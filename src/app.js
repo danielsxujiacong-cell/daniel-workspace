@@ -9,9 +9,22 @@ const ui = {
   query: "",
   searchOpen: false,
   modal: null,
+  confirmation: null,
   assistantOpen: false,
   chat: [{ role: "assistant", text: "你好，我是这个工作台里的 Mock AI。可以问我当前页面的项目进度、下一步或决策摘要。" }],
 };
+
+const colorScheme = window.matchMedia("(prefers-color-scheme: light)");
+
+function applyTheme() {
+  const preference = db.settings?.theme || "system";
+  document.documentElement.dataset.theme = preference === "system" ? (colorScheme.matches ? "light" : "dark") : preference;
+}
+
+applyTheme();
+colorScheme.addEventListener?.("change", () => {
+  if (db.settings?.theme === "system") applyTheme();
+});
 
 const iconShapes = {
   grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
@@ -36,6 +49,8 @@ const iconShapes = {
   layers: '<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/>',
   chevron: '<path d="m9 18 6-6-6-6"/>',
   reset: '<path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/>',
+  moon: '<path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2Z"/>',
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/>',
   tag: '<path d="M20 13 13 20 4 11V4h7z"/><circle cx="8" cy="8" r="1"/>',
@@ -226,9 +241,9 @@ function renderProjectDetail() {
   const github = safeExternal(project.github);
   const live = safeExternal(project.url);
   return `<div class="detail-topline"><button class="icon-button" data-page="projects" aria-label="返回项目">${icon("back")}</button><span>Projects</span>${icon("chevron")}<span>${esc(project.name)}</span></div>
-    <section class="card detail-hero"><div class="detail-hero-head"><div class="detail-hero-copy">${statusPill(project.status)}<h2 style="margin-top:11px">${esc(project.name)}</h2><p>${esc(project.description || "还没有项目简介。")}</p></div><button class="button" data-action="edit-project" data-id="${esc(project.id)}">${icon("edit")} 编辑项目</button></div><div class="detail-links"><span class="detail-link">${icon("folder")} ${esc(project.path || "本地路径未设置")}</span>${github ? `<a class="detail-link" href="${esc(github)}" target="_blank" rel="noreferrer">${icon("external")} GitHub</a>` : ""}${live ? `<a class="detail-link" href="${esc(live)}" target="_blank" rel="noreferrer">${icon("external")} 在线网址</a>` : ""}</div></section>
+    <section class="card detail-hero"><div class="detail-hero-head"><div class="detail-hero-copy">${statusPill(project.status)}<h2 style="margin-top:11px">${esc(project.name)}</h2><p>${esc(project.description || "还没有项目简介。")}</p></div><div class="detail-actions"><button class="button" data-action="edit-project" data-id="${esc(project.id)}">${icon("edit")} 编辑项目</button><button class="button quiet danger" data-action="delete-project" data-id="${esc(project.id)}">${icon("trash")} 删除</button></div></div><div class="detail-links"><span class="detail-link">${icon("folder")} ${esc(project.path || "本地路径未设置")}</span>${github ? `<a class="detail-link" href="${esc(github)}" target="_blank" rel="noreferrer">${icon("external")} GitHub</a>` : ""}${live ? `<a class="detail-link" href="${esc(live)}" target="_blank" rel="noreferrer">${icon("external")} 在线网址</a>` : ""}</div></section>
     <div class="detail-meta-grid"><div class="card meta-card"><div class="meta-label">当前阶段</div><div class="meta-value">${esc(project.stage || "未设置")}</div></div><div class="card meta-card"><div class="meta-label">下一步</div><div class="meta-value">${esc(project.next || "待补充")}</div></div><div class="card meta-card"><div class="meta-label">进度概览</div><div class="meta-value">${tasks.filter((task) => task.status === "done").length} / ${tasks.length} 项任务完成</div></div></div>
-    <div class="subgrid"><section class="card task-panel">${sectionTitle("TODO", `<button class="button quiet small" data-action="open-create-task" data-project-id="${esc(project.id)}">${icon("plus")} 添加任务</button>`)}<div>${tasks.map((task) => `<div class="task-detail-row"><button class="check-button ${task.status === "done" ? "checked" : ""}" data-action="toggle-task" data-id="${esc(task.id)}" aria-label="完成任务">${task.status === "done" ? icon("checkSquare") : ""}</button><div class="task-text">${esc(task.title)}</div><span class="priority ${priorityClass(task.priority)}">${esc(task.priority || "低")}</span></div>`).join("") || `<div class="empty-state">这个项目还没有任务。</div>`}</div></section>
+    <div class="subgrid"><section class="card task-panel">${sectionTitle("TODO", `<button class="button quiet small" data-action="open-create-task" data-project-id="${esc(project.id)}">${icon("plus")} 添加任务</button>`)}<div>${tasks.map((task) => `<div class="task-detail-row"><button class="check-button ${task.status === "done" ? "checked" : ""}" data-action="toggle-task" data-id="${esc(task.id)}" aria-label="${task.status === "done" ? "重新打开" : "完成"}任务">${task.status === "done" ? icon("checkSquare") : ""}</button><div class="task-text">${esc(task.title)}</div><span class="priority ${priorityClass(task.priority)}">${esc(task.priority || "低")}</span></div>`).join("") || `<div class="empty-state">这个项目还没有任务。</div>`}</div></section>
       <section class="card card-pad">${sectionTitle("最近活动", `<span class="minor">${activities.length} 条</span>`)}<div>${activities.map(activityRow).join("") || `<div class="empty-state">项目活动会显示在这里。</div>`}</div></section>
       <section class="card card-pad" style="grid-column:1/-1">${sectionTitle("相关资料", `<button class="button quiet small" data-action="open-create-knowledge" data-project-id="${esc(project.id)}">${icon("plus")} 添加资料</button>`)}<div class="subgrid">${knowledge.map((item) => `<article class="card knowledge-card"><span class="type-pill">${esc(item.type)}</span><h3>${esc(item.title)}</h3><p>${esc(item.summary || item.content)}</p><div class="tag-row">${item.tags.map((tag) => `<span class="tag">#${esc(tag)}</span>`).join("")}</div></article>`).join("") || `<div class="empty-state">还没有关联资料。</div>`}</div></section></div>`;
 }
@@ -244,7 +259,7 @@ function renderTasks() {
 function renderKnowledge() {
   const records = [...db.knowledge].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return `<div class="page-heading"><div><div class="eyebrow">收件箱 · 本地资料</div><h1>Knowledge</h1><p>先收集，再整理。V1 保存文本、笔记和链接。</p></div><div class="heading-actions"><button class="button primary" data-action="open-create-knowledge">${icon("plus")} 添加资料</button></div></div>
-    <section class="card card-pad"><div class="card-header"><h3>所有资料</h3><span class="minor">${records.length} 条</span></div>${records.map((item) => `<article class="knowledge-row"><div class="record-icon">${recordIcon(item.type)}</div><div class="record-copy"><div class="record-title">${esc(item.title)}</div><div class="record-meta">${esc(item.summary || "暂无摘要")} · ${esc(projectTitle(item.projectId))} · ${timeAgo(item.createdAt)}</div><details style="margin-top:8px"><summary style="color:#8e909a;font-size:9px;cursor:pointer">查看内容</summary><div class="record-meta content-text" style="margin-top:7px">${knowledgeContent(item)}</div></details><div class="tag-row">${item.tags.map((tag) => `<span class="tag">#${esc(tag)}</span>`).join("")}</div></div><div class="record-actions" style="opacity:1"><button class="icon-button" data-action="edit-knowledge" data-id="${esc(item.id)}" aria-label="编辑资料">${icon("edit")}</button><button class="icon-button" data-action="delete-knowledge" data-id="${esc(item.id)}" aria-label="删除资料">${icon("trash")}</button></div></article>`).join("") || `<div class="empty-state"><strong>收件箱还空着</strong>添加一段文字、一则笔记或一个网页链接。</div>`}</section>`;
+    <section class="card card-pad"><div class="card-header"><h3>所有资料</h3><span class="minor">${records.length} 条</span></div>${records.map((item) => `<article class="knowledge-row"><div class="record-icon">${recordIcon(item.type)}</div><div class="record-copy"><div class="record-title">${esc(item.title)}</div><div class="record-meta">${esc(item.summary || "暂无摘要")} · ${esc(projectTitle(item.projectId))} · ${timeAgo(item.createdAt)}</div><details class="knowledge-details"><summary>查看内容</summary><div class="record-meta content-text">${knowledgeContent(item)}</div></details><div class="tag-row">${item.tags.map((tag) => `<span class="tag">#${esc(tag)}</span>`).join("")}</div></div><div class="record-actions" style="opacity:1"><button class="icon-button" data-action="edit-knowledge" data-id="${esc(item.id)}" aria-label="编辑资料">${icon("edit")}</button><button class="icon-button" data-action="delete-knowledge" data-id="${esc(item.id)}" aria-label="删除资料">${icon("trash")}</button></div></article>`).join("") || `<div class="empty-state"><strong>收件箱还空着</strong>添加一段文字、一则笔记或一个网页链接。</div>`}</section>`;
 }
 
 function decisionCard(decision) {
@@ -331,6 +346,10 @@ function recommendationFor(options, goal, risk) {
 }
 
 function renderModal() {
+  if (ui.confirmation) {
+    const { title, message, confirmLabel } = ui.confirmation;
+    return `<div class="modal-backdrop confirm-backdrop" data-action="close-confirm-backdrop"><section class="modal confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message"><header class="modal-head"><div class="modal-head-copy"><h2 id="confirm-title">${esc(title)}</h2></div><button class="icon-button" data-action="cancel-confirm" aria-label="关闭">${icon("close")}</button></header><div class="modal-body"><p class="confirm-message" id="confirm-message">${esc(message)}</p></div><footer class="modal-foot"><button class="button" data-action="cancel-confirm">取消</button><button class="button danger" data-action="accept-confirm">${esc(confirmLabel || "确认")}</button></footer></section></div>`;
+  }
   if (!ui.modal) return "";
   const { kind, id } = ui.modal;
   const existing = id ? ({ project: projectById(id), task: db.tasks.find((item) => item.id === id), knowledge: db.knowledge.find((item) => item.id === id), decision: db.decisions.find((item) => item.id === id) })[kind] : null;
@@ -360,7 +379,7 @@ function renderModal() {
 
 function render() {
   const page = ui.page === "home" ? renderDashboard() : ui.page === "projects" ? renderProjects() : ui.page === "project" ? renderProjectDetail() : ui.page === "tasks" ? renderTasks() : ui.page === "knowledge" ? renderKnowledge() : renderDecisions();
-  app.innerHTML = `${renderNav()}<main class="main-shell"><header class="topbar"><div class="breadcrumbs"><span>Daniel Workspace</span><span class="crumb-sep">/</span><strong>${esc(pageTitle())}</strong></div><div class="search-wrap"><div class="search-box">${icon("search")}<input id="global-search" type="search" value="${esc(ui.query)}" placeholder="搜索项目、资料、决策或任务…" autocomplete="off" aria-label="全局搜索"/><kbd class="search-hint">Ctrl K</kbd></div><div id="search-results"></div></div><div class="topbar-actions"><span class="today-label">${formattedDate()}</span><button class="icon-button" data-action="open-assistant" title="打开 AI Assistant" aria-label="打开 AI Assistant">${icon("sparkle")}</button><span class="top-avatar">D</span></div></header><div class="content">${page}</div></main>${renderAssistant()}${renderModal()}<div class="toast-region" id="toast-region" aria-live="polite"></div>`;
+  app.innerHTML = `${renderNav()}<main class="main-shell"><header class="topbar"><div class="breadcrumbs"><span>Daniel Workspace</span><span class="crumb-sep">/</span><strong>${esc(pageTitle())}</strong></div><div class="search-wrap"><div class="search-box">${icon("search")}<input id="global-search" type="search" value="${esc(ui.query)}" placeholder="搜索项目、资料、决策或任务…" autocomplete="off" aria-label="全局搜索"/><kbd class="search-hint">Ctrl K</kbd></div><div id="search-results"></div></div><div class="topbar-actions"><span class="today-label">${formattedDate()}</span><button class="icon-button theme-toggle" data-action="toggle-theme" title="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式" aria-label="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式">${icon(document.documentElement.dataset.theme === "light" ? "moon" : "sun")}</button><button class="icon-button" data-action="open-assistant" title="打开 AI Assistant" aria-label="打开 AI Assistant">${icon("sparkle")}</button><span class="top-avatar">D</span></div></header><div class="content">${page}</div></main>${renderAssistant()}${renderModal()}<div class="toast-region" id="toast-region" aria-live="polite"></div>`;
   renderSearchResults();
   if (ui.assistantOpen) document.querySelector("#assistant-messages")?.scrollTo({ top: 999999, behavior: "smooth" });
 }
@@ -379,6 +398,12 @@ function openModal(kind, id = null, projectId = null) {
   ui.modal = { kind, id, projectId };
   render();
   document.querySelector(".modal input, .modal textarea")?.focus({ preventScroll: true });
+}
+
+function openConfirmation({ title, message, confirmLabel, onConfirm }) {
+  ui.confirmation = { title, message, confirmLabel, onConfirm };
+  render();
+  document.querySelector("[data-action=accept-confirm]")?.focus({ preventScroll: true });
 }
 
 function mockReply(message) {
@@ -465,11 +490,48 @@ function handleSearchResult(kind, id) {
 
 function handleAction(action, element, sourceEvent) {
   const id = element.dataset.id;
+  if (action === "close-confirm-backdrop" && element !== sourceEvent?.target) return;
+  if (action === "cancel-confirm" || action === "close-confirm-backdrop") { ui.confirmation = null; render(); return; }
+  if (action === "accept-confirm") {
+    const onConfirm = ui.confirmation?.onConfirm;
+    ui.confirmation = null;
+    render();
+    onConfirm?.();
+    return;
+  }
   if (action === "open-create-project") openModal("project");
   if (action === "open-create-task") openModal("task", null, element.dataset.projectId || null);
   if (action === "open-create-knowledge") openModal("knowledge", null, element.dataset.projectId || null);
   if (action === "open-create-decision") openModal("decision");
   if (action === "edit-project") openModal("project", id);
+  if (action === "delete-project") {
+    const project = projectById(id);
+    if (project) {
+      const projectName = project.name;
+      openConfirmation({
+        title: "删除项目",
+        message: `删除项目「${projectName}」？关联任务、资料和决策会保留，并解除项目关联。`,
+        confirmLabel: "删除项目",
+        onConfirm: () => {
+          db.projects = db.projects.filter((item) => item.id !== id);
+          for (const collection of [db.tasks, db.knowledge, db.decisions]) {
+            collection.forEach((item) => { if (item.projectId === id) item.projectId = ""; });
+          }
+          db.activities.forEach((activity) => { if (activity.projectId === id) activity.projectId = null; });
+          logActivity("project-deleted", `删除项目「${projectName}」`);
+          persist();
+          go("projects");
+          toast("项目已删除，关联记录已保留");
+        },
+      });
+    }
+  }
+  if (action === "toggle-theme") {
+    db.settings = { ...(db.settings || {}), theme: document.documentElement.dataset.theme === "light" ? "dark" : "light" };
+    applyTheme();
+    persist();
+    render();
+  }
   if (action === "edit-task") openModal("task", id);
   if (action === "edit-knowledge") openModal("knowledge", id);
   if (action === "edit-decision") openModal("decision", id);
@@ -488,8 +550,16 @@ function handleAction(action, element, sourceEvent) {
   }
   if (action === "delete-knowledge") {
     const item = db.knowledge.find((record) => record.id === id);
-    if (item && window.confirm(`确定删除资料「${item.title}」吗？此操作无法撤销。`)) {
-      db.knowledge = db.knowledge.filter((record) => record.id !== id); persist(); render(); toast("资料已删除");
+    if (item) {
+      openConfirmation({
+        title: "删除资料",
+        message: `确定删除资料「${item.title}」吗？此操作无法撤销。`,
+        confirmLabel: "删除资料",
+        onConfirm: () => {
+          db.knowledge = db.knowledge.filter((record) => record.id !== id);
+          persist(); render(); toast("资料已删除");
+        },
+      });
     }
   }
   if (action === "close-modal" || action === "close-modal-backdrop") {
@@ -501,9 +571,14 @@ function handleAction(action, element, sourceEvent) {
   if (action === "clear-chat") { ui.chat = [{ role: "assistant", text: "对话已清空。我会继续根据你当前打开的页面和本地数据回答。" }]; render(); }
   if (action === "send-prompt") sendChat(element.dataset.prompt || "");
   if (action === "reset-demo") {
-    if (window.confirm("重置会清除这个浏览器中保存的自定义内容，并恢复演示数据。确定继续吗？")) {
-      db = resetData(); ui.page = "home"; ui.projectId = null; ui.taskFilter = "all"; ui.query = ""; ui.chat = [{ role: "assistant", text: "演示数据已恢复。你可以从当前页面开始提问。" }]; ui.modal = null; persist(); render(); toast("演示数据已恢复");
-    }
+    openConfirmation({
+      title: "重置演示数据",
+      message: "此操作会清除本浏览器中保存的自定义内容，并恢复内置演示数据；主题选择会保留。",
+      confirmLabel: "重置演示数据",
+      onConfirm: () => {
+        db = resetData({ theme: db.settings?.theme || "system" }); applyTheme(); ui.page = "home"; ui.projectId = null; ui.taskFilter = "all"; ui.query = ""; ui.chat = [{ role: "assistant", text: "演示数据已恢复。你可以从当前页面开始提问。" }]; ui.modal = null; persist(); render(); toast("演示数据已恢复");
+      },
+    });
   }
 }
 
@@ -523,7 +598,8 @@ app.addEventListener("keydown", (event) => {
     if (first) handleSearchResult(first.kind, first.id);
   }
   if (event.key === "Escape") {
-    if (ui.modal) { ui.modal = null; render(); }
+    if (ui.confirmation) { ui.confirmation = null; render(); }
+    else if (ui.modal) { ui.modal = null; render(); }
     else if (ui.assistantOpen) { ui.assistantOpen = false; render(); }
     else if (ui.searchOpen) { ui.searchOpen = false; renderSearchResults(); }
   }

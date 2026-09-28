@@ -2,13 +2,13 @@
 
 ## Current state
 
-- **Updated:** 2026-09-27
-- **Status:** V1 MVP complete
-- **Last completed:** Built and browser-verified the local-first workspace pages and interactions, including search and refresh persistence.
+- **Updated:** 2026-09-28
+- **Status:** V1.0.0 complete
+- **Last completed:** Re-verified project, knowledge, decision, task, search, contextual AI, reset, and persistence flows; added system-aware Light/Dark themes and verified 390 px layouts.
 
 ## Next action
 
-No V1 feature work remains. For V2, decide whether cross-device sync is needed before choosing a backend or account model.
+No V1 work remains. V1.0.0 is prepared for the `main` branch Pages release. For V2, decide whether cross-device sync is needed before choosing a backend or account model; real AI, GitHub integration, and local project scanning remain out of scope until requested.
 
 ## How to resume
 

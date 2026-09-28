@@ -3,6 +3,7 @@ const hoursAgo = (hours) => new Date(Date.now() - hours * 60 * 60 * 1000).toISOS
 export function createDemoData() {
   return {
     version: 1,
+    settings: { theme: "system" },
     projects: [
       {
         id: "project-workspace",
