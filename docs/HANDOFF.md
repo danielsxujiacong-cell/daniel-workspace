@@ -3,12 +3,12 @@
 ## Current state
 
 - **Updated:** 2026-09-28
-- **Status:** V1.0.0 complete
-- **Last completed:** Re-verified project, knowledge, decision, task, search, contextual AI, reset, and persistence flows; added system-aware Light/Dark themes and verified 390 px layouts.
+- **Status:** V2.1 complete
+- **Last completed:** Routed Assistant chat through `src/ai/service.js`, separated Mock and HTTP providers, and built page-specific local context for Dashboard, Projects, Project detail, Knowledge, Decisions, and Tasks. No API Key or server endpoint is configured, so the app stays local Mock AI.
 
 ## Next action
 
-No V1 work remains. V1.0.0 is prepared for the `main` branch Pages release. For V2, decide whether cross-device sync is needed before choosing a backend or account model; real AI, GitHub integration, and local project scanning remain out of scope until requested.
+Do not start V2.2. To enable Real AI later, deploy a same-origin/serverless `POST /api/chat`, store `OPENAI_API_KEY` only in the server environment, and provide the frontend-safe `DANIEL_AI_CONFIG` with `provider: "real"` and `chatEndpoint: "/api/chat"`. The route must follow the JSON contract in `README.md` and return `provider: "mock"` or `"real"`; the browser service falls back to local Mock on an unavailable or invalid response. No database, login, RAG, GitHub scan, or local file scan is part of this step.
 
 ## How to resume
 

@@ -1,4 +1,6 @@
 import { loadData, resetData, saveData } from "./store.js";
+import { buildAssistantContext } from "./ai/context.js";
+import { chat as chatWithAI, getAIStatus } from "./ai/service.js";
 
 const app = document.querySelector("#app");
 let db = loadData();
@@ -11,7 +13,8 @@ const ui = {
   modal: null,
   confirmation: null,
   assistantOpen: false,
-  chat: [{ role: "assistant", text: "你好，我是这个工作台里的 Mock AI。可以问我当前页面的项目进度、下一步或决策摘要。" }],
+  chatBusy: false,
+  chat: [{ role: "assistant", text: "你好，我是 Daniel Workspace Assistant。可以问我当前页面的数据、进展和下一步。" }],
 };
 
 const colorScheme = window.matchMedia("(prefers-color-scheme: light)");
@@ -312,10 +315,12 @@ function contextLabel() {
 function renderAssistant() {
   if (!ui.assistantOpen) return `<button class="assistant-launcher" data-action="open-assistant" aria-label="打开 AI 助手"><span class="assistant-orb">${icon("sparkle")}</span><span>问问 AI</span></button>`;
   const prompts = ui.page === "project" ? ["这个项目现在做到哪了？", "帮我总结下一步"] : ui.page === "decisions" ? ["帮我整理这个决定", "我最近做了什么决定？"] : ui.page === "tasks" ? ["我下一步应该做什么？", "哪个任务优先？"] : ui.page === "knowledge" ? ["最近收集了哪些资料？", "总结一下当前收件箱"] : ["我下一步应该做什么？", "最近有哪些进展？"];
-  return `<section class="assistant-panel" aria-label="AI Assistant"><header class="assistant-head"><span class="assistant-orb">${icon("sparkle")}</span><div class="assistant-head-copy"><div class="assistant-head-title">Workspace Assistant <span class="tag">Mock AI</span></div><div class="assistant-context">${esc(contextLabel())} · 本地数据上下文</div></div><button class="icon-button" data-action="clear-chat" title="清空对话" aria-label="清空对话">${icon("reset")}</button><button class="icon-button" data-action="close-assistant" aria-label="关闭助手">${icon("close")}</button></header>
-    <div class="assistant-messages" id="assistant-messages">${ui.chat.map((message) => `<div class="chat-message ${message.role === "user" ? "user" : ""}">${esc(message.text)}</div>`).join("")}</div>
-    <div class="assistant-suggestions">${prompts.map((prompt) => `<button class="suggestion-chip" data-action="send-prompt" data-prompt="${esc(prompt)}">${esc(prompt)}</button>`).join("")}</div>
-    <form class="assistant-compose" id="assistant-form"><label class="sr-only" for="assistant-input">给 AI 助手发消息</label><textarea id="assistant-input" name="message" rows="1" placeholder="问问当前工作区…" required></textarea><button class="send-button" type="submit" aria-label="发送">${icon("send")}</button></form><div class="assistant-note">Mock AI · 回复基于本地数据，不会发送到网络</div></section>`;
+  const status = getAIStatus();
+  const transportNote = status.mode === "real" ? "API Key 仅由服务端环境变量管理。" : status.hint === "Real AI（以后启用）" ? "回复基于本地数据，本次对话不会发送到网络。" : status.hint;
+  return `<section class="assistant-panel" aria-label="AI Assistant"><header class="assistant-head"><span class="assistant-orb">${icon("sparkle")}</span><div class="assistant-head-copy"><div class="assistant-head-title">Workspace Assistant <span class="tag ai-mode ${status.mode}">${esc(status.label)}</span></div><div class="ai-mode-hint">${esc(status.hint)}</div><div class="assistant-context">${esc(contextLabel())} · 当前页面数据上下文</div></div><button class="icon-button" data-action="clear-chat" title="清空对话" aria-label="清空对话">${icon("reset")}</button><button class="icon-button" data-action="close-assistant" aria-label="关闭助手">${icon("close")}</button></header>
+    <div class="assistant-messages" id="assistant-messages" aria-live="polite">${ui.chat.map((message) => `<div class="chat-message ${message.role === "user" ? "user" : ""} ${message.pending ? "pending" : ""}">${esc(message.text)}</div>`).join("")}</div>
+    <div class="assistant-suggestions">${prompts.map((prompt) => `<button class="suggestion-chip" data-action="send-prompt" data-prompt="${esc(prompt)}" ${ui.chatBusy ? "disabled" : ""}>${esc(prompt)}</button>`).join("")}</div>
+    <form class="assistant-compose" id="assistant-form"><label class="sr-only" for="assistant-input">给 AI 助手发消息</label><textarea id="assistant-input" name="message" rows="1" placeholder="问问当前工作区…" required ${ui.chatBusy ? "disabled" : ""}></textarea><button class="send-button" type="submit" aria-label="发送" ${ui.chatBusy ? "disabled" : ""}>${icon("send")}</button></form><div class="assistant-note">${esc(status.label)} · ${esc(transportNote)}</div></section>`;
 }
 
 function projectOptions(selected = "") {
@@ -406,42 +411,34 @@ function openConfirmation({ title, message, confirmLabel, onConfirm }) {
   document.querySelector("[data-action=accept-confirm]")?.focus({ preventScroll: true });
 }
 
-function mockReply(message) {
-  const text = message.toLocaleLowerCase();
-  if (ui.page === "project") {
-    const project = projectById(ui.projectId);
-    if (!project) return "先从 Projects 里打开一个项目，我就可以根据它的资料和任务回答。";
-    const tasks = db.tasks.filter((task) => task.projectId === project.id);
-    const pending = tasks.filter((task) => task.status !== "done");
-    const knowledge = db.knowledge.filter((item) => item.projectId === project.id);
-    const decision = db.decisions.find((item) => item.projectId === project.id);
-    if (/下一步|next|建议|做什么/.test(text)) return `「${project.name}」目前处于${project.stage || "阶段未设置"}阶段。项目记录的下一步是：${project.next || "还没有写下一步"}。${pending[0] ? `最近的待办是「${pending[0].title}」。` : "当前没有未完成任务。"}`;
-    if (/决定|选择|决策/.test(text) && decision) return `这个项目最近的决策是：${decision.question}\n最终选择：${decision.final || "尚未决定"}\n原因：${decision.reason || "尚未填写"}`;
-    return `「${project.name}」当前状态：${project.status} · ${project.stage || "阶段未设置"}。\n${project.description || "项目还没有简介。"}\n待办 ${pending.length} 项，关联资料 ${knowledge.length} 条。${project.next ? `\n下一步：${project.next}` : ""}`;
-  }
-  if (/下一步|next|优先|做什么/.test(text)) {
-    const task = suggestionTask();
-    return task ? `建议先处理「${task.title}」（${task.priority}优先级，关联项目：${projectTitle(task.projectId)}）。\n完成后再从 ${openTasks().length - 1} 项待办中选下一件。` : "你现在没有未完成任务。可以回顾项目的下一步，或新建一条任务。";
-  }
-  if (ui.page === "decisions" || /整理|决定|决策/.test(text)) {
-    const decision = ui.page === "decisions" ? db.decisions[0] : db.decisions.find((item) => item.projectId === ui.projectId) || db.decisions[0];
-    return decision ? `我根据现有记录整理了一下：\n问题：${decision.question}\n目标：${decision.goal || "未记录"}\n方案：${decision.options.join("；") || "未记录"}\nMock 建议：${decision.recommendation || "未记录"}\n最终决定：${decision.final || "待定"}\n原因：${decision.reason || "未记录"}` : "还没有历史决策。先新建一条决策，记录问题、选项和目标，我就能帮你整理。";
-  }
-  if (ui.page === "knowledge") {
-    const latest = [...db.knowledge].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 4);
-    return latest.length ? `当前收件箱有 ${db.knowledge.length} 条资料。最近几条：\n${latest.map((item, index) => `${index + 1}. ${item.title} — ${item.summary || item.content.slice(0, 48)}`).join("\n")}` : "收件箱目前是空的。你可以先添加文本、笔记或链接。";
-  }
-  if (ui.page === "tasks") return `目前有 ${openTasks().length} 项未完成任务，${db.tasks.length - openTasks().length} 项已经完成。${suggestionTask() ? `\n优先级最高的是「${suggestionTask().title}」。` : ""}你可以用状态筛选来只看待办或已完成。`;
-  const latestActivity = db.activities[0];
-  return `现在有 ${db.projects.length} 个项目、${openTasks().length} 项待办、${db.knowledge.length} 条资料和 ${db.decisions.length} 条决策。${suggestionTask() ? `\n建议先推进「${suggestionTask().title}」。` : ""}${latestActivity ? `\n最近活动：${latestActivity.title}` : ""}`;
-}
-
-function sendChat(message) {
+async function sendChat(message) {
   const clean = message.trim();
-  if (!clean) return;
-  ui.chat.push({ role: "user", text: clean }, { role: "assistant", text: mockReply(clean) });
+  if (!clean || ui.chatBusy) return;
+  const context = buildAssistantContext({ data: db, currentPage: ui.page, projectId: ui.projectId, taskFilter: ui.taskFilter });
+  const request = {
+    message: clean,
+    currentPage: ui.page,
+    currentProject: context.currentProject,
+    relevantContext: context.relevantContext,
+    history: ui.chat.slice(-10).filter((item) => !item.pending).map((item) => ({ role: item.role, content: item.text })),
+  };
+  const pendingMessage = { role: "assistant", text: "正在整理当前页面和本地数据…", pending: true };
+  ui.chat.push({ role: "user", text: clean }, pendingMessage);
+  ui.chatBusy = true;
   ui.assistantOpen = true;
   render();
+  try {
+    const result = await chatWithAI(request);
+    pendingMessage.text = result.message.content;
+    pendingMessage.provider = result.provider;
+  } catch {
+    pendingMessage.text = "暂时无法生成回复，请稍后重试。当前工作区数据仍保存在本地。";
+    pendingMessage.provider = "mock";
+  } finally {
+    pendingMessage.pending = false;
+    ui.chatBusy = false;
+    render();
+  }
 }
 
 function submitRecord(form) {

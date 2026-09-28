@@ -6,8 +6,8 @@ Build a usable, local-first personal workspace that brings projects, notes, deci
 
 ## Scope
 
-- In scope: Dashboard, project list/detail and CRUD, Knowledge inbox, decision history, tasks and status filters, global search, contextual Mock AI, activity timeline, demo-data reset, system-aware Light/Dark theme.
-- Out of scope: OpenAI API, database, login, RAG, PDF or live-web parsing, computer-wide scanning, GitHub automation, agents, and permission management.
+- In scope: Dashboard, project list/detail and CRUD, Knowledge inbox, decision history, tasks and status filters, global search, contextual Mock AI, activity timeline, demo-data reset, system-aware Light/Dark theme, and the V2.1 AI provider/API contract seam.
+- Out of scope: Calling a real AI API, deploying a serverless route, database, login, RAG, PDF or live-web parsing, computer-wide scanning, GitHub automation, agents, and permission management.
 
 ## Constraints
 
@@ -17,6 +17,9 @@ Build a usable, local-first personal workspace that brings projects, notes, deci
 - Deleting a project keeps its tasks, knowledge, decisions, and activity, while clearing their project association.
 - Treat local path and URLs as user-entered project metadata; never scan or operate those destinations.
 - Escape rendered user strings and allow only HTTP(S) project links.
+- All Assistant chat requests go through `src/ai/service.js`; absent an explicit server-injected `DANIEL_AI_CONFIG`, use the local Mock Provider and make no network request.
+- The reserved `POST /api/chat` contract uses `{ message, currentPage, currentProject, relevantContext, history }` and responds with `{ message: { role: "assistant", content }, provider: "real" | "mock" }`.
+- Any future API key belongs only in a serverless environment variable such as `OPENAI_API_KEY`; never expose it to browser code.
 
 ## Key decisions
 
@@ -27,8 +30,9 @@ Build a usable, local-first personal workspace that brings projects, notes, deci
 | 2026-09-27 | Use one small storage module as the future persistence seam | Leave room for later sync without adding a backend now |
 | 2026-09-28 | Keep appearance in local workspace settings and follow the OS until a manual choice | Persist theme without a second storage system |
 | 2026-09-28 | Preserve related records when deleting a project | Avoid cascading user data loss |
+| 2026-09-28 | Put Assistant requests behind a small service and provider seam; default to local Mock | Keep current behavior safe without a key and make a future server endpoint swappable |
 
 ## Verification
 
-- PowerShell ESM syntax checks for `src/app.js`, `src/store.js`, and `src/mock-data.js`; `git diff --check`.
-- Browser acceptance across project/knowledge/decision/task CRUD, search, contextual AI, confirmation/reset flows, reload/reopen persistence, both themes, and 390 px layout with no horizontal overflow.
+- ESM syntax checks for app and AI modules; local Mock context verified through the UI; `git diff --check`.
+- Browser regression across project/knowledge/decision/task CRUD, search, page-context Mock AI, confirmation/reset flows, reload/reopen persistence, both themes, and mobile layout.

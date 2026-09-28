@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-28 · V2.1
+
+- Moved Assistant replies into one AI service with separate local Mock and same-origin `/api/chat` providers; absent safe server config, chat stays offline and automatically uses Mock.
+- Added page-specific context for Dashboard, Projects, Project detail, Knowledge, Decisions, and Tasks, plus a visible Mock AI / Real AI state hint.
+- Documented the future request/response contract and server-only `OPENAI_API_KEY` requirement; no real API, backend, database, or key was added.
+
 ## 2026-09-28 · V1.0.0
 
 - 完成 V1 全量交互验收，补上项目删除；删除项目会保留并解除关联的任务、资料和决策。

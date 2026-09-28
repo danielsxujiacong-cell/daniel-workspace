@@ -3,8 +3,9 @@
 ## Orientation
 
 - Read `README.md`, `docs/PROJECT_CONTEXT.md`, and `docs/HANDOFF.md` before modifying the project.
-- Keep V1 small: vanilla HTML/CSS/JavaScript, no build step, no external API, backend, auth, RAG, or machine-wide scanning.
-- Keep all user data in the `daniel-workspace-v1` localStorage key. Any future storage/API integration belongs behind `src/store.js`.
+- Keep the app vanilla HTML/CSS/JavaScript with no required build step. V2.1 AI chat must go through `src/ai/service.js`; absent a safe runtime server config it must remain local Mock, with no API call. Do not add real API, backend, auth, RAG, or machine-wide scanning unless explicitly requested.
+- Keep the `/api/chat` request/response contract and environment-key boundary documented; never put API keys in browser code.
+- Keep all user data in the `daniel-workspace-v1` localStorage key. Future persistence belongs behind `src/store.js`; all Assistant calls belong behind `src/ai/service.js`.
 
 ## Efficient execution
 
