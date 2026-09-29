@@ -8,6 +8,9 @@ let db = loadData();
 const ui = {
   page: "home",
   projectId: null,
+  localProjectId: null,
+  localProjects: null,
+  localProjectsStatus: ["localhost", "127.0.0.1"].includes(window.location.hostname) ? "loading" : "unavailable",
   taskFilter: "all",
   query: "",
   searchOpen: false,
@@ -77,10 +80,56 @@ function uid(prefix) {
 
 function projectById(id) { return db.projects.find((project) => project.id === id); }
 function projectTitle(id) { return projectById(id)?.name || "未关联项目"; }
+function localProjectById(id) { return ui.localProjects?.items?.find((project) => project.id === id) || null; }
 function openTasks() { return db.tasks.filter((task) => task.status !== "done"); }
 function priorityClass(priority = "低") { return priority === "高" ? "high" : priority === "中" ? "medium" : "low"; }
 function statusClass(status = "") { return status === "进行中" ? "active" : status === "暂停" ? "paused" : "planned"; }
 function initials(title = "?") { return [...title.trim()].slice(0, 2).join("") || "?"; }
+
+function githubKey(value) {
+  const repository = parsePublicGitHubRepository(value);
+  return repository?.fullName?.toLowerCase() || "";
+}
+
+function comparablePath(value) {
+  return String(value || "").replaceAll("/", "\\").replace(/\\+$/, "").toLowerCase();
+}
+
+function normalizedName(value) {
+  return String(value || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+function workspaceProjectForLocal(localProject) {
+  const remoteKey = githubKey(localProject?.githubRepository);
+  if (remoteKey) {
+    const remoteMatch = db.projects.find((project) => githubKey(project.github) === remoteKey);
+    if (remoteMatch) return remoteMatch;
+  }
+  const pathKey = comparablePath(localProject?.path);
+  if (pathKey) {
+    const pathMatch = db.projects.find((project) => comparablePath(project.path) === pathKey);
+    if (pathMatch) return pathMatch;
+  }
+  const localName = normalizedName(localProject?.name);
+  if (localName) return db.projects.find((project) => normalizedName(project.name) === localName) || null;
+  return null;
+}
+
+function localProjectForWorkspace(project) {
+  if (!project || !ui.localProjects?.items) return null;
+  const remoteKey = githubKey(project.github);
+  if (remoteKey) {
+    const remoteMatch = ui.localProjects.items.find((item) => githubKey(item.githubRepository) === remoteKey);
+    if (remoteMatch) return remoteMatch;
+  }
+  const pathKey = comparablePath(project.path);
+  if (pathKey) {
+    const pathMatch = ui.localProjects.items.find((item) => comparablePath(item.path) === pathKey);
+    if (pathMatch) return pathMatch;
+  }
+  const nameKey = normalizedName(project.name);
+  return nameKey ? ui.localProjects.items.find((item) => normalizedName(item.name) === nameKey) || null : null;
+}
 
 function timeAgo(iso) {
   const date = new Date(iso);
@@ -124,12 +173,30 @@ function logActivity(type, title, projectId = null) {
 function go(page, projectId = null, push = true) {
   ui.page = page;
   ui.projectId = projectId;
+  ui.localProjectId = null;
   ui.searchOpen = false;
   if (push) history.pushState({ page, projectId }, "", page === "project" ? `#project/${encodeURIComponent(projectId)}` : `#${page}`);
   render();
 }
 
+function goLocalProject(localProjectId, push = true) {
+  const localProject = localProjectById(localProjectId);
+  const linked = localProject && workspaceProjectForLocal(localProject);
+  if (linked) {
+    go("project", linked.id, push);
+    return;
+  }
+  ui.page = "local-project";
+  ui.projectId = null;
+  ui.localProjectId = localProjectId;
+  ui.searchOpen = false;
+  if (push) history.pushState({ page: "local-project", localProjectId }, "", `#local-project/${encodeURIComponent(localProjectId)}`);
+  render();
+}
+
 window.addEventListener("popstate", () => {
+  const localMatch = location.hash.match(/^#local-project\/(.+)$/);
+  if (localMatch) { goLocalProject(decodeURIComponent(localMatch[1]), false); return; }
   const match = location.hash.match(/^#project\/(.+)$/);
   if (match) go("project", decodeURIComponent(match[1]), false);
   else {
@@ -203,6 +270,48 @@ function suggestionTask() {
   return openTasks().sort((a, b) => ["高", "中", "低"].indexOf(a.priority) - ["高", "中", "低"].indexOf(b.priority))[0];
 }
 
+function localDocumentIssues(project) {
+  const documents = project?.documents || {};
+  const issues = [];
+  if (!documents.readme) issues.push("README");
+  if (!documents.handoff && !documents.projectStatus && !documents.todo) issues.push("HANDOFF / PROJECT_STATUS / TODO");
+  return issues;
+}
+
+function localAheadBehind(project) {
+  if (!project?.hasGit) return "无 Git";
+  if (project.ahead == null || project.behind == null) return "origin/main 不可比较";
+  return `领先 ${project.ahead} · 落后 ${project.behind}`;
+}
+
+function localGitLabel(project) {
+  if (!project?.hasGit) return "无 Git";
+  if (project.clean == null) return project.gitError || "Git 状态未知";
+  return project.clean ? "Clean" : "有未提交修改";
+}
+
+function renderLocalReminders() {
+  const items = ui.localProjects?.items;
+  if (!items) {
+    const message = ui.localProjectsStatus === "loading"
+      ? "正在读取本机项目状态…"
+      : ui.localProjectsStatus === "error"
+        ? "本次本地扫描失败，保留最近一次扫描结果。"
+        : "启动本地 companion 后即可读取真实项目状态：python local_companion.py";
+    return `<section class="card card-pad grid-span-12"><div class="card-header"><h3>本地项目提醒</h3><span class="minor">${esc(message)}</span></div><button class="button small" data-action="refresh-local-projects">重新扫描</button></section>`;
+  }
+
+  const groups = [
+    ["有未提交修改", items.filter((item) => item.hasGit && item.clean === false)],
+    ["本地领先 origin/main", items.filter((item) => Number(item.ahead) > 0)],
+    ["本地落后 origin/main", items.filter((item) => Number(item.behind) > 0)],
+    ["没有 Git", items.filter((item) => !item.hasGit)],
+    ["缺少关键项目文档", items.filter((item) => localDocumentIssues(item).length > 0)],
+  ].filter(([, matches]) => matches.length);
+  const summary = ui.localProjects.scannedAt ? `扫描于 ${formattedTimestamp(ui.localProjects.scannedAt)}` : `${items.length} 个本地项目`;
+  return `<section class="card card-pad grid-span-12"><div class="card-header"><h3>本地项目提醒</h3><span class="minor">${items.length} 个项目 · ${esc(summary)}</span></div>${groups.length ? `<div class="local-reminder-grid">${groups.map(([label, matches]) => `<div class="local-reminder"><strong>${esc(label)} <span>${matches.length}</span></strong><p>${esc(matches.slice(0, 3).map((item) => item.name).join("、"))}${matches.length > 3 ? ` 等 ${matches.length} 个项目` : ""}</p></div>`).join("")}</div>` : `<div class="local-clear">未发现未提交修改、领先/落后远端、无 Git 或关键文档缺失的项目。</div>`}<button class="button quiet small" data-page="projects">查看本地项目 ${icon("arrow")}</button></section>`;
+}
+
 function renderDashboard() {
   const pending = openTasks();
   const task = suggestionTask();
@@ -230,6 +339,7 @@ function renderDashboard() {
       <section class="card card-pad grid-span-5">${sectionTitle("最近资料", `<button class="button quiet small" data-page="knowledge">打开收件箱 ${icon("arrow")}</button>`)}<div>${recentKnowledge.map((item) => knowledgeRow(item, true)).join("") || `<div class="empty-state">还没有资料。</div>`}</div></section>
       <section class="card card-pad grid-span-6">${sectionTitle("最近决策", `<button class="button quiet small" data-page="decisions">决策历史 ${icon("arrow")}</button>`)}<div>${recentDecisions.map((decision) => decisionRow(decision, true)).join("") || `<div class="empty-state">还没有记录过决策。</div>`}</div></section>
       <section class="card card-pad grid-span-6">${sectionTitle("最近活动", `<span class="minor">${db.activities.length} 条记录</span>`)}<div>${activities.map(activityRow).join("") || `<div class="empty-state">创建一个任务，活动就会出现在这里。</div>`}</div></section>
+      ${renderLocalReminders()}
     </div>`;
 }
 
@@ -239,7 +349,17 @@ function renderProjects() {
   const hasRequestFailure = configured.some((project) => ui.githubRefreshStatus[project.id] === "error");
   const connectedCount = configured.filter((project) => project.githubData?.refreshedAt).length;
   const connectionLabel = hasRequestFailure ? "GitHub 请求失败" : !configured.length ? "GitHub 未配置" : connectedCount ? "GitHub 已连接" : "GitHub 待刷新";
+  const localProjects = ui.localProjects?.items || [];
+  const scanLabel = ui.localProjectsStatus === "loading" ? "正在扫描" : ui.localProjectsStatus === "error" ? "扫描失败" : ui.localProjects ? `${localProjects.length} 个项目` : "companion 未连接";
+  const localSection = `<section class="local-project-section"><div class="section-title"><div><h2>本地项目</h2><p class="local-section-note">只读扫描 D:\\_Codex project；不会修改项目文件或联网刷新 Git。</p></div><div class="heading-actions"><span class="github-overview-status">${esc(scanLabel)}</span><button class="button small" data-action="refresh-local-projects" ${ui.localProjectsStatus === "loading" ? "disabled aria-busy=\"true\"" : ""}>${icon("reset")} 重新扫描</button></div></div>${localProjects.length ? `<div class="local-project-list">${localProjects.map((item) => {
+    const linked = workspaceProjectForLocal(item);
+    const repository = safeExternal(item.githubRepository || "");
+    const gitLabel = localGitLabel(item);
+    const gitClass = !item.hasGit || item.clean === false ? "warning" : item.clean === true ? "ok" : "";
+    return `<article class="card local-project-row"><div class="local-project-main"><h3>${esc(item.name)}</h3><code>${esc(item.path)}</code><span class="local-project-link">${linked ? `工作台项目：${esc(linked.name)}` : repository ? `<a href="${esc(repository)}" target="_blank" rel="noreferrer">${esc(repository.replace("https://github.com/", ""))}</a>` : "未关联工作台项目"}</span></div><div class="local-project-meta"><span class="local-state ${gitClass}">${esc(gitLabel)}</span><span>分支 ${esc(item.branch || (item.hasGit ? "未知" : "—"))}</span><span>${esc(localAheadBehind(item))}</span></div><button class="button small" data-action="view-local-project" data-id="${esc(item.id)}">查看状态 ${icon("chevron")}</button></article>`;
+  }).join("")}</div>` : ui.localProjects ? `<div class="card empty-state">扫描目录中没有发现本地项目。</div>` : `<div class="card local-companion-notice"><strong>${ui.localProjectsStatus === "loading" ? "正在读取本地项目" : "尚未连接本地 companion"}</strong><p>在项目目录运行 <code>python local_companion.py</code>，然后重新扫描。在线 Pages 版本不具备本机磁盘访问权限。</p></div>`}</section>`;
   return `<div class="page-heading"><div><div class="eyebrow">工作空间</div><h1>Projects</h1><p>项目、当前阶段与下一步都在这里。</p></div><div class="heading-actions"><span class="github-overview-status">${esc(connectionLabel)}</span><button class="button" data-action="refresh-github" ${ui.githubRefreshing ? "disabled aria-busy=\"true\"" : ""}>${icon("reset")} 刷新 GitHub 数据</button><button class="button primary" data-action="open-create-project">${icon("plus")} 新建项目</button></div></div>
+    ${localSection}
     ${projects.length ? `<div class="project-cards">${projects.map((project) => {
       const tasks = db.tasks.filter((item) => item.projectId === project.id);
       const done = tasks.filter((item) => item.status === "done").length;
@@ -283,6 +403,32 @@ function renderGitHubDetails(project) {
     </div></section>`;
 }
 
+function renderLocalProjectDetails(localProject, fallbackPath = "") {
+  const value = (label, content) => `<div class="local-data-cell"><div class="meta-label">${label}</div><div class="local-data-value">${content}</div></div>`;
+  const documents = localProject?.documents || {};
+  const commit = localProject?.lastLocalCommit;
+  const cleanLabel = localProject ? localGitLabel(localProject) : "尚未读取";
+  const aheadBehind = localProject ? localAheadBehind(localProject) : "尚未读取";
+  const docRows = [
+    ["README", documents.readme],
+    ["HANDOFF", documents.handoff],
+    ["PROJECT_STATUS", documents.projectStatus],
+    ["TODO", documents.todo],
+    ["PROJECT_CONTEXT", documents.projectContext],
+    ["CHANGELOG", documents.changelog],
+  ];
+  return `<section class="card local-data-card"><div class="github-info-head"><div><h3>本地扫描状态</h3><p>文件名、Git 元数据和最后修改时间；不读取文档正文。</p></div><span class="local-state ${localProject?.clean === false || !localProject?.hasGit ? "warning" : localProject?.clean === true ? "ok" : ""}">${esc(cleanLabel)}</span></div><div class="local-data-grid">
+    ${value("Local Path", esc(localProject?.path || fallbackPath || "未设置"))}
+    ${value("Git Status", esc(cleanLabel))}
+    ${value("Branch", esc(localProject?.branch || (localProject?.hasGit ? "未知" : localProject ? "无 Git" : "尚未读取")))}
+    ${value("Ahead / Behind", esc(aheadBehind))}
+    ${value("本地 HEAD", esc(localProject?.head || "尚未读取"))}
+    ${value("origin/main", esc(localProject?.originMain || "未找到本地引用"))}
+    ${value("Last Local Commit", commit ? `${esc(commit.message || "无提交说明")}<br><span class="minor">${esc(commit.sha)} · ${esc(commit.committedAt ? formattedTimestamp(commit.committedAt) : "时间未知")}</span>` : localProject?.hasGit ? "暂无提交记录" : "无 Git 仓库")}
+    ${value("最后修改", esc(localProject?.modifiedAt ? formattedTimestamp(localProject.modifiedAt) : "尚未读取"))}
+    </div><div class="local-documents"><div class="meta-label">项目文档（仅检查是否存在）</div><div class="local-document-grid">${docRows.map(([label, path]) => `<div class="local-document ${path ? "present" : "missing"}"><span>${path ? "✓" : "—"} ${label}</span><small>${esc(path || "缺失")}</small></div>`).join("")}</div></div>${!localProject ? `<p class="local-scan-note">本机扫描尚未发现与此工作台项目匹配的目录。</p>` : ""}</section>`;
+}
+
 function knowledgeContent(item) {
   const href = item.type === "链接" ? safeExternal(item.content.trim()) : "";
   return href ? `<a class="knowledge-external" href="${esc(href)}" target="_blank" rel="noreferrer">${esc(href)} ${icon("external")}</a>` : esc(item.content);
@@ -294,15 +440,25 @@ function renderProjectDetail() {
   const tasks = db.tasks.filter((item) => item.projectId === project.id).sort((a, b) => Number(a.status === "done") - Number(b.status === "done"));
   const knowledge = db.knowledge.filter((item) => item.projectId === project.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const activities = db.activities.filter((item) => item.projectId === project.id).slice(0, 6);
+  const localProject = localProjectForWorkspace(project);
   const github = safeExternal(project.github);
   const live = safeExternal(project.url);
   return `<div class="detail-topline"><button class="icon-button" data-page="projects" aria-label="返回项目">${icon("back")}</button><span>Projects</span>${icon("chevron")}<span>${esc(project.name)}</span></div>
-    <section class="card detail-hero"><div class="detail-hero-head"><div class="detail-hero-copy">${statusPill(project.status)}<h2 style="margin-top:11px">${esc(project.name)}</h2><p>${esc(project.description || "还没有项目简介。")}</p></div><div class="detail-actions"><button class="button" data-action="edit-project" data-id="${esc(project.id)}">${icon("edit")} 编辑项目</button><button class="button quiet danger" data-action="delete-project" data-id="${esc(project.id)}">${icon("trash")} 删除</button></div></div><div class="detail-links"><span class="detail-link">${icon("folder")} ${esc(project.path || "本地路径未设置")}</span>${github ? `<a class="detail-link" href="${esc(github)}" target="_blank" rel="noreferrer">${icon("external")} GitHub</a>` : ""}${live ? `<a class="detail-link" href="${esc(live)}" target="_blank" rel="noreferrer">${icon("external")} 在线网址</a>` : ""}</div></section>
+    <section class="card detail-hero"><div class="detail-hero-head"><div class="detail-hero-copy">${statusPill(project.status)}<h2 style="margin-top:11px">${esc(project.name)}</h2><p>${esc(project.description || "还没有项目简介。")}</p></div><div class="detail-actions"><button class="button" data-action="edit-project" data-id="${esc(project.id)}">${icon("edit")} 编辑项目</button><button class="button quiet danger" data-action="delete-project" data-id="${esc(project.id)}">${icon("trash")} 删除</button></div></div><div class="detail-links"><span class="detail-link">${icon("folder")} ${esc(localProject?.path || project.path || "本地路径未设置")}</span>${github ? `<a class="detail-link" href="${esc(github)}" target="_blank" rel="noreferrer">${icon("external")} GitHub</a>` : ""}${live ? `<a class="detail-link" href="${esc(live)}" target="_blank" rel="noreferrer">${icon("external")} 在线网址</a>` : ""}</div></section>
     <div class="detail-meta-grid"><div class="card meta-card"><div class="meta-label">当前阶段</div><div class="meta-value">${esc(project.stage || "未设置")}</div></div><div class="card meta-card"><div class="meta-label">下一步</div><div class="meta-value">${esc(project.next || "待补充")}</div></div><div class="card meta-card"><div class="meta-label">进度概览</div><div class="meta-value">${tasks.filter((task) => task.status === "done").length} / ${tasks.length} 项任务完成</div></div></div>
+    ${renderLocalProjectDetails(localProject, project.path)}
     ${renderGitHubDetails(project)}
     <div class="subgrid"><section class="card task-panel">${sectionTitle("TODO", `<button class="button quiet small" data-action="open-create-task" data-project-id="${esc(project.id)}">${icon("plus")} 添加任务</button>`)}<div>${tasks.map((task) => `<div class="task-detail-row"><button class="check-button ${task.status === "done" ? "checked" : ""}" data-action="toggle-task" data-id="${esc(task.id)}" aria-label="${task.status === "done" ? "重新打开" : "完成"}任务">${task.status === "done" ? icon("checkSquare") : ""}</button><div class="task-text">${esc(task.title)}</div><span class="priority ${priorityClass(task.priority)}">${esc(task.priority || "低")}</span></div>`).join("") || `<div class="empty-state">这个项目还没有任务。</div>`}</div></section>
       <section class="card card-pad">${sectionTitle("最近活动", `<span class="minor">${activities.length} 条</span>`)}<div>${activities.map(activityRow).join("") || `<div class="empty-state">项目活动会显示在这里。</div>`}</div></section>
       <section class="card card-pad" style="grid-column:1/-1">${sectionTitle("相关资料", `<button class="button quiet small" data-action="open-create-knowledge" data-project-id="${esc(project.id)}">${icon("plus")} 添加资料</button>`)}<div class="subgrid">${knowledge.map((item) => `<article class="card knowledge-card"><span class="type-pill">${esc(item.type)}</span><h3>${esc(item.title)}</h3><p>${esc(item.summary || item.content)}</p><div class="tag-row">${item.tags.map((tag) => `<span class="tag">#${esc(tag)}</span>`).join("")}</div></article>`).join("") || `<div class="empty-state">还没有关联资料。</div>`}</div></section></div>`;
+}
+
+function renderLocalProjectDetail() {
+  const localProject = localProjectById(ui.localProjectId);
+  if (!localProject) return `<div class="page-heading"><div><h1>找不到本地项目</h1><p>请返回 Projects 并重新扫描本机目录。</p></div><button class="button" data-page="projects">${icon("back")} 返回项目</button></div>`;
+  const linked = workspaceProjectForLocal(localProject);
+  const repository = safeExternal(localProject.githubRepository || linked?.github || "");
+  return `<div class="detail-topline"><button class="icon-button" data-page="projects" aria-label="返回项目">${icon("back")}</button><span>Projects</span>${icon("chevron")}<span>${esc(localProject.name)}</span></div><section class="card detail-hero"><div class="detail-hero-head"><div class="detail-hero-copy"><span class="status-pill">本地项目</span><h2 style="margin-top:11px">${esc(localProject.name)}</h2><p>${linked ? `已对应工作台项目「${esc(linked.name)}」。` : "此目录目前尚未关联工作台项目记录。"}</p></div><div class="detail-actions"><button class="button primary" data-action="open-assistant">${icon("sparkle")} 询问 AI</button></div></div><div class="detail-links"><span class="detail-link">${icon("folder")} ${esc(localProject.path)}</span>${repository ? `<a class="detail-link" href="${esc(repository)}" target="_blank" rel="noreferrer">${icon("external")} GitHub</a>` : ""}</div></section>${renderLocalProjectDetails(localProject, localProject.path)}${linked ? renderGitHubDetails(linked) : ""}<section class="card card-pad local-readonly-note"><strong>只读扫描</strong><p>工作区内文件、Git 提交、远端引用和文档内容均未被修改；扫描只读取项目文档文件名。</p></section>`;
 }
 
 function renderTasks() {
@@ -332,6 +488,7 @@ function renderDecisions() {
 
 function pageTitle() {
   if (ui.page === "project") return projectTitle(ui.projectId);
+  if (ui.page === "local-project") return localProjectById(ui.localProjectId)?.name || "本地项目";
   return ({ home: "Home", projects: "Projects", knowledge: "Knowledge", decisions: "Decisions", tasks: "Tasks" })[ui.page] || "Home";
 }
 
@@ -363,12 +520,13 @@ function renderSearchResults() {
 
 function contextLabel() {
   if (ui.page === "project") return `当前项目：${projectTitle(ui.projectId)}`;
+  if (ui.page === "local-project") return `当前项目：${localProjectById(ui.localProjectId)?.name || "本地项目"}`;
   return `当前页面：${pageTitle()}`;
 }
 
 function renderAssistant() {
   if (!ui.assistantOpen) return `<button class="assistant-launcher" data-action="open-assistant" aria-label="打开 AI 助手"><span class="assistant-orb">${icon("sparkle")}</span><span>问问 AI</span></button>`;
-  const prompts = ui.page === "project" ? ["这个项目现在做到哪了？", "这个项目最近有什么变化？", "帮我总结下一步"] : ui.page === "decisions" ? ["帮我整理这个决定", "我最近做了什么决定？"] : ui.page === "tasks" ? ["我下一步应该做什么？", "哪个任务优先？"] : ui.page === "knowledge" ? ["最近收集了哪些资料？", "总结一下当前收件箱"] : ["我下一步应该做什么？", "最近有哪些进展？"];
+  const prompts = ["project", "local-project"].includes(ui.page) ? ["这个项目现在有什么问题？", "这个项目最近有什么变化？", "帮我总结下一步"] : ui.page === "decisions" ? ["帮我整理这个决定", "我最近做了什么决定？"] : ui.page === "tasks" ? ["我下一步应该做什么？", "哪个任务优先？"] : ui.page === "knowledge" ? ["最近收集了哪些资料？", "总结一下当前收件箱"] : ["我下一步应该做什么？", "最近有哪些进展？"];
   const status = getAIStatus();
   const transportNote = status.mode === "real" ? "API Key 仅由服务端环境变量管理。" : status.hint === "Real AI（以后启用）" ? "回复基于本地数据，本次对话不会发送到网络。" : status.hint;
   return `<section class="assistant-panel" aria-label="AI Assistant"><header class="assistant-head"><span class="assistant-orb">${icon("sparkle")}</span><div class="assistant-head-copy"><div class="assistant-head-title">Workspace Assistant <span class="tag ai-mode ${status.mode}">${esc(status.label)}</span></div><div class="ai-mode-hint">${esc(status.hint)}</div><div class="assistant-context">${esc(contextLabel())} · 当前页面数据上下文</div></div><button class="icon-button" data-action="clear-chat" title="清空对话" aria-label="清空对话">${icon("reset")}</button><button class="icon-button" data-action="close-assistant" aria-label="关闭助手">${icon("close")}</button></header>
@@ -437,7 +595,7 @@ function renderModal() {
 }
 
 function render() {
-  const page = ui.page === "home" ? renderDashboard() : ui.page === "projects" ? renderProjects() : ui.page === "project" ? renderProjectDetail() : ui.page === "tasks" ? renderTasks() : ui.page === "knowledge" ? renderKnowledge() : renderDecisions();
+  const page = ui.page === "home" ? renderDashboard() : ui.page === "projects" ? renderProjects() : ui.page === "project" ? renderProjectDetail() : ui.page === "local-project" ? renderLocalProjectDetail() : ui.page === "tasks" ? renderTasks() : ui.page === "knowledge" ? renderKnowledge() : renderDecisions();
   app.innerHTML = `${renderNav()}<main class="main-shell"><header class="topbar"><div class="breadcrumbs"><span>Daniel Workspace</span><span class="crumb-sep">/</span><strong>${esc(pageTitle())}</strong></div><div class="search-wrap"><div class="search-box">${icon("search")}<input id="global-search" type="search" value="${esc(ui.query)}" placeholder="搜索项目、资料、决策或任务…" autocomplete="off" aria-label="全局搜索"/><kbd class="search-hint">Ctrl K</kbd></div><div id="search-results"></div></div><div class="topbar-actions"><span class="today-label">${formattedDate()}</span><button class="icon-button theme-toggle" data-action="toggle-theme" title="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式" aria-label="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式">${icon(document.documentElement.dataset.theme === "light" ? "moon" : "sun")}</button><button class="icon-button" data-action="open-assistant" title="打开 AI Assistant" aria-label="打开 AI Assistant">${icon("sparkle")}</button><span class="top-avatar">D</span></div></header><div class="content">${page}</div></main>${renderAssistant()}${renderModal()}<div class="toast-region" id="toast-region" aria-live="polite"></div>`;
   renderSearchResults();
   if (ui.assistantOpen) document.querySelector("#assistant-messages")?.scrollTo({ top: 999999, behavior: "smooth" });
@@ -468,10 +626,12 @@ function openConfirmation({ title, message, confirmLabel, onConfirm }) {
 async function sendChat(message) {
   const clean = message.trim();
   if (!clean || ui.chatBusy) return;
-  const context = buildAssistantContext({ data: db, currentPage: ui.page, projectId: ui.projectId, taskFilter: ui.taskFilter });
+  const localProject = ui.page === "local-project" ? localProjectById(ui.localProjectId) : ui.page === "project" ? localProjectForWorkspace(projectById(ui.projectId)) : null;
+  const assistantPage = ui.page === "local-project" ? "project" : ui.page;
+  const context = buildAssistantContext({ data: db, currentPage: assistantPage, projectId: ui.projectId, taskFilter: ui.taskFilter, localProject });
   const request = {
     message: clean,
-    currentPage: ui.page,
+    currentPage: assistantPage,
     currentProject: context.currentProject,
     relevantContext: context.relevantContext,
     history: ui.chat.slice(-10).filter((item) => !item.pending).map((item) => ({ role: item.role, content: item.text })),
@@ -574,6 +734,27 @@ async function refreshGitHubData(projectId = null) {
   else toast(`GitHub 数据已更新（${successCount} 个仓库）`);
 }
 
+async function refreshLocalProjects() {
+  if (!["localhost", "127.0.0.1"].includes(window.location.hostname)) {
+    ui.localProjectsStatus = "unavailable";
+    render();
+    return;
+  }
+  ui.localProjectsStatus = "loading";
+  render();
+  try {
+    const response = await fetch("/api/local-projects", { method: "GET", cache: "no-store", credentials: "same-origin" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const inventory = await response.json();
+    if (!Array.isArray(inventory.items)) throw new Error("Invalid local project inventory");
+    ui.localProjects = inventory;
+    ui.localProjectsStatus = "ready";
+  } catch {
+    ui.localProjectsStatus = ui.localProjects ? "error" : "unavailable";
+  }
+  render();
+}
+
 function handleSearchResult(kind, id) {
   ui.query = "";
   if (kind === "project") go("project", id);
@@ -630,6 +811,7 @@ function handleAction(action, element, sourceEvent) {
   if (action === "edit-knowledge") openModal("knowledge", id);
   if (action === "edit-decision") openModal("decision", id);
   if (action === "view-project") go("project", id);
+  if (action === "view-local-project") goLocalProject(id);
   if (action === "view-decision") { ui.expandedDecisionId = id; go("decisions"); }
   if (action === "toggle-decision") { ui.expandedDecisionId = ui.expandedDecisionId === id ? null : id; render(); }
   if (action === "open-search-result") handleSearchResult(element.dataset.kind, id);
@@ -665,6 +847,7 @@ function handleAction(action, element, sourceEvent) {
   if (action === "clear-chat") { ui.chat = [{ role: "assistant", text: "对话已清空。我会继续根据你当前打开的页面和本地数据回答。" }]; render(); }
   if (action === "send-prompt") sendChat(element.dataset.prompt || "");
   if (action === "refresh-github") refreshGitHubData(id || null);
+  if (action === "refresh-local-projects") refreshLocalProjects();
   if (action === "reset-demo") {
     openConfirmation({
       title: "重置演示数据",
@@ -738,8 +921,14 @@ document.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); document.querySelector("#global-search")?.focus(); }
 });
 
+const initialLocalProjectRoute = location.hash.match(/^#local-project\/(.+)$/);
 const initialProjectRoute = location.hash.match(/^#project\/(.+)$/);
-if (initialProjectRoute) {
+if (initialLocalProjectRoute) {
+  try {
+    ui.page = "local-project";
+    ui.localProjectId = decodeURIComponent(initialLocalProjectRoute[1]);
+  } catch { /* Ignore malformed local routes. */ }
+} else if (initialProjectRoute) {
   try {
     const id = decodeURIComponent(initialProjectRoute[1]);
     if (projectById(id)) { ui.page = "project"; ui.projectId = id; }
@@ -750,3 +939,4 @@ if (initialProjectRoute) {
 }
 
 render();
+if (["localhost", "127.0.0.1"].includes(window.location.hostname)) refreshLocalProjects();

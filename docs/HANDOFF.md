@@ -3,17 +3,17 @@
 ## Current state
 
 - **Updated:** 2026-09-29
-- **Status:** V2.2 implementation and browser regression complete
-- **Last completed:** Added unauthenticated read-only GitHub Public API snapshots for public repositories, local caching with failure preservation, Projects refresh/status UI, Dashboard update-time ordering, and GitHub-aware Project Mock AI context. Regressed V1/V2.1 CRUD, search, page-context Mock AI, persistence/reset, themes, mobile layout, and V2.2 refresh/failure behavior.
+- **Status:** V2.3 implementation and browser regression complete; release push and Pages verification are the remaining handoff steps.
+- **Last completed:** Added a loopback-only read-only companion for `D:\_Codex project`; Projects displays 14 discovered local projects and matches the Daniel Workspace repo to its existing project by GitHub identity. Details show local Git, last commit, modification time, and document presence; Dashboard shows local warnings; project Mock AI uses local status, cached GitHub data, TODOs, and document presence. Companion excludes hidden verification fixtures and does not fetch or mutate Git repositories.
 
 ## Next action
 
-No V2.2 work remains. Do not start V2.3 until explicitly requested. Future candidates (not implemented) include private-repository authorization or GitHub write/automation workflows; keep public reads tokenless and read-only. Real AI remains separately disabled: to enable it later, deploy a same-origin/serverless `POST /api/chat`, store `OPENAI_API_KEY` only in the server environment, and provide the frontend-safe `DANIEL_AI_CONFIG` with `provider: "real"` and `chatEndpoint: "/api/chat"`. No database, login, RAG, local scanning, or GitHub automation is part of this release.
+Do not start V2.4. V2.3 remains read-only: the companion is bound to loopback, scans only `D:\_Codex project`, checks document names without reading contents, compares only the locally cached `origin/main`, and keeps scan results in memory. No source files in scanned projects are changed. Real AI remains separately disabled; the `/api/chat` contract and server-only key boundary are unchanged.
 
 ## How to resume
 
 1. Inspect Git status and safely pull if clean.
-2. Start `python -m http.server 4174 --bind 127.0.0.1` from this folder.
+2. Start `python local_companion.py` from this folder (Python 3 and Git in `PATH`).
 3. Open `http://localhost:4174`; review `README.md` and `docs/PROJECT_CONTEXT.md`.
 
 ## Open questions or risks

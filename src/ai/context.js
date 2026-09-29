@@ -4,7 +4,31 @@ function byRecent(left, right) {
   return (right.createdAt || "").localeCompare(left.createdAt || "");
 }
 
-function projectRecord(project) {
+function localProjectRecord(localProject) {
+  if (!localProject) return null;
+  return {
+    name: localProject.name || "",
+    path: localProject.path || "",
+    hasGit: localProject.hasGit === true,
+    branch: localProject.branch || "",
+    clean: localProject.clean,
+    head: localProject.head || "",
+    originMain: localProject.originMain || "",
+    ahead: localProject.ahead,
+    behind: localProject.behind,
+    lastLocalCommit: localProject.lastLocalCommit ? {
+      sha: localProject.lastLocalCommit.sha || "",
+      message: localProject.lastLocalCommit.message || "",
+      committedAt: localProject.lastLocalCommit.committedAt || "",
+    } : null,
+    githubRepository: localProject.githubRepository || "",
+    documents: { ...(localProject.documents || {}) },
+    modifiedAt: localProject.modifiedAt || "",
+    gitError: localProject.gitError || "",
+  };
+}
+
+function projectRecord(project, localProject = null) {
   return {
     id: project.id,
     name: project.name,
@@ -12,6 +36,9 @@ function projectRecord(project) {
     stage: project.stage || "",
     next: project.next || "",
     description: project.description || "",
+    path: project.path || "",
+    github: project.github || "",
+    localData: localProjectRecord(localProject),
     githubData: project.githubData ? {
       repositoryName: project.githubData.repositoryName || "",
       repositoryUrl: project.githubData.repositoryUrl || "",
@@ -80,13 +107,20 @@ function activityRecord(activity, projects) {
   };
 }
 
-export function buildAssistantContext({ data, currentPage, projectId, taskFilter = "all" }) {
+export function buildAssistantContext({ data, currentPage, projectId, taskFilter = "all", localProject = null }) {
   const projects = data.projects || [];
   const tasks = data.tasks || [];
   const knowledge = data.knowledge || [];
   const decisions = data.decisions || [];
   const activities = data.activities || [];
-  const projectById = projects.find((project) => project.id === projectId);
+  const storedProject = projects.find((project) => project.id === projectId);
+  const projectById = storedProject || (localProject ? {
+    id: localProject.id,
+    name: localProject.name,
+    status: "本地项目",
+    path: localProject.path,
+    github: localProject.githubRepository,
+  } : null);
   const projectTodos = projectById
     ? tasks.filter((task) => task.projectId === projectById.id).map((task) => taskRecord(task, projects))
     : [];
@@ -100,7 +134,7 @@ export function buildAssistantContext({ data, currentPage, projectId, taskFilter
     ? decisions.filter((item) => item.projectId === projectById.id).sort(byRecent).map((item) => decisionRecord(item, projects))
     : [];
 
-  const currentProject = projectById ? projectRecord(projectById) : null;
+  const currentProject = projectById ? projectRecord(projectById, localProject) : null;
 
   let relevantContext = {};
   if (currentPage === "home") {

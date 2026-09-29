@@ -1,6 +1,7 @@
 const nextIntent = /下一步|优先|建议|做什么|next/i;
 const decisionIntent = /决定|选择|决策|整理/i;
 const recentChangeIntent = /最近.{0,8}(变化|更新|改动|提交|commit)|变化|仓库|github|commit|提交记录/i;
+const issueIntent = /问题|风险|阻塞|异常|缺少|有什么不对|哪里需要|现状怎么样|状态如何|issues?/i;
 
 function taskSummary(task) {
   return `「${task.title}」（${task.priority}优先级，${task.project}）`;
@@ -8,6 +9,42 @@ function taskSummary(task) {
 
 function summarizeDecision(decision) {
   return `问题：${decision.question}\n目标：${decision.goal || "未记录"}\n方案：${decision.options.join("；") || "未记录"}\n建议：${decision.recommendation || "未记录"}\n最终决定：${decision.final || "待定"}\n原因：${decision.reason || "未记录"}`;
+}
+
+function projectIssueReply(project) {
+  const local = project.localData;
+  const issues = [];
+  if (!local) {
+    issues.push("本机扫描状态尚未关联到这个工作台项目。");
+  } else if (!local.hasGit) {
+    issues.push("本地目录没有 Git 仓库，无法判断提交与远端差异。");
+  } else {
+    if (local.clean === false) issues.push("工作区有未提交修改，建议先查看变更内容。");
+    if (local.gitError) issues.push(`Git 状态读取不完整：${local.gitError}。`);
+    if (local.originMain && local.ahead > 0) issues.push(`本地领先 origin/main ${local.ahead} 个 commit，尚未同步到该本地远端引用。`);
+    if (local.originMain && local.behind > 0) issues.push(`本地落后 origin/main ${local.behind} 个 commit；比较依据是本地缓存的远端引用。`);
+    if (!local.originMain) issues.push("没有本地 origin/main 引用，因此暂时无法比较领先或落后。");
+  }
+
+  const docs = local?.documents || {};
+  if (local && !docs.readme) issues.push("缺少 README 文档。");
+  if (local && !docs.handoff && !docs.projectStatus && !docs.todo) issues.push("未发现 HANDOFF、PROJECT_STATUS 或 TODO 文档。");
+
+  const openTodos = (project.todos || []).filter((task) => task.status !== "done");
+  if (openTodos.length) issues.push(`工作台 TODO 有 ${openTodos.length} 项未完成，优先项：${openTodos.slice(0, 2).map((task) => task.title).join("、")}。`);
+
+  const github = project.githubData;
+  const githubNote = github
+    ? `GitHub 快照：${github.repositoryName || project.name}，默认分支 ${github.defaultBranch || "未知"}，仓库更新时间 ${github.updatedAt || "未知"}${github.latestCommit?.message ? `；最新远端提交「${github.latestCommit.message}」` : ""}。`
+    : project.github ? "尚无已缓存的 GitHub 仓库快照；可在 Projects 页面手动刷新公开仓库数据。" : "当前工作台项目没有关联 GitHub 地址。";
+  const commitNote = local?.lastLocalCommit
+    ? `最近本地 commit：${local.lastLocalCommit.message || "无提交说明"}（${local.lastLocalCommit.sha.slice(0, 12)}）。`
+    : local?.hasGit ? "尚未读取到本地 commit。" : "";
+  const statusNote = local
+    ? `本地 Git：${local.clean === true ? "clean" : local.clean === false ? "有未提交修改" : "状态未知"}；分支 ${local.branch || "未知"}；${local.ahead == null || local.behind == null ? "origin/main 不可比较" : `领先 ${local.ahead} / 落后 ${local.behind}`}。`
+    : "";
+
+  return `「${project.name}」当前检查：\n${issues.length ? issues.map((item) => `• ${item}`).join("\n") : "• 没有发现未提交修改、远端差异或关键文档缺失。"}\n${statusNote}${commitNote ? `\n${commitNote}` : ""}\n${githubNote}\n文档检查只确认文件是否存在，不读取 README、HANDOFF 或 TODO 正文。`;
 }
 
 export function createMockReply({ message = "", currentPage = "home", currentProject = null, relevantContext = {} } = {}) {
@@ -18,6 +55,7 @@ export function createMockReply({ message = "", currentPage = "home", currentPro
     if (!project) return "当前没有打开的项目。请先进入 Projects 选择一个项目，我就能读取它的进度和资料。";
     const openTodos = (project.todos || []).filter((task) => task.status !== "done");
     const materialNames = (project.relatedMaterials || []).slice(0, 3).map((item) => item.title);
+    if (issueIntent.test(message)) return projectIssueReply(project);
     if (recentChangeIntent.test(message) && !decisionIntent.test(message)) {
       const github = project.githubData;
       if (!github) {
