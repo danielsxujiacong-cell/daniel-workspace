@@ -12,6 +12,22 @@ function projectRecord(project) {
     stage: project.stage || "",
     next: project.next || "",
     description: project.description || "",
+    githubData: project.githubData ? {
+      repositoryName: project.githubData.repositoryName || "",
+      repositoryUrl: project.githubData.repositoryUrl || "",
+      defaultBranch: project.githubData.defaultBranch || "",
+      updatedAt: project.githubData.updatedAt || "",
+      latestCommit: project.githubData.latestCommit ? {
+        sha: project.githubData.latestCommit.sha || "",
+        message: project.githubData.latestCommit.message || "",
+        url: project.githubData.latestCommit.url || "",
+        committedAt: project.githubData.latestCommit.committedAt || "",
+      } : null,
+      pagesUrl: project.githubData.pagesUrl || "",
+      pagesUrlEstimated: project.githubData.pagesUrlEstimated === true,
+      isPublic: project.githubData.isPublic === true,
+      refreshedAt: project.githubData.refreshedAt || "",
+    } : null,
   };
 }
 

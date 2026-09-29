@@ -2,13 +2,13 @@
 
 ## Current state
 
-- **Updated:** 2026-09-28
-- **Status:** V2.1 complete
-- **Last completed:** Routed Assistant chat through `src/ai/service.js`, separated Mock and HTTP providers, and built page-specific local context for Dashboard, Projects, Project detail, Knowledge, Decisions, and Tasks. No API Key or server endpoint is configured, so the app stays local Mock AI.
+- **Updated:** 2026-09-29
+- **Status:** V2.2 implementation and browser regression complete
+- **Last completed:** Added unauthenticated read-only GitHub Public API snapshots for public repositories, local caching with failure preservation, Projects refresh/status UI, Dashboard update-time ordering, and GitHub-aware Project Mock AI context. Regressed V1/V2.1 CRUD, search, page-context Mock AI, persistence/reset, themes, mobile layout, and V2.2 refresh/failure behavior.
 
 ## Next action
 
-Do not start V2.2. To enable Real AI later, deploy a same-origin/serverless `POST /api/chat`, store `OPENAI_API_KEY` only in the server environment, and provide the frontend-safe `DANIEL_AI_CONFIG` with `provider: "real"` and `chatEndpoint: "/api/chat"`. The route must follow the JSON contract in `README.md` and return `provider: "mock"` or `"real"`; the browser service falls back to local Mock on an unavailable or invalid response. No database, login, RAG, GitHub scan, or local file scan is part of this step.
+No V2.2 work remains. Do not start V2.3 until explicitly requested. Future candidates (not implemented) include private-repository authorization or GitHub write/automation workflows; keep public reads tokenless and read-only. Real AI remains separately disabled: to enable it later, deploy a same-origin/serverless `POST /api/chat`, store `OPENAI_API_KEY` only in the server environment, and provide the frontend-safe `DANIEL_AI_CONFIG` with `provider: "real"` and `chatEndpoint: "/api/chat"`. No database, login, RAG, local scanning, or GitHub automation is part of this release.
 
 ## How to resume
 

@@ -177,6 +177,17 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 .project-card h3 { margin: 0; font: 600 13px Manrope, sans-serif; letter-spacing: -.02em; }
 .project-card p { min-height: 34px; margin: 13px 0 15px; color: #a0a1aa; font-size: 10px; line-height: 1.65; }
 .project-card-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 11px; border-top: 1px solid var(--line-soft); color: #777984; font-size: 9px; }
+.project-card-github { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; color: var(--muted); font-size: 9px; }
+.github-overview-status, .github-status { color: var(--muted); font-size: 9px; white-space: nowrap; }
+.github-info-card { padding: 16px; margin-bottom: 14px; }
+.github-info-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.github-info-head h3 { margin: 0; font-size: 12px; }
+.github-info-head p { margin: 5px 0 0; color: var(--muted); font-size: 9px; }
+.github-data-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 13px; }
+.github-data-cell { min-width: 0; padding: 10px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--panel-raised); }
+.github-data-value { margin-top: 6px; color: var(--text); font-size: 10px; line-height: 1.55; overflow-wrap: anywhere; }
+.github-data-link { color: var(--accent-strong); overflow-wrap: anywhere; }
+.github-data-link:hover { text-decoration: underline; }
 .detail-topline { display: flex; align-items: center; gap: 9px; margin-bottom: 11px; color: #888a94; font-size: 10px; }
 .detail-hero { padding: 19px; margin-bottom: 14px; }
 .detail-hero-head { display: flex; justify-content: space-between; gap: 15px; }
@@ -322,6 +333,8 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
   .project-cards { grid-template-columns: minmax(0,1fr); }
   .project-card p { min-height: auto; }
   .detail-meta-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+  .github-data-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .github-overview-status { display: none; }
   .subgrid { grid-template-columns: minmax(0,1fr); }
   .detail-hero-head { align-items: flex-start; }
   .detail-hero h2 { font-size: 18px; }
@@ -342,6 +355,8 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
   .form-grid { grid-template-columns: minmax(0,1fr); }
   .field.full { grid-column: auto; }
   .detail-meta-grid { grid-template-columns: minmax(0,1fr); }
+  .github-info-head { flex-direction: column; }
+  .github-status { white-space: normal; }
   .decision-detail-grid { grid-template-columns: minmax(0,1fr); }
   .activity-time { display: none; }
   .toolbar { align-items: flex-start; flex-direction: column; }

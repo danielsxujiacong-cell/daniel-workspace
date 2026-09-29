@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-09-29 · V2.2
+
+- Added an explicit refresh flow for public GitHub repositories using unauthenticated GitHub Public API reads. Repository metadata, latest commit, Pages URL, visibility, and refresh time are stored with local workspace data; failed requests preserve the previous snapshot.
+- Added GitHub connection states to Projects, recent GitHub update timestamps to Dashboard, and GitHub snapshot context to Project-page Mock AI replies.
+- Replaced placeholder demo GitHub home-page links with the known Daniel Workspace repository; other sample projects remain local-only.
+
 ## 2026-09-28 · V2.1
 
 - Moved Assistant replies into one AI service with separate local Mock and same-origin `/api/chat` providers; absent safe server config, chat stays offline and automatically uses Mock.

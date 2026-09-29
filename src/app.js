@@ -1,6 +1,7 @@
 import { loadData, resetData, saveData } from "./store.js";
 import { buildAssistantContext } from "./ai/context.js";
 import { chat as chatWithAI, getAIStatus } from "./ai/service.js";
+import { fetchPublicGitHubRepository, parsePublicGitHubRepository } from "./github/public-api.js";
 
 const app = document.querySelector("#app");
 let db = loadData();
@@ -14,6 +15,8 @@ const ui = {
   confirmation: null,
   assistantOpen: false,
   chatBusy: false,
+  githubRefreshing: false,
+  githubRefreshStatus: {},
   chat: [{ role: "assistant", text: "你好，我是 Daniel Workspace Assistant。可以问我当前页面的数据、进展和下一步。" }],
 };
 
@@ -91,6 +94,20 @@ function timeAgo(iso) {
   return days < 7 ? `${days} 天前` : date.toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
 }
 
+function formattedTimestamp(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "尚未获取";
+  return date.toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function githubStatus(project) {
+  const requestStatus = ui.githubRefreshStatus[project.id];
+  if (requestStatus === "loading") return "正在刷新";
+  if (requestStatus === "error") return "请求失败 · 保留已有数据";
+  if (!parsePublicGitHubRepository(project.github)) return "未配置公开仓库";
+  return project.githubData?.refreshedAt ? "GitHub 已连接" : "尚未刷新";
+}
+
 function formattedDate() {
   return new Date().toLocaleDateString("zh-CN", { weekday: "short", month: "long", day: "numeric" });
 }
@@ -137,9 +154,12 @@ function taskRow(task, compact = false) {
 
 function projectRow(project) {
   const count = db.tasks.filter((task) => task.projectId === project.id && task.status !== "done").length;
+  const meta = project.githubData?.updatedAt
+    ? `GitHub 更新 · ${timeAgo(project.githubData.updatedAt)} · ${count} 个待办`
+    : `${project.stage || "尚未设置阶段"} · ${count} 个待办`;
   return `<div class="project-row" data-action="view-project" data-id="${esc(project.id)}" tabindex="0" role="button" aria-label="打开项目 ${esc(project.name)}">
     <div class="project-glyph">${esc(initials(project.name))}</div>
-    <div class="project-main"><div class="project-name">${esc(project.name)}</div><div class="project-meta">${esc(project.stage || "尚未设置阶段")} · ${count} 个待办</div></div>
+    <div class="project-main"><div class="project-name">${esc(project.name)}</div><div class="project-meta">${esc(meta)}</div></div>
     <div class="project-trailing">${statusPill(project.status)}${icon("chevron")}</div>
   </div>`;
 }
@@ -187,7 +207,7 @@ function renderDashboard() {
   const pending = openTasks();
   const task = suggestionTask();
   const activeProjects = db.projects.filter((project) => project.status === "进行中").length;
-  const recentProjects = [...db.projects].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 4);
+  const recentProjects = [...db.projects].sort((a, b) => (b.githubData?.updatedAt || b.createdAt).localeCompare(a.githubData?.updatedAt || a.createdAt)).slice(0, 4);
   const recentKnowledge = [...db.knowledge].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 3);
   const recentDecisions = [...db.decisions].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 3);
   const activities = db.activities.slice(0, 6);
@@ -215,11 +235,16 @@ function renderDashboard() {
 
 function renderProjects() {
   const projects = [...db.projects].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return `<div class="page-heading"><div><div class="eyebrow">工作空间</div><h1>Projects</h1><p>项目、当前阶段与下一步都在这里。</p></div><div class="heading-actions"><button class="button primary" data-action="open-create-project">${icon("plus")} 新建项目</button></div></div>
+  const configured = projects.filter((project) => parsePublicGitHubRepository(project.github));
+  const hasRequestFailure = configured.some((project) => ui.githubRefreshStatus[project.id] === "error");
+  const connectedCount = configured.filter((project) => project.githubData?.refreshedAt).length;
+  const connectionLabel = hasRequestFailure ? "GitHub 请求失败" : !configured.length ? "GitHub 未配置" : connectedCount ? "GitHub 已连接" : "GitHub 待刷新";
+  return `<div class="page-heading"><div><div class="eyebrow">工作空间</div><h1>Projects</h1><p>项目、当前阶段与下一步都在这里。</p></div><div class="heading-actions"><span class="github-overview-status">${esc(connectionLabel)}</span><button class="button" data-action="refresh-github" ${ui.githubRefreshing ? "disabled aria-busy=\"true\"" : ""}>${icon("reset")} 刷新 GitHub 数据</button><button class="button primary" data-action="open-create-project">${icon("plus")} 新建项目</button></div></div>
     ${projects.length ? `<div class="project-cards">${projects.map((project) => {
       const tasks = db.tasks.filter((item) => item.projectId === project.id);
       const done = tasks.filter((item) => item.status === "done").length;
-      return `<article class="card project-card" data-action="view-project" data-id="${esc(project.id)}" tabindex="0" role="button"><div class="project-card-top"><div class="project-glyph">${esc(initials(project.name))}</div><div class="project-main"><h3>${esc(project.name)}</h3><div class="project-meta">${esc(project.stage || "尚未设置阶段")}</div></div>${statusPill(project.status)}</div><p>${esc(project.description || "还没有项目简介。")}</p><div class="project-card-bottom"><span>${esc(project.next || "下一步待定")}</span><span>${done}/${tasks.length} 完成</span></div></article>`;
+      const recentUpdate = project.githubData?.updatedAt ? `最近更新 ${timeAgo(project.githubData.updatedAt)}` : "";
+      return `<article class="card project-card" data-action="view-project" data-id="${esc(project.id)}" tabindex="0" role="button"><div class="project-card-top"><div class="project-glyph">${esc(initials(project.name))}</div><div class="project-main"><h3>${esc(project.name)}</h3><div class="project-meta">${esc(project.stage || "尚未设置阶段")}</div></div>${statusPill(project.status)}</div><p>${esc(project.description || "还没有项目简介。")}</p><div class="project-card-bottom"><span>${esc(project.next || "下一步待定")}</span><span>${done}/${tasks.length} 完成</span></div><div class="project-card-github"><span>${esc(githubStatus(project))}</span>${recentUpdate ? `<span>${esc(recentUpdate)}</span>` : ""}</div></article>`;
     }).join("")}</div>` : `<div class="card empty-state"><strong>还没有项目</strong>创建第一个项目来整理任务与资料。<br><br><button class="button primary" data-action="open-create-project">${icon("plus")} 新建项目</button></div>`}`;
 }
 
@@ -228,6 +253,34 @@ function safeExternal(url) {
     const parsed = new URL(url);
     return ["http:", "https:"].includes(parsed.protocol) ? parsed.href : "";
   } catch { return ""; }
+}
+
+function renderGitHubDetails(project) {
+  const data = project.githubData;
+  const parsedUrl = parsePublicGitHubRepository(project.github);
+  const repositoryUrl = data?.repositoryUrl || parsedUrl?.url || "";
+  const commit = data?.latestCommit;
+  const commitLabel = commit?.message || "暂无提交记录";
+  const commitMarkup = commit?.url
+    ? `<a class="github-data-link" href="${esc(commit.url)}" target="_blank" rel="noreferrer">${esc(commitLabel)}${commit.sha ? ` · ${esc(commit.sha)}` : ""}</a>`
+    : esc(commitLabel);
+  const repoMarkup = repositoryUrl
+    ? `<a class="github-data-link" href="${esc(repositoryUrl)}" target="_blank" rel="noreferrer">${esc(data?.repositoryName || parsedUrl?.fullName || repositoryUrl)}</a>`
+    : "未配置公开仓库";
+  const pagesMarkup = data?.pagesUrl
+    ? `<a class="github-data-link" href="${esc(data.pagesUrl)}" target="_blank" rel="noreferrer">${esc(data.pagesUrl)}</a>${data.pagesUrlEstimated ? ` <span class="minor">默认地址</span>` : ""}`
+    : data?.refreshedAt ? "未启用" : "尚未获取";
+  const value = (label, content) => `<div class="github-data-cell"><div class="meta-label">${label}</div><div class="github-data-value">${content}</div></div>`;
+  return `<section class="card github-info-card"><div class="github-info-head"><div><h3>GitHub 仓库信息</h3><p>仅读取公开仓库；数据保存在本地浏览器。</p></div><span class="github-status">${esc(githubStatus(project))}</span></div><div class="github-data-grid">
+    ${value("仓库名称", repoMarkup)}
+    ${value("默认分支", esc(data?.defaultBranch || "尚未获取"))}
+    ${value("最近更新时间", esc(data?.updatedAt ? formattedTimestamp(data.updatedAt) : "尚未获取"))}
+    ${value("最近一次 commit", commitMarkup)}
+    ${value("最近 commit 时间", esc(commit?.committedAt ? formattedTimestamp(commit.committedAt) : data?.refreshedAt ? "暂无提交记录" : "尚未获取"))}
+    ${value("GitHub Pages", pagesMarkup)}
+    ${value("仓库可见性", data?.isPublic === true ? "Public" : data?.isPublic === false ? "非 Public" : "尚未获取")}
+    ${value("数据最后刷新", esc(data?.refreshedAt ? formattedTimestamp(data.refreshedAt) : "尚未刷新"))}
+    </div></section>`;
 }
 
 function knowledgeContent(item) {
@@ -246,6 +299,7 @@ function renderProjectDetail() {
   return `<div class="detail-topline"><button class="icon-button" data-page="projects" aria-label="返回项目">${icon("back")}</button><span>Projects</span>${icon("chevron")}<span>${esc(project.name)}</span></div>
     <section class="card detail-hero"><div class="detail-hero-head"><div class="detail-hero-copy">${statusPill(project.status)}<h2 style="margin-top:11px">${esc(project.name)}</h2><p>${esc(project.description || "还没有项目简介。")}</p></div><div class="detail-actions"><button class="button" data-action="edit-project" data-id="${esc(project.id)}">${icon("edit")} 编辑项目</button><button class="button quiet danger" data-action="delete-project" data-id="${esc(project.id)}">${icon("trash")} 删除</button></div></div><div class="detail-links"><span class="detail-link">${icon("folder")} ${esc(project.path || "本地路径未设置")}</span>${github ? `<a class="detail-link" href="${esc(github)}" target="_blank" rel="noreferrer">${icon("external")} GitHub</a>` : ""}${live ? `<a class="detail-link" href="${esc(live)}" target="_blank" rel="noreferrer">${icon("external")} 在线网址</a>` : ""}</div></section>
     <div class="detail-meta-grid"><div class="card meta-card"><div class="meta-label">当前阶段</div><div class="meta-value">${esc(project.stage || "未设置")}</div></div><div class="card meta-card"><div class="meta-label">下一步</div><div class="meta-value">${esc(project.next || "待补充")}</div></div><div class="card meta-card"><div class="meta-label">进度概览</div><div class="meta-value">${tasks.filter((task) => task.status === "done").length} / ${tasks.length} 项任务完成</div></div></div>
+    ${renderGitHubDetails(project)}
     <div class="subgrid"><section class="card task-panel">${sectionTitle("TODO", `<button class="button quiet small" data-action="open-create-task" data-project-id="${esc(project.id)}">${icon("plus")} 添加任务</button>`)}<div>${tasks.map((task) => `<div class="task-detail-row"><button class="check-button ${task.status === "done" ? "checked" : ""}" data-action="toggle-task" data-id="${esc(task.id)}" aria-label="${task.status === "done" ? "重新打开" : "完成"}任务">${task.status === "done" ? icon("checkSquare") : ""}</button><div class="task-text">${esc(task.title)}</div><span class="priority ${priorityClass(task.priority)}">${esc(task.priority || "低")}</span></div>`).join("") || `<div class="empty-state">这个项目还没有任务。</div>`}</div></section>
       <section class="card card-pad">${sectionTitle("最近活动", `<span class="minor">${activities.length} 条</span>`)}<div>${activities.map(activityRow).join("") || `<div class="empty-state">项目活动会显示在这里。</div>`}</div></section>
       <section class="card card-pad" style="grid-column:1/-1">${sectionTitle("相关资料", `<button class="button quiet small" data-action="open-create-knowledge" data-project-id="${esc(project.id)}">${icon("plus")} 添加资料</button>`)}<div class="subgrid">${knowledge.map((item) => `<article class="card knowledge-card"><span class="type-pill">${esc(item.type)}</span><h3>${esc(item.title)}</h3><p>${esc(item.summary || item.content)}</p><div class="tag-row">${item.tags.map((tag) => `<span class="tag">#${esc(tag)}</span>`).join("")}</div></article>`).join("") || `<div class="empty-state">还没有关联资料。</div>`}</div></section></div>`;
@@ -314,7 +368,7 @@ function contextLabel() {
 
 function renderAssistant() {
   if (!ui.assistantOpen) return `<button class="assistant-launcher" data-action="open-assistant" aria-label="打开 AI 助手"><span class="assistant-orb">${icon("sparkle")}</span><span>问问 AI</span></button>`;
-  const prompts = ui.page === "project" ? ["这个项目现在做到哪了？", "帮我总结下一步"] : ui.page === "decisions" ? ["帮我整理这个决定", "我最近做了什么决定？"] : ui.page === "tasks" ? ["我下一步应该做什么？", "哪个任务优先？"] : ui.page === "knowledge" ? ["最近收集了哪些资料？", "总结一下当前收件箱"] : ["我下一步应该做什么？", "最近有哪些进展？"];
+  const prompts = ui.page === "project" ? ["这个项目现在做到哪了？", "这个项目最近有什么变化？", "帮我总结下一步"] : ui.page === "decisions" ? ["帮我整理这个决定", "我最近做了什么决定？"] : ui.page === "tasks" ? ["我下一步应该做什么？", "哪个任务优先？"] : ui.page === "knowledge" ? ["最近收集了哪些资料？", "总结一下当前收件箱"] : ["我下一步应该做什么？", "最近有哪些进展？"];
   const status = getAIStatus();
   const transportNote = status.mode === "real" ? "API Key 仅由服务端环境变量管理。" : status.hint === "Real AI（以后启用）" ? "回复基于本地数据，本次对话不会发送到网络。" : status.hint;
   return `<section class="assistant-panel" aria-label="AI Assistant"><header class="assistant-head"><span class="assistant-orb">${icon("sparkle")}</span><div class="assistant-head-copy"><div class="assistant-head-title">Workspace Assistant <span class="tag ai-mode ${status.mode}">${esc(status.label)}</span></div><div class="ai-mode-hint">${esc(status.hint)}</div><div class="assistant-context">${esc(contextLabel())} · 当前页面数据上下文</div></div><button class="icon-button" data-action="clear-chat" title="清空对话" aria-label="清空对话">${icon("reset")}</button><button class="icon-button" data-action="close-assistant" aria-label="关闭助手">${icon("close")}</button></header>
@@ -451,7 +505,14 @@ function submitRecord(form) {
 
   if (kind === "project") {
     const item = { ...values, id: existing?.id || uid("project"), createdAt: existing?.createdAt || now, status: values.status || "计划中" };
-    if (existing) Object.assign(existing, item);
+    if (existing) {
+      const repositoryChanged = existing.github !== item.github;
+      Object.assign(existing, item);
+      if (repositoryChanged) {
+        delete existing.githubData;
+        delete ui.githubRefreshStatus[item.id];
+      }
+    }
     else { db.projects.unshift(item); logActivity("project-created", `创建项目「${item.name}」`, item.id); }
     ui.page = "project"; ui.projectId = item.id;
     history.replaceState({ page: "project", projectId: item.id }, "", `#project/${encodeURIComponent(item.id)}`);
@@ -475,6 +536,42 @@ function submitRecord(form) {
   ui.modal = null;
   render();
   toast(existing ? "修改已保存" : ({ project: "项目已创建", task: "任务已创建", knowledge: "资料已保存", decision: "决策已保存" })[kind]);
+}
+
+async function refreshGitHubData(projectId = null) {
+  if (ui.githubRefreshing) return;
+  const candidates = (projectId ? db.projects.filter((project) => project.id === projectId) : db.projects)
+    .map((project) => ({ project, githubUrl: project.github, repository: parsePublicGitHubRepository(project.github) }))
+    .filter((item) => item.repository);
+  if (!candidates.length) {
+    toast("没有可读取的公开 GitHub 仓库地址");
+    return;
+  }
+
+  ui.githubRefreshing = true;
+  candidates.forEach(({ project }) => { ui.githubRefreshStatus[project.id] = "loading"; });
+  render();
+
+  const results = await Promise.all(candidates.map(async ({ project, githubUrl }) => {
+    try {
+      const snapshot = await fetchPublicGitHubRepository(githubUrl);
+      if (projectById(project.id) === project && project.github === githubUrl) project.githubData = snapshot;
+      ui.githubRefreshStatus[project.id] = "connected";
+      return "success";
+    } catch {
+      ui.githubRefreshStatus[project.id] = "error";
+      return "error";
+    }
+  }));
+
+  ui.githubRefreshing = false;
+  const successCount = results.filter((result) => result === "success").length;
+  const errorCount = results.length - successCount;
+  if (successCount) persist();
+  render();
+  if (errorCount && successCount) toast(`已更新 ${successCount} 个仓库；${errorCount} 个请求失败，已有数据已保留`);
+  else if (errorCount) toast("GitHub 请求失败，已有数据已保留");
+  else toast(`GitHub 数据已更新（${successCount} 个仓库）`);
 }
 
 function handleSearchResult(kind, id) {
@@ -567,13 +664,14 @@ function handleAction(action, element, sourceEvent) {
   if (action === "close-assistant") { ui.assistantOpen = false; render(); }
   if (action === "clear-chat") { ui.chat = [{ role: "assistant", text: "对话已清空。我会继续根据你当前打开的页面和本地数据回答。" }]; render(); }
   if (action === "send-prompt") sendChat(element.dataset.prompt || "");
+  if (action === "refresh-github") refreshGitHubData(id || null);
   if (action === "reset-demo") {
     openConfirmation({
       title: "重置演示数据",
       message: "此操作会清除本浏览器中保存的自定义内容，并恢复内置演示数据；主题选择会保留。",
       confirmLabel: "重置演示数据",
       onConfirm: () => {
-        db = resetData({ theme: db.settings?.theme || "system" }); applyTheme(); ui.page = "home"; ui.projectId = null; ui.taskFilter = "all"; ui.query = ""; ui.chat = [{ role: "assistant", text: "演示数据已恢复。你可以从当前页面开始提问。" }]; ui.modal = null; persist(); render(); toast("演示数据已恢复");
+        db = resetData({ theme: db.settings?.theme || "system" }); applyTheme(); ui.page = "home"; ui.projectId = null; ui.taskFilter = "all"; ui.query = ""; ui.githubRefreshStatus = {}; ui.chat = [{ role: "assistant", text: "演示数据已恢复。你可以从当前页面开始提问。" }]; ui.modal = null; persist(); render(); toast("演示数据已恢复");
       },
     });
   }

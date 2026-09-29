@@ -1,5 +1,6 @@
 const nextIntent = /下一步|优先|建议|做什么|next/i;
 const decisionIntent = /决定|选择|决策|整理/i;
+const recentChangeIntent = /最近.{0,8}(变化|更新|改动|提交|commit)|变化|仓库|github|commit|提交记录/i;
 
 function taskSummary(task) {
   return `「${task.title}」（${task.priority}优先级，${task.project}）`;
@@ -17,6 +18,15 @@ export function createMockReply({ message = "", currentPage = "home", currentPro
     if (!project) return "当前没有打开的项目。请先进入 Projects 选择一个项目，我就能读取它的进度和资料。";
     const openTodos = (project.todos || []).filter((task) => task.status !== "done");
     const materialNames = (project.relatedMaterials || []).slice(0, 3).map((item) => item.title);
+    if (recentChangeIntent.test(message) && !decisionIntent.test(message)) {
+      const github = project.githubData;
+      if (!github) {
+        const latestActivity = project.recentActivity?.[0];
+        return `「${project.name}」还没有可用的 GitHub 快照。${latestActivity ? `本地最近活动：${latestActivity.title}。` : ""}可在 Projects 页面刷新公开仓库数据。`;
+      }
+      const latest = github.latestCommit;
+      return `「${project.name}」的 GitHub 仓库是 ${github.repositoryName || project.name}（${github.defaultBranch || "默认分支未知"}）。最近更新时间：${github.updatedAt || "未知"}。${latest ? `最近一次 commit：${latest.message || "无提交说明"}${latest.sha ? `（${latest.sha}）` : ""}，时间：${latest.committedAt || "未知"}。` : "仓库目前没有可读取的 commit。"}${github.pagesUrl ? `\nGitHub Pages${github.pagesUrlEstimated ? " 默认地址" : ""}：${github.pagesUrl}` : ""}`;
+    }
     if (nextIntent.test(message)) {
       return `「${project.name}」当前在${project.stage || "阶段未设置"}阶段，状态为${project.status}。项目记录的下一步：${project.next || "尚未填写"}。${openTodos[0] ? `优先待办是${taskSummary(openTodos[0])}。` : "当前没有未完成任务。"}`;
     }

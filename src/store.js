@@ -10,6 +10,18 @@ export function loadData() {
       if (parsed?.version === 1 && Array.isArray(parsed.projects) && Array.isArray(parsed.tasks)) {
         const settings = parsed.settings && typeof parsed.settings === "object" && !Array.isArray(parsed.settings) ? parsed.settings : {};
         parsed.settings = { ...settings, theme: ["system", "light", "dark"].includes(settings.theme) ? settings.theme : "system" };
+        let migratedDemoGithubLinks = false;
+        for (const project of parsed.projects) {
+          if (project.github !== "https://github.com") continue;
+          if (project.id === "project-workspace") {
+            project.github = "https://github.com/danielsxujiacong-cell/daniel-workspace";
+            migratedDemoGithubLinks = true;
+          } else if (["project-reading", "project-weekly-review"].includes(project.id)) {
+            project.github = "";
+            migratedDemoGithubLinks = true;
+          }
+        }
+        if (migratedDemoGithubLinks) saveData(parsed);
         return parsed;
       }
     }
