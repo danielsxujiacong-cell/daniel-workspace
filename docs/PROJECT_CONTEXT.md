@@ -2,16 +2,20 @@
 
 ## Goal
 
-Build a usable, local-first personal workspace that brings projects, notes, decisions, and tasks into one place. V1 is for one person using one browser profile.
+Build a usable, local-first personal workspace that brings projects, notes, decisions, and tasks into one place. Workspace content stays on the current browser profile and is shown only after Supabase authenticates an existing account.
 
 ## Scope
 
-- In scope: A daily-action Dashboard for project continuation, scan-based health/reminders/change comparison/recent activity, project list/detail and CRUD, public GitHub repository read-only snapshots, a local read-only companion for `D:\_Codex project`, Knowledge inbox, decision history, tasks and status filters, global search, contextual Mock AI, activity timeline, demo-data reset, system-aware Light/Dark theme, and the V2.1 AI provider/API contract seam.
-- Out of scope: Calling a real AI API, deploying a serverless route, database, login, RAG, private GitHub access, GitHub write operations/automation, scanning outside the fixed project root, reading scanned document bodies, PDF or live-web parsing, agents, and permission management.
+- In scope: Email/password login for an existing Supabase Auth user, a login-only public page, local session persistence and logout, plus a daily-action Dashboard for project continuation, scan-based health/reminders/change comparison/recent activity, project list/detail and CRUD, public GitHub repository read-only snapshots, a local read-only companion for `D:\_Codex project`, Knowledge inbox, decision history, tasks and status filters, global search, contextual Mock AI, activity timeline, demo-data reset, system-aware Light/Dark theme, and the V2.1 AI provider/API contract seam.
+- Out of scope: Public registration, cloud database or account/device sync, Google login, password recovery flow, calling a real AI API, deploying a serverless route, RAG, private GitHub access, GitHub write operations/automation, scanning outside the fixed project root, reading scanned document bodies, PDF or live-web parsing, agents, and permission management.
 
 ## Constraints
 
-- Vanilla HTML, CSS, and JavaScript with no build step or required third-party dependency.
+- Vanilla HTML, CSS, and JavaScript with no build step; `supabase-js` is loaded from a pinned-major CDN import for Auth only.
+- The public `index.html` entry loads only `src/auth/gate.js`. The gate validates any persisted session with Supabase Auth before dynamically importing `src/app.js`; the unauthenticated branch must not load `src/store.js`, read workspace or scan-cache localStorage, or request Local Companion.
+- `src/auth/config.js` may contain only the Supabase project URL and public anon/publishable key. Disable new-user signups in the Supabase project settings; never include a service role key, password, or private token in browser code or GitHub.
+- Workspace content stays in the existing `daniel-workspace-v1` localStorage key with no cloud sync. The Supabase session is stored separately by the Supabase client. On logout, clear the private DOM and in-memory app/scan data and abort any active Companion request, while preserving Workspace localStorage for the next login on this browser.
+- Fresh-install demo records must contain generic sample content only: no real project names, private paths, or personal repository links.
 - Persist user content in browser `localStorage`; data does not synchronize between browsers or devices in V1.
 - Store the theme preference in the same versioned workspace object under `settings.theme`; use `system` by default and preserve the selected theme during demo reset.
 - Deleting a project keeps its tasks, knowledge, decisions, and activity, while clearing their project association.
@@ -40,6 +44,7 @@ Build a usable, local-first personal workspace that brings projects, notes, deci
 | 2026-09-29 | Read public GitHub metadata only on explicit refresh and cache it locally | Keep the V1 local-first model and avoid background requests, credentials, or repository writes |
 | 2026-09-29 | Read local project metadata through a loopback-only companion, without scanning document bodies or refreshing Git refs | Give the workspace useful local status while preserving the read-only boundary |
 | 2026-09-30 | Make Dashboard a daily action surface and compare scans with a compact browser-local baseline | Put current priorities, health issues, and recent changes ahead of demo counts while retaining read-only scanning |
+| 2026-09-30 | Place a Supabase email/password gate before the app module | Keep public Pages limited to a login screen and avoid reading local Workspace/Companion data before a verified session |
 
 ## Verification
 
@@ -49,3 +54,4 @@ Build a usable, local-first personal workspace that brings projects, notes, deci
 - V2.3 browser regression: local scan results and project/GitHub matching, details and document presence, Dashboard reminders, project issue Mock AI; V1 task create/complete/filter, Knowledge create/search, V2.2 public refresh and persisted snapshot. Companion API and static-file deny rules checked locally.
 - V2.4.1 verification: logon scheduled task uses `pythonw.exe` with a limited interactive token; API remains loopback-only and read-only; GitHub Pages CORS is restricted to the app origin; Dashboard loads, retains, and labels the last successful scan on failure; manual refresh updates the scan time and result.
 - V2.4 browser regression: real scan-driven continuation, metrics, actionable reminders, baseline comparisons, recent activity ordering, contextual Mock AI, both themes, mobile layout, and V1–V2.3 flows. Verify the compact baseline excludes project names and paths.
+- V2.5 browser verification must cover the public login-only page, no pre-auth localStorage/Companion access, existing-account password login, refreshed session, logout clearing the view, post-login 16-project scan, themes, and phone layout. Until Supabase configuration and an existing user are provisioned, report auth acceptance as pending rather than verified.

@@ -1,26 +1,32 @@
 # Daniel Workspace
 
-本地优先的个人 AI 工作台 V2.4.1。首页优先回答今天继续什么、工作区哪里需要处理、最近发生了什么；建议结合本机只读扫描、工作台 Tasks 和已缓存的公开 GitHub 快照。AI Assistant 仍使用本地 Mock，不需要登录或 Token。
+本地优先的私人 AI 工作台 V2.5。GitHub Pages 对未登录访客只显示登录页；现有 Supabase email/password 用户登录后，才加载当前浏览器的 Workspace 数据并连接本机只读 Companion。内容继续保存在本机 localStorage，不做云同步；AI Assistant 仍为本地 Mock。
 
 ## Status
 
-- **Stage:** V2.4.1 complete; local project scanner and GitHub reads are read-only; Real AI server route is reserved but not enabled
+- **Stage:** V2.5 login gate implemented; Supabase project configuration and an existing account are required before login can be accepted
 - **Last updated:** 2026-09-30
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
 ## Quick start
 
-需要 Python 3 和 Git。Windows 登录后，任务计划程序会静默启动 Companion（`pythonw.exe`，任务名 `DanielWorkspaceLocalCompanion`）；它会同时提供静态页面和只读扫描 API。也可以手动运行：
+先完成 [Supabase 登录配置](#v25-登录配置)。本地预览需要 Python 3 和 Git。Windows 登录后，任务计划程序会静默启动 Companion（`pythonw.exe`，任务名 `DanielWorkspaceLocalCompanion`）；它会同时提供静态页面和只读扫描 API。也可以手动运行：
 
 ```powershell
 python local_companion.py
 ```
 
-在浏览器打开 [http://127.0.0.1:4174](http://127.0.0.1:4174)。按 `Ctrl+K` 或 `⌘K` 聚焦全局搜索。首页启动时自动检查 Companion 并刷新扫描；暂时离线时继续展示当前浏览器保存的上次成功扫描，并标记数据可能不是最新。GitHub Pages 也会尝试从本机 `127.0.0.1:4174` 读取扫描；浏览器可能要求允许页面访问本地网络。
+在浏览器打开 [http://127.0.0.1:4174](http://127.0.0.1:4174) 并登录。登录前页面不会读取 Workspace/扫描缓存，也不会请求 Companion。登录后按 `Ctrl+K` 或 `⌘K` 聚焦全局搜索；GitHub Pages 会在登录后尝试从本机 `127.0.0.1:4174` 读取扫描，浏览器可能要求允许页面访问本地网络。
 
 手动控制 Companion：前台运行 `python local_companion.py` 时按 `Ctrl+C` 停止；开机任务启动的后台实例可在 PowerShell 执行 `Stop-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion"` 停止。取消后续登录自动启动，执行 `Unregister-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion" -Confirm:$false`。重新登录 Windows 会再次启动仍注册的任务。
 
 项目、资料、决策、任务与主题偏好保存在当前浏览器的 `localStorage`（同一浏览器配置和站点来源内）。刷新或重开页面后会保留；“重置演示数据”会恢复样例内容并保留主题选择。
+
+## V2.5 登录配置
+
+应用不提供注册入口。使用 Supabase Dashboard 的 Auth 设置关闭 **Allow new users to sign up**，并在 Dashboard 中预先创建/确认唯一的 email/password 用户。将项目 URL 和 **anon / publishable key** 填入 `src/auth/config.js`；这是可公开使用的前端配置，绝不填 `service_role` key、密码或访问令牌。将 GitHub Pages 地址加入 Supabase Auth 的 Site URL / Redirect URL 设置后发布。当前仓库中的配置值为空，因此未完成这些步骤前登录会保持关闭。
+
+登录门在 `getUser()` 成功验证会话前不会导入 `src/app.js`，读取 Workspace localStorage 或扫描缓存，也不会请求 Local Companion。退出会立即清空页面和应用内存并停止扫描请求；原有 `daniel-workspace-v1` 浏览器数据会保留，供此设备下一次成功登录继续使用。Supabase 只管理认证会话，不存储 Workspace 内容。
 
 ## V1 功能
 
@@ -30,6 +36,7 @@ python local_companion.py
 - 本地项目只读扫描：Projects 显示 `D:\_Codex project` 下发现的项目、路径、Git 仓库/分支/clean 状态、HEAD、`origin/main`、领先/落后、最近本地 commit、常见文档文件是否存在和最后修改时间。
 - 本地项目详情与 GitHub 仓库按安全提取的 GitHub owner/repository 地址优先匹配；详情展示完整本地 Git 与文档状态。
 - Dashboard 健康指标与提醒：按本地扫描统计 clean、未提交修改、ahead/behind、README/HANDOFF/TODO 缺失和超过 30 天未更新，并提供项目入口。
+- Authentication gate：Supabase 校验已有账号后才导入私人 Workspace 并读取本机数据；未登录只显示邮箱和密码表单，界面不提供注册入口。
 - Dashboard “自上次打开后”对比新 commit、Git 状态、文档、文件更新时间和同步变化；完整扫描只保留在页面内存，比较基线不保存本地路径或项目名。
 - Knowledge：添加、编辑、删除文本、笔记和网页链接，支持标签和项目关联。
 - Decisions：记录问题、方案、目标、时间、成本、风险、Mock AI 建议和最终决定。
@@ -48,7 +55,7 @@ python local_companion.py
 
 ### V2.2 GitHub 只读数据
 
-在 Projects 页面点“刷新 GitHub 数据”后，应用使用 GitHub Public API 读取填入的公开 `github.com/{owner}/{repo}` 地址：仓库名称、默认分支、更新时间、最新 commit 消息和时间、Public 状态，以及已启用时的 GitHub Pages URL。当匿名 Pages API 没有返回站点地址时，会显示按 GitHub Pages 默认命名规则推导的地址并标注“默认地址”。请求无登录、Token 或写操作。成功快照保存在 `localStorage`；请求失败会显示状态并保留上次成功快照。未配置仓库的项目继续使用现有本地信息。当前演示中的“个人工作台”指向本仓库，其余示例项目没有虚构仓库地址。
+在 Projects 页面点“刷新 GitHub 数据”后，应用使用 GitHub Public API 读取填入的公开 `github.com/{owner}/{repo}` 地址：仓库名称、默认分支、更新时间、最新 commit 消息和时间、Public 状态，以及已启用时的 GitHub Pages URL。当匿名 Pages API 没有返回站点地址时，会显示按 GitHub Pages 默认命名规则推导的地址并标注“默认地址”。请求无登录、Token 或写操作。成功快照保存在 `localStorage`；请求失败会显示状态并保留上次成功快照。V2.5 的初始示例项目不包含个人仓库地址或本机路径；已有浏览器中的用户数据保持不变。
 
 ### V2.3 本地项目只读 companion
 
@@ -67,6 +74,8 @@ python local_companion.py
 | Path | Purpose |
 | --- | --- |
 | `index.html` | 应用入口 |
+| `src/auth/gate.js` | Login-first session validation and private app boot |
+| `src/auth/config.js` | Public Supabase URL and anon/publishable-key configuration |
 | `src/app.js` | 页面、交互、Assistant 面板和记录表单 |
 | `src/ai/service.js` | 统一 chat 接口、provider 选择与安全回退 |
 | `src/ai/context.js` | 从当前页面构造最小相关上下文 |

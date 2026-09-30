@@ -1,13 +1,19 @@
-import { loadData, loadLocalScanBaseline, loadLocalScanCache, resetData, saveData, saveLocalScanBaseline, saveLocalScanCache } from "./store.js?v=2.4.1";
-import { buildAssistantContext } from "./ai/context.js";
-import { chat as chatWithAI, getAIStatus } from "./ai/service.js";
-import { fetchPublicGitHubRepository, parsePublicGitHubRepository } from "./github/public-api.js";
-import { buildLocalDashboardModel, compareLocalProjects } from "./dashboard.js";
+if (globalThis.DANIEL_WORKSPACE_AUTHENTICATED !== true) {
+  throw new Error("Workspace requires a validated Supabase session.");
+}
+
+const { loadData, loadLocalScanBaseline, loadLocalScanCache, resetData, saveData, saveLocalScanBaseline, saveLocalScanCache } = await import("./store.js?v=2.5.0");
+const { buildAssistantContext } = await import("./ai/context.js");
+const { chat: chatWithAI, getAIStatus } = await import("./ai/service.js");
+const { fetchPublicGitHubRepository, parsePublicGitHubRepository } = await import("./github/public-api.js");
+const { buildLocalDashboardModel, compareLocalProjects } = await import("./dashboard.js");
 
 const app = document.querySelector("#app");
 let db = loadData();
-const scanCache = loadLocalScanCache();
+let scanCache = loadLocalScanCache();
 const localScanEndpoint = getLocalScanEndpoint();
+let workspaceActive = true;
+let activeLocalScanController = null;
 const ui = {
   page: "home",
   projectId: null,
@@ -178,7 +184,28 @@ function formattedDate() {
 }
 
 function persist() {
+  if (!workspaceActive) return;
   saveData(db);
+}
+
+export function clearPrivateWorkspace() {
+  if (!workspaceActive) return;
+  workspaceActive = false;
+  activeLocalScanController?.abort();
+  activeLocalScanController = null;
+  db = { version: 1, settings: { theme: "system" }, projects: [], tasks: [], knowledge: [], decisions: [], activities: [] };
+  scanCache = { inventory: null, readable: true };
+  ui.localProjects = null;
+  ui.localProjectsSource = null;
+  ui.localProjectsStatus = "unavailable";
+  ui.localComparison = null;
+  ui.localScanAttemptAt = "";
+  ui.chat = [];
+  ui.modal = null;
+  ui.confirmation = null;
+  ui.assistantOpen = false;
+  ui.query = "";
+  app.replaceChildren();
 }
 
 function logActivity(type, title, projectId = null) {
@@ -394,7 +421,7 @@ function renderProjects() {
   const connectionLabel = hasRequestFailure ? "GitHub 请求失败" : !configured.length ? "GitHub 未配置" : connectedCount ? "GitHub 已连接" : "GitHub 待刷新";
   const localProjects = ui.localProjects?.items || [];
   const scanLabel = ui.localProjectsStatus === "ready" ? `${localProjects.length} 个项目 · 在线` : ui.localProjectsStatus === "loading" ? (ui.localProjects ? `检测中 · 缓存 ${localProjects.length} 个` : "正在连接") : ui.localProjects ? `${localProjects.length} 个项目 · 可能过期` : "Companion 离线";
-  const localSection = `<section class="local-project-section"><div class="section-title"><div><h2>本地项目</h2><p class="local-section-note">只读扫描 D:\\_Codex project；不会修改项目文件或联网刷新 Git。</p></div><div class="heading-actions"><span class="github-overview-status">${esc(scanLabel)}</span><button class="button small" data-action="refresh-local-projects" ${ui.localProjectsStatus === "loading" ? "disabled aria-busy=\"true\"" : ""}>${icon("reset")} 重新扫描</button></div></div>${localProjects.length ? `<div class="local-project-list">${localProjects.map((item) => {
+  const localSection = `<section class="local-project-section"><div class="section-title"><div><h2>本地项目</h2><p class="local-section-note">只读扫描指定的本地项目根目录；不会修改项目文件或联网刷新 Git。</p></div><div class="heading-actions"><span class="github-overview-status">${esc(scanLabel)}</span><button class="button small" data-action="refresh-local-projects" ${ui.localProjectsStatus === "loading" ? "disabled aria-busy=\"true\"" : ""}>${icon("reset")} 重新扫描</button></div></div>${localProjects.length ? `<div class="local-project-list">${localProjects.map((item) => {
     const linked = workspaceProjectForLocal(item);
     const repository = safeExternal(item.githubRepository || "");
     const gitLabel = localGitLabel(item);
@@ -537,7 +564,7 @@ function pageTitle() {
 
 function renderNav() {
   const items = [["home", "grid", "Home"], ["projects", "folder", "Projects"], ["knowledge", "inbox", "Knowledge"], ["decisions", "bulb", "Decisions"], ["tasks", "checkSquare", "Tasks"]];
-  return `<aside class="sidebar"><div class="brand"><div class="brand-mark">D</div><div><div class="brand-name">Daniel Workspace · V2.4.1</div><div class="brand-caption">个人 AI 工作台</div></div></div><div class="nav-label">Workspace</div><nav class="nav-list" aria-label="主导航">${items.map(([page, iconName, label]) => `<button class="nav-item ${(ui.page === page || (ui.page === "project" && page === "projects")) ? "active" : ""}" data-page="${page}">${icon(iconName)}<span>${label}</span>${page === "tasks" ? `<span class="nav-count">${openTasks().length}</span>` : ""}</button>`).join("")}</nav><div class="sidebar-spacer"></div><div class="workspace-mini"><div class="avatar">D</div><div><div class="workspace-title">Daniel 的工作区</div><div class="workspace-sub">仅保存在此浏览器</div></div><button class="icon-button" data-action="reset-demo" title="重置演示数据" aria-label="重置演示数据">${icon("more")}</button></div><div class="sidebar-footer"><span class="local-label"><span class="local-dot"></span> 本地数据已启用</span><button class="icon-button" data-action="reset-demo" title="重置演示数据" aria-label="重置演示数据">${icon("reset")}</button></div></aside>`;
+  return `<aside class="sidebar"><div class="brand"><div class="brand-mark">D</div><div><div class="brand-name">Daniel Workspace · V2.5</div><div class="brand-caption">个人 AI 工作台</div></div></div><div class="nav-label">Workspace</div><nav class="nav-list" aria-label="主导航">${items.map(([page, iconName, label]) => `<button class="nav-item ${(ui.page === page || (ui.page === "project" && page === "projects")) ? "active" : ""}" data-page="${page}">${icon(iconName)}<span>${label}</span>${page === "tasks" ? `<span class="nav-count">${openTasks().length}</span>` : ""}</button>`).join("")}</nav><div class="sidebar-spacer"></div><div class="workspace-mini"><div class="avatar">D</div><div><div class="workspace-title">Daniel 的工作区</div><div class="workspace-sub">仅保存在此浏览器</div></div><button class="icon-button" data-action="reset-demo" title="重置演示数据" aria-label="重置演示数据">${icon("more")}</button></div><div class="sidebar-footer"><span class="local-label"><span class="local-dot"></span> 本地数据已启用</span><button class="icon-button" data-action="reset-demo" title="重置演示数据" aria-label="重置演示数据">${icon("reset")}</button></div></aside>`;
 }
 
 function searchItems(query) {
@@ -619,7 +646,7 @@ function renderModal() {
 
   if (kind === "project") {
     title = isEdit ? "编辑项目" : "新建项目"; subtitle = "记录当前阶段、路径与下一步。";
-    form = `<div class="form-grid">${field("项目名称", "name", existing?.name || "", { full: true })}${field("项目简介", "description", existing?.description || "", { full: true, textarea: true, short: true, required: false, placeholder: "这个项目要解决什么问题？" })}${field("当前状态", "status", existing?.status || "计划中", { select: ["计划中", "进行中", "暂停", "已完成"].map((x) => `<option ${x === (existing?.status || "计划中") ? "selected" : ""}>${x}</option>`).join("") })}${field("当前阶段", "stage", existing?.stage || "", { placeholder: "例如：原型验证" })}${field("本地路径", "path", existing?.path || "", { full: true, optional: true, required: false, placeholder: "D:\\Projects\\my-project" })}${field("GitHub 地址", "github", existing?.github || "", { optional: true, required: false, placeholder: "https://github.com/..." })}${field("在线网址", "url", existing?.url || "", { optional: true, required: false, placeholder: "https://..." })}${field("下一步", "next", existing?.next || "", { full: true, textarea: true, short: true, required: false })}</div>`;
+    form = `<div class="form-grid">${field("项目名称", "name", existing?.name || "", { full: true })}${field("项目简介", "description", existing?.description || "", { full: true, textarea: true, short: true, required: false, placeholder: "这个项目要解决什么问题？" })}${field("当前状态", "status", existing?.status || "计划中", { select: ["计划中", "进行中", "暂停", "已完成"].map((x) => `<option ${x === (existing?.status || "计划中") ? "selected" : ""}>${x}</option>`).join("") })}${field("当前阶段", "stage", existing?.stage || "", { placeholder: "例如：原型验证" })}${field("本地路径", "path", existing?.path || "", { full: true, optional: true, required: false, placeholder: "本机项目路径" })}${field("GitHub 地址", "github", existing?.github || "", { optional: true, required: false, placeholder: "https://github.com/..." })}${field("在线网址", "url", existing?.url || "", { optional: true, required: false, placeholder: "https://..." })}${field("下一步", "next", existing?.next || "", { full: true, textarea: true, short: true, required: false })}</div>`;
   } else if (kind === "task") {
     title = isEdit ? "编辑任务" : "新建任务"; subtitle = "任务保存在本地，可以随时调整优先级和关联项目。";
     const selectedProject = existing?.projectId || ui.modal.projectId || "";
@@ -638,8 +665,9 @@ function renderModal() {
 }
 
 function render() {
+  if (!workspaceActive) return;
   const page = ui.page === "home" ? renderDashboard() : ui.page === "projects" ? renderProjects() : ui.page === "project" ? renderProjectDetail() : ui.page === "local-project" ? renderLocalProjectDetail() : ui.page === "tasks" ? renderTasks() : ui.page === "knowledge" ? renderKnowledge() : renderDecisions();
-  app.innerHTML = `${renderNav()}<main class="main-shell"><header class="topbar"><div class="breadcrumbs"><span>Daniel Workspace</span><span class="crumb-sep">/</span><strong>${esc(pageTitle())}</strong></div><div class="search-wrap"><div class="search-box">${icon("search")}<input id="global-search" type="search" value="${esc(ui.query)}" placeholder="搜索项目、资料、决策或任务…" autocomplete="off" aria-label="全局搜索"/><kbd class="search-hint">Ctrl K</kbd></div><div id="search-results"></div></div><div class="topbar-actions"><span class="today-label">${formattedDate()}</span><button class="icon-button theme-toggle" data-action="toggle-theme" title="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式" aria-label="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式">${icon(document.documentElement.dataset.theme === "light" ? "moon" : "sun")}</button><button class="icon-button" data-action="open-assistant" title="打开 AI Assistant" aria-label="打开 AI Assistant">${icon("sparkle")}</button><span class="top-avatar">D</span></div></header><div class="content">${page}</div></main>${renderAssistant()}${renderModal()}<div class="toast-region" id="toast-region" aria-live="polite"></div>`;
+  app.innerHTML = `${renderNav()}<main class="main-shell"><header class="topbar"><div class="breadcrumbs"><span>Daniel Workspace</span><span class="crumb-sep">/</span><strong>${esc(pageTitle())}</strong></div><div class="search-wrap"><div class="search-box">${icon("search")}<input id="global-search" type="search" value="${esc(ui.query)}" placeholder="搜索项目、资料、决策或任务…" autocomplete="off" aria-label="全局搜索"/><kbd class="search-hint">Ctrl K</kbd></div><div id="search-results"></div></div><div class="topbar-actions"><span class="today-label">${formattedDate()}</span><button class="icon-button theme-toggle" data-action="toggle-theme" title="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式" aria-label="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式">${icon(document.documentElement.dataset.theme === "light" ? "moon" : "sun")}</button><button class="icon-button" data-action="open-assistant" title="打开 AI Assistant" aria-label="打开 AI Assistant">${icon("sparkle")}</button><button class="button quiet small logout-button" data-action="logout">退出登录</button></div></header><div class="content">${page}</div></main>${renderAssistant()}${renderModal()}<div class="toast-region" id="toast-region" aria-live="polite"></div>`;
   renderSearchResults();
   if (ui.assistantOpen) document.querySelector("#assistant-messages")?.scrollTo({ top: 999999, behavior: "smooth" });
 }
@@ -788,6 +816,7 @@ async function refreshGitHubData(projectId = null) {
 }
 
 async function refreshLocalProjects() {
+  if (!workspaceActive) return;
   if (!localScanEndpoint) {
     ui.localProjectsStatus = "unavailable";
     ui.localScanAttemptAt = new Date().toISOString();
@@ -797,6 +826,7 @@ async function refreshLocalProjects() {
   ui.localProjectsStatus = "loading";
   render();
   const controller = new AbortController();
+  activeLocalScanController = controller;
   const timeoutId = setTimeout(() => controller.abort(), 60000);
   try {
     const response = await fetch(localScanEndpoint, {
@@ -808,6 +838,7 @@ async function refreshLocalProjects() {
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const inventory = await response.json();
+    if (!workspaceActive) return;
     if (!Array.isArray(inventory.items) || typeof inventory.scannedAt !== "string") throw new Error("Invalid local project inventory");
     const prior = loadLocalScanBaseline();
     const comparison = compareLocalProjects(inventory.items, prior.baseline, inventory.scannedAt);
@@ -828,13 +859,15 @@ async function refreshLocalProjects() {
     ui.localProjectsStatus = "ready";
     ui.localScanAttemptAt = inventory.scannedAt;
   } catch (error) {
+    if (!workspaceActive) return;
     ui.localProjectsStatus = ui.localProjects ? "error" : "unavailable";
     ui.localProjectsSource = ui.localProjects ? "cache" : null;
     ui.localScanAttemptAt = new Date().toISOString();
   } finally {
     clearTimeout(timeoutId);
+    if (activeLocalScanController === controller) activeLocalScanController = null;
   }
-  render();
+  if (workspaceActive) render();
 }
 
 function handleSearchResult(kind, id) {

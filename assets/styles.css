@@ -410,6 +410,28 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
 
+.login-screen { min-height: 100vh; min-height: 100svh; display: grid; place-items: center; padding: 24px; }
+.login-card { width: min(100%, 390px); padding: 34px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); box-shadow: 0 24px 80px rgb(0 0 0 / 16%); }
+.login-mark { width: 36px; height: 36px; display: grid; place-items: center; margin-bottom: 20px; border: 1px solid #464451; border-radius: 11px; color: #d4d0ff; background: #24232d; font: 700 16px Manrope, sans-serif; }
+.login-card h1 { font-size: 23px; }
+.login-subtitle { margin: 8px 0 25px; color: var(--muted); font-size: 13px; }
+.login-form { display: grid; gap: 9px; }
+.login-form label { margin-top: 4px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.login-form input { width: 100%; min-height: 42px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--panel-raised); font-size: 14px; }
+.login-form input:focus { border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 28%, transparent); }
+.login-submit { min-height: 42px; margin-top: 9px; border: 1px solid #c6c2ff; border-radius: 8px; color: #171620; background: #bbb6ff; font-size: 13px; font-weight: 700; cursor: pointer; }
+.login-submit:hover { background: #cfccff; }
+.login-submit:disabled { opacity: .65; cursor: wait; }
+.login-status { min-height: 18px; margin: 2px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.login-status:empty { display: none; }
+.login-status.error { color: var(--red); }
+[data-theme="light"] .login-card { box-shadow: 0 24px 80px rgb(28 35 48 / 10%); }
+
+@media (max-width: 430px) {
+  .login-screen { padding: 16px; }
+  .login-card { padding: 26px 22px; }
+}
+
 :root[data-theme="light"] {
   color-scheme: light;
   --bg: #f4f5f7;

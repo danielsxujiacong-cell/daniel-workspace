@@ -3,20 +3,29 @@
 ## Current state
 
 - **Updated:** 2026-09-30
-- **Status:** V2.4.1 is complete and pushed to `main` at `e8825fd`; GitHub Pages is served with cache-busted V2.4.1 assets. The `DanielWorkspaceLocalCompanion` logon task is installed and running silently through `pythonw.exe` on `127.0.0.1:4174`.
-- **Last completed:** Added startup detection, live rescanning, explicit offline/error status, and browser-local preservation of the last successful scan. Verified the local app and GitHub Pages load 16 real projects, a rescan advances the scan timestamp, and stopping the Companion leaves cached project data visible with a possibly-stale label. Companion remains a loopback-only read-only scanner; GitHub Pages CORS is limited to the exact Pages origin. Task Scheduler's logon trigger is registered and its action was started and stopped successfully in-session; Windows itself has not been restarted/logged out for a reboot-cycle test.
+- **Status:** V2.5 authentication gate is implemented. The public entry fails closed because `src/auth/config.js` still has empty Supabase URL and anon/publishable key values.
+- **Last completed:** The public entry loads only `src/auth/gate.js`. It verifies a persisted Supabase session with `getUser()` before importing the Workspace app. Logout clears the page and app memory and aborts the active Local Companion scan. Fresh-install demo data no longer includes a personal repository URL or local paths. A high-confidence secret scan of the working tree and reachable Git history found no matches.
+- **Not verified yet:** Login with the real account, refreshed-session access, logged-in Companion scan of 16 projects, and end-to-end published Pages behavior all depend on Supabase project configuration and a provisioned existing user.
 
 ## Next action
 
-The Companion is configured to start at user logon via Task Scheduler. To stop it now, run `Stop-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion"`. To disable automatic startup, run `Unregister-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion" -Confirm:$false`. To run it manually in the foreground, use `python local_companion.py` and press Ctrl+C to stop it. The scanner still scans only `D:\_Codex project`, checks document names without reading contents, compares only cached `origin/main` refs, and never mutates repositories. Real AI remains disabled; the `/api/chat` contract and server-only key boundary are unchanged. No V2.5 work is in scope.
+Configure Supabase Auth, then finish browser acceptance:
+
+1. In Supabase Auth settings, disable **Allow new users to sign up**; create or confirm the one existing email/password account in the Dashboard.
+2. Add the project URL and public anon/publishable key to `src/auth/config.js`. Never use a `service_role` key or put a password/token in GitHub.
+3. Add the GitHub Pages origin to the Supabase Auth site/redirect URL settings, then publish the config change.
+4. Verify logged-out Pages shows only the login form and makes no Companion request or Workspace/cache localStorage read; sign in, reload, scan 16 local projects, test Light/Dark and a phone viewport, then sign out and confirm private DOM is cleared.
+
+Do not begin V2.6 until the user requests it.
 
 ## How to resume
 
-1. Inspect Git status and safely pull if clean.
-2. Confirm the scheduled task is running, or start it with `Start-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion"`.
-3. Open `http://localhost:4174` or the GitHub Pages URL. Review `README.md` and `docs/PROJECT_CONTEXT.md`.
+1. Read this file, `README.md`, and `docs/PROJECT_CONTEXT.md`; inspect Git state and synchronize safely.
+2. Complete the Supabase setup above and keep the signup setting disabled.
+3. Run `python local_companion.py` if the installed logon task is not active, open `http://127.0.0.1:4174`, then test auth and the post-login scan.
 
 ## Open questions or risks
 
-- `localStorage` is browser-specific and does not sync across devices. The last successful local scan is held in a separate browser-local cache. Reset Demo Data replaces this browser's custom workspace with the built-in sample data.
-- The logon trigger and hidden `pythonw.exe` action are verified, but a full Windows restart/login remains untested because it would interrupt the active work session.
+- `src/auth/config.js` intentionally contains empty values, so login is unavailable until the existing Supabase project URL and public client key are configured. No Supabase project credentials or test password were present in the workspace.
+- Existing `daniel-workspace-v1` data and scan caches remain in the same browser localStorage and are not read before authentication; no cloud sync was added.
+- The client auth session persists locally through the Supabase SDK. Workspace content remains local to this device and browser profile.
