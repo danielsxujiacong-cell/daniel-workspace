@@ -2,6 +2,7 @@
 
 ## 2026-09-30 · V2.5 (acceptance pending)
 
+- Fixed delegated login submission to use the submitted form instead of the `#app` event listener target; added visible in-progress and actionable error states so handler failures cannot leave the button inert.
 - Added an authentication-first public entry: the private app module, Workspace localStorage, scan caches, and Local Companion are not loaded before Supabase validates an existing email/password session.
 - Added a minimal responsive login page, persistent Supabase client session, logout that clears the private page and app memory, and no public registration UI.
 - Replaced personal repository/path values in fresh-install demo data with empty generic fields; existing browser Workspace data remains local and compatible.

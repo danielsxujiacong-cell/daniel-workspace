@@ -3,16 +3,16 @@
 ## Current state
 
 - **Updated:** 2026-09-30
-- **Status:** V2.5 code and the sole allowed user's UUID are configured and deployed at commit `81939d7`. Public Auth settings confirm new-user signup is disabled. The user reports the GitHub Pages Site URL and Redirect URL are configured.
-- **Last completed:** Reused only the public client config from `D:\_Codex project\04_Web\lanlan-cloud-pet\supabase-config.js`. Live Pages index, auth gate, and auth config return HTTP 200 with the expected project URL, UUID, and public key prefix. The entry loads only `src/auth/gate.js`; it verifies `getUser()` and the UUID allowlist before importing the Workspace app. The gate module itself has no Companion URL. Logout clears the private page and app memory and aborts the active Local Companion scan. Fresh-install demo data contains no personal repository URL or local project names. No service-role key, password, or private token was copied.
-- **Not verified yet:** Real online login, refreshed-session access, logout, and logged-in Companion scan of 16 projects. The public Auth settings endpoint does not expose Site URL/Redirect URL values, so those remain user-reported. The user must enter the existing password directly in the open login page; do not request or store it.
+- **Status:** Investigating a V2.5 login-submit bug reported from Pages. The error screenshot shows the delegated handler receives `#app` as `event.currentTarget`, then reads `form.elements.email` before its `try` block. This throws before setting the busy state or calling `signInWithPassword()`.
+- **Last completed:** V2.5 is deployed at `b298a7d`; public Auth settings confirm signup is disabled. The user-provided Site URL/Redirect URL are reported configured. Existing source confirms the Pages entry loads only the auth gate, the allowlisted user UUID is configured, and the Companion is only reachable after Workspace import. No password or private key was copied.
+- **Next:** Fix the handler to accept the submitted form target, resolve fields by ID, and show all initialization/request errors in the page. Bump the gate asset version, run syntax/whitespace checks, push, wait for Pages, then verify a synthetic invalid-credential submit reaches Supabase Auth and produces a visible response. Never use or request the user's real password.
 
 ## Next action
 
-Finish browser acceptance:
+Finish browser acceptance after the submit bug fix is deployed:
 
-1. Have the user enter the existing password directly in the open Pages login form. Never collect the password.
-2. Verify session persistence after reload, scan 16 local projects, test Light/Dark and a phone viewport, then sign out and confirm private DOM is cleared.
+1. Use synthetic invalid credentials to confirm the button calls Supabase Auth and displays its response; never use the user's password.
+2. Have the user enter the existing password directly in the Pages form if real login acceptance is required; never collect the password. Then verify session persistence after reload, scan 16 local projects, and sign out.
 
 Do not begin V2.6 until the user requests it.
 

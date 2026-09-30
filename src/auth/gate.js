@@ -1,4 +1,4 @@
-import { SUPABASE_ALLOWED_USER, SUPABASE_ANON_KEY, SUPABASE_URL } from "./config.js?v=2.5.1";
+import { SUPABASE_ALLOWED_USER, SUPABASE_ANON_KEY, SUPABASE_URL } from "./config.js?v=2.5.2";
 
 const app = document.querySelector("#app");
 const colorScheme = window.matchMedia("(prefers-color-scheme: light)");
@@ -8,6 +8,7 @@ let workspaceModule = null;
 let workspaceVisible = false;
 let signInBusy = false;
 let signOutBusy = false;
+let authInitializationError = "";
 
 document.documentElement.dataset.theme = colorScheme.matches ? "light" : "dark";
 
@@ -53,6 +54,17 @@ function unauthorizedMessage() {
     : "登录配置尚未指定唯一允许账号，工作台保持锁定。";
 }
 
+function loginErrorMessage(error) {
+  const message = typeof error?.message === "string" ? error.message.trim() : "";
+  const status = Number(error?.status) || 0;
+  if (/invalid login credentials|invalid credentials/i.test(message)) return "邮箱或密码不正确，请检查后重试。";
+  if (/failed to fetch|networkerror|load failed|fetch failed/i.test(message)) return "无法连接 Supabase Auth。请检查网络和 Supabase 项目 URL 后重试。";
+  if (/invalid api key/i.test(message)) return "Supabase 公共 API key 无效，请检查前端配置。";
+  if (status === 429) return "登录尝试过多，请稍后再试。";
+  if (message) return `登录失败：${message}`;
+  return status ? `登录失败（HTTP ${status}），请稍后重试。` : "登录过程中发生意外错误，请刷新页面后重试。";
+}
+
 async function enterWorkspace(user) {
   if (workspaceVisible) return;
   if (!isAllowedUser(user)) throw new Error("Unauthorized user");
@@ -86,23 +98,47 @@ function clearAuthSessionStorage() {
   }
 }
 
-async function handleLogin(event) {
-  event.preventDefault();
-  if (signInBusy || signOutBusy) return;
-  if (!isConfigured() || !authClient) {
-    setLoginStatus("登录服务尚未配置，暂时无法登录。");
+function recoverLoginForm(form, error) {
+  signInBusy = false;
+  const submit = form?.querySelector('button[type="submit"]');
+  const passwordInput = form?.querySelector("#login-password");
+  if (passwordInput) passwordInput.value = "";
+  if (submit) {
+    submit.disabled = false;
+    submit.textContent = "登录";
+  }
+  setLoginStatus(loginErrorMessage(error));
+}
+
+async function handleLogin(form) {
+  if (signInBusy || signOutBusy) {
+    setLoginStatus("登录正在处理中，请稍候。", false);
     return;
   }
 
-  const form = event.currentTarget;
-  const submit = form.querySelector("button[type=submit]");
-  const email = form.elements.email.value.trim();
-  const password = form.elements.password.value;
+  const submit = form.querySelector('button[type="submit"]');
+  const emailInput = form.querySelector("#login-email");
+  const passwordInput = form.querySelector("#login-password");
+  if (!submit || !emailInput || !passwordInput) {
+    setLoginStatus("登录表单未正确加载，请刷新页面后重试。");
+    return;
+  }
+  if (!isConfigured()) {
+    setLoginStatus("Supabase 登录配置不完整，暂时无法登录。");
+    return;
+  }
+  if (!authClient) {
+    setLoginStatus(authInitializationError || "登录服务正在初始化，请稍后重试。", false);
+    return;
+  }
+
   signInBusy = true;
   submit.disabled = true;
   submit.textContent = "正在登录…";
-  setLoginStatus("");
+  setLoginStatus("正在连接 Supabase Auth…", false);
   try {
+    const email = emailInput.value.trim();
+    const password = passwordInput.value;
     const { error } = await authClient.auth.signInWithPassword({ email, password });
     if (error) throw error;
     const { data: { user }, error: userError } = await authClient.auth.getUser();
@@ -110,22 +146,20 @@ async function handleLogin(event) {
     if (!isAllowedUser(user)) {
       await authClient.auth.signOut({ scope: "local" }).catch(() => {});
       clearAuthSessionStorage();
-      const passwordField = form.elements.password;
-      if (passwordField) passwordField.value = "";
+      passwordInput.value = "";
       setLoginStatus(unauthorizedMessage());
-      submit.disabled = false;
-      submit.textContent = "登录";
       return;
     }
     await enterWorkspace(user);
-  } catch {
-    const passwordField = form.elements.password;
-    if (passwordField) passwordField.value = "";
-    setLoginStatus("邮箱或密码不正确，或登录服务暂不可用。");
-    submit.disabled = false;
-    submit.textContent = "登录";
+  } catch (error) {
+    passwordInput.value = "";
+    setLoginStatus(loginErrorMessage(error));
   } finally {
     signInBusy = false;
+    if (submit.isConnected) {
+      submit.disabled = false;
+      submit.textContent = "登录";
+    }
   }
 }
 
@@ -147,7 +181,10 @@ async function handleLogout() {
 }
 
 app.addEventListener("submit", (event) => {
-  if (event.target.id === "login-form") void handleLogin(event);
+  const form = event.target;
+  if (!(form instanceof HTMLFormElement) || form.id !== "login-form") return;
+  event.preventDefault();
+  void handleLogin(form).catch((error) => recoverLoginForm(form, error));
 });
 
 // Handle logout before the authenticated application's delegated click listener.
@@ -186,9 +223,10 @@ async function boot() {
       return;
     }
     await enterWorkspace(user);
-  } catch {
+  } catch (error) {
     authClient = null;
-    showLogin("登录服务暂不可用，请检查网络或认证配置。");
+    authInitializationError = `登录服务初始化失败：${loginErrorMessage(error)}`;
+    showLogin(authInitializationError);
   }
 }
 
