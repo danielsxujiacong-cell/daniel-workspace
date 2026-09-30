@@ -3,16 +3,15 @@
 ## Current state
 
 - **Updated:** 2026-09-30
-- **Status:** Investigating a V2.5 login-submit bug reported from Pages. The error screenshot shows the delegated handler receives `#app` as `event.currentTarget`, then reads `form.elements.email` before its `try` block. This throws before setting the busy state or calling `signInWithPassword()`.
-- **Last completed:** V2.5 is deployed at `b298a7d`; public Auth settings confirm signup is disabled. The user-provided Site URL/Redirect URL are reported configured. Existing source confirms the Pages entry loads only the auth gate, the allowlisted user UUID is configured, and the Companion is only reachable after Workspace import. No password or private key was copied.
-- **Next:** Fix the handler to accept the submitted form target, resolve fields by ID, and show all initialization/request errors in the page. Bump the gate asset version, run syntax/whitespace checks, push, wait for Pages, then verify a synthetic invalid-credential submit reaches Supabase Auth and produces a visible response. Never use or request the user's real password.
+- **Status:** V2.5 login-submit fix deployed at `42c4f58`; source and deployed assets show the delegated handler uses the submitted form, displays progress/errors, and calls `signInWithPassword()`.
+- **Last completed:** GitHub Pages reports `built`; live index, auth gate, and config return HTTP 200 and the entry loads auth gate `v2.5.2`. The deployed gate contains the form-target fix and visible error handling. A synthetic invalid-credential POST to this project's Supabase Auth endpoint returned HTTP 400 as expected. Public Auth settings confirm signup is disabled. The user-provided Site URL/Redirect URL are reported configured. No real password or private key was copied.
+- **Not verified yet:** An automated browser tab could not be bound, so there is no observed click-through from the live page. The user's real successful login, refreshed-session access, logout, and logged-in Companion scan of 16 projects still require direct acceptance in the browser; never collect the password.
 
 ## Next action
 
-Finish browser acceptance after the submit bug fix is deployed:
+Finish browser acceptance:
 
-1. Use synthetic invalid credentials to confirm the button calls Supabase Auth and displays its response; never use the user's password.
-2. Have the user enter the existing password directly in the Pages form if real login acceptance is required; never collect the password. Then verify session persistence after reload, scan 16 local projects, and sign out.
+1. Have the user enter the existing password directly in the Pages form and confirm the page responds; never collect the password. Then verify session persistence after reload, scan 16 local projects, and sign out.
 
 Do not begin V2.6 until the user requests it.
 
