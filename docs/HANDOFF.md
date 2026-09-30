@@ -3,8 +3,8 @@
 ## Current state
 
 - **Updated:** 2026-09-30
-- **Status:** V2.4 Dashboard implementation and regression are complete; final GitHub push and Pages deployment verification are part of this handoff.
-- **Last completed:** Rebuilt Dashboard around the best next project, live scan health, actionable findings, changes since the prior scan, and recently active local projects. Mock AI uses the current scan, cached GitHub snapshot, tasks, and document presence. The Companion remains read-only; a minimal browser-local baseline stores hashed identity, Git/document state, and modification time without project names or paths.
+- **Status:** V2.4 is complete and pushed to `main`; GitHub Pages built implementation commit `78ed0ac`, and the live page plus JavaScript/CSS resources returned HTTP 200.
+- **Last completed:** Rebuilt Dashboard around the best next project, live scan health, actionable findings, changes since the prior scan, and recently active local projects. Mock AI uses the current scan, cached GitHub snapshot, tasks, and document presence. The Companion remains read-only; a minimal browser-local baseline stores hashed identity, Git/document state, and modification time without project names or paths. Local acceptance scanned 16 projects; all 16 were clean, with 2 missing README, 1 missing HANDOFF, and 16 missing TODO.
 
 ## Next action
 
