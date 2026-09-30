@@ -4,7 +4,7 @@
 
 ## Status
 
-- **Stage:** V2.5 login gate and public Supabase client configuration are in place; one allowed account and Supabase Dashboard settings remain to be confirmed
+- **Stage:** V2.5 login gate, public Supabase client configuration, and single-user allowlist are in place; online auth acceptance is pending
 - **Last updated:** 2026-09-30
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -24,9 +24,9 @@ python local_companion.py
 
 ## V2.5 登录配置
 
-应用不提供注册入口。当前 `src/auth/config.js` 已使用本机“云养猫 / 蓝蓝”项目的 URL 和 **publishable key**。Supabase Dashboard 中请进入 **Authentication → Settings**，关闭 **Allow new users to sign up**；再进入 **Authentication → URL Configuration**，将 **Site URL** 设为 `https://danielsxujiacong-cell.github.io/daniel-workspace/`，并将同一地址加入 **Redirect URLs**。Dashboard 当前未对本任务开放，因此这些设置尚待控制台确认。
+应用不提供注册入口。`src/auth/config.js` 使用本机“云养猫 / 蓝蓝”项目的 URL 和 **publishable key**，并只允许指定的 Supabase 用户 UUID。Supabase Dashboard 已关闭 **Allow new users to sign up**；**Site URL** 和 **Redirect URLs** 已按下方 Pages 地址配置。
 
-`src/auth/config.js` 的 `SUPABASE_ALLOWED_USER` 必须填唯一账号的 Supabase User UUID 或登录邮箱；建议用 User UUID，避免把邮箱放进公开源码。留空时默认拒绝所有账号。只允许已存在的 Email + Password 账号登录，不能从应用注册。项目 URL 和 publishable key 属于公开前端配置；绝不填 `service_role` key、数据库密码、用户密码或私密 Token。
+`src/auth/config.js` 的 `SUPABASE_ALLOWED_USER` 设为唯一允许账号的 User UUID；留空时默认拒绝所有账号。只允许已存在的 Email + Password 账号登录，不能从应用注册。项目 URL 和 publishable key 属于公开前端配置；绝不填 `service_role` key、数据库密码、用户密码或私密 Token。
 
 登录门在 `getUser()` 成功验证会话前不会导入 `src/app.js`，读取 Workspace localStorage 或扫描缓存，也不会请求 Local Companion。退出会立即清空页面和应用内存并停止扫描请求；原有 `daniel-workspace-v1` 浏览器数据会保留，供此设备下一次成功登录继续使用。Supabase 只管理认证会话，不存储 Workspace 内容。
 

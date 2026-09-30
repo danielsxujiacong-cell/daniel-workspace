@@ -6,8 +6,8 @@
 - Added a minimal responsive login page, persistent Supabase client session, logout that clears the private page and app memory, and no public registration UI.
 - Replaced personal repository/path values in fresh-install demo data with empty generic fields; existing browser Workspace data remains local and compatible.
 - Configured the project URL and public publishable key from the local Lanlan Cloud Pet project; no service-role key or password was used.
-- Added a single-user Auth allowlist. It fails closed while the allowed user's UUID/email is blank.
-- The Supabase Dashboard signup/URL settings, allowed account identifier, and real login/refresh/logout/16-project scan acceptance remain pending.
+- Added the sole allowed user's UUID to the Auth allowlist; blank configuration still fails closed.
+- Verified via the public Auth settings endpoint that new-user signup is disabled. Site URL/Redirect URL were reported configured; real login/refresh/logout/16-project scan acceptance remains pending.
 
 ## 2026-09-30 · V2.4.1
 

@@ -1,4 +1,4 @@
-import { SUPABASE_ALLOWED_USER, SUPABASE_ANON_KEY, SUPABASE_URL } from "./config.js";
+import { SUPABASE_ALLOWED_USER, SUPABASE_ANON_KEY, SUPABASE_URL } from "./config.js?v=2.5.1";
 
 const app = document.querySelector("#app");
 const colorScheme = window.matchMedia("(prefers-color-scheme: light)");
@@ -110,6 +110,8 @@ async function handleLogin(event) {
     if (!isAllowedUser(user)) {
       await authClient.auth.signOut({ scope: "local" }).catch(() => {});
       clearAuthSessionStorage();
+      const passwordField = form.elements.password;
+      if (passwordField) passwordField.value = "";
       setLoginStatus(unauthorizedMessage());
       submit.disabled = false;
       submit.textContent = "登录";
