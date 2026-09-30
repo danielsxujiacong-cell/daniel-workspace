@@ -1,4 +1,4 @@
-"""Read-only local companion for Daniel Workspace V2.3.
+"""Read-only local companion for Daniel Workspace V2.4.1.
 
 Serves this app on loopback and exposes a single read-only project inventory
 endpoint. It never writes to scanned repositories or runs network Git commands.
@@ -10,6 +10,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -20,6 +21,7 @@ APP_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = Path(r"D:\_Codex project")
 HOST = "127.0.0.1"
 PORT = 4174
+ALLOWED_CROSS_ORIGIN = {"https://danielsxujiacong-cell.github.io"}
 IGNORED_DIRS = {
     ".git", "node_modules", ".venv", "venv", "env", "dist", "build",
     "coverage", ".next", ".cache", "cache", "outputs", "logs",
@@ -209,7 +211,7 @@ def project_inventory() -> dict[str, object]:
 
 
 class Handler(SimpleHTTPRequestHandler):
-    server_version = "DanielWorkspaceLocal/2.3"
+    server_version = "DanielWorkspaceLocal/2.4.1"
 
     def log_message(self, _format: str, *_args: object) -> None:
         return
@@ -218,13 +220,38 @@ class Handler(SimpleHTTPRequestHandler):
         parts = [part for part in urlsplit(path).path.split("/") if part]
         return str(APP_ROOT.joinpath(*parts))
 
-    def do_GET(self) -> None:
+    def loopback_host(self) -> bool:
         host = self.headers.get("Host", "").split(":", 1)[0].strip("[]").lower()
-        if host not in {"localhost", "127.0.0.1"}:
+        return host in {"localhost", "127.0.0.1"}
+
+    def allowed_origin(self) -> str | None:
+        origin = self.headers.get("Origin")
+        if not origin:
+            return None
+        if origin in ALLOWED_CROSS_ORIGIN:
+            return origin
+        parsed = urlsplit(origin)
+        host = self.headers.get("Host", "").lower()
+        if parsed.scheme == "http" and parsed.netloc.lower() == host:
+            return origin
+        return None
+
+    def send_api_cors_headers(self, origin: str | None) -> None:
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Private-Network", "true")
+
+    def do_GET(self) -> None:
+        if not self.loopback_host():
             self.send_error(403, "Loopback host required")
             return
         request_path = unquote(urlsplit(self.path).path)
         if request_path == "/api/local-projects":
+            origin = self.allowed_origin()
+            if self.headers.get("Origin") and not origin:
+                self.send_error(403, "Origin not allowed")
+                return
             try:
                 payload = json.dumps(project_inventory(), ensure_ascii=False).encode("utf-8")
             except (OSError, ValueError) as error:
@@ -232,6 +259,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_response(500)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Cache-Control", "no-store")
+                self.send_api_cors_headers(origin)
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)
@@ -239,6 +267,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
+            self.send_api_cors_headers(origin)
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
@@ -266,6 +295,27 @@ class Handler(SimpleHTTPRequestHandler):
         self.path = "/" + "/".join(raw_parts)
         super().do_GET()
 
+    def do_OPTIONS(self) -> None:
+        if not self.loopback_host():
+            self.send_error(403, "Loopback host required")
+            return
+        if unquote(urlsplit(self.path).path) != "/api/local-projects":
+            self.send_error(404)
+            return
+        origin = self.allowed_origin()
+        if not origin or self.headers.get("Access-Control-Request-Method", "GET") != "GET":
+            self.send_error(403, "Preflight not allowed")
+            return
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", origin)
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Max-Age", "600")
+        self.send_header("Vary", "Origin")
+        if self.headers.get("Access-Control-Request-Private-Network") == "true":
+            self.send_header("Access-Control-Allow-Private-Network", "true")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def do_HEAD(self) -> None:
         self.send_error(405, "GET only")
 
@@ -281,9 +331,10 @@ if __name__ == "__main__":
     if not PROJECT_ROOT.is_dir():
         raise SystemExit(f"项目根目录不存在：{PROJECT_ROOT}")
     server = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"Daniel Workspace V2.3: http://localhost:{PORT}")
-    print(f"只读扫描目录：{PROJECT_ROOT}")
-    print("按 Ctrl+C 停止本地 companion。")
+    if sys.stdout is not None:
+        print(f"Daniel Workspace V2.4.1: http://127.0.0.1:{PORT}")
+        print(f"只读扫描目录：{PROJECT_ROOT}")
+        print("按 Ctrl+C 停止本地 companion。")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

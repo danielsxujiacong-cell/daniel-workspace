@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-30 · V2.4.1
+
+- Added a Windows logon scheduled task that runs the Companion with `pythonw.exe` in the background without opening a console window.
+- Dashboard now auto-detects the Companion on local and GitHub Pages origins, shows scan success/offline status and timestamps, and retains the last successful browser-local inventory with a stale-data label.
+- Fixed manual re-scan to call the live read-only endpoint and immediately refresh the Dashboard; added allow-listed GitHub Pages CORS and Private Network Access preflight support.
+- Documented how to stop the running task and remove logon auto-start.
+
 ## 2026-09-30 · V2.4
 
 - Reworked Dashboard around today's recommended project, real scan health counts, actionable reminders, changes since the previous scan, and recency-ranked local projects.

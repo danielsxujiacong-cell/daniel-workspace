@@ -175,6 +175,10 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 .dashboard-health .card-header { margin-bottom: 13px; }
 .dashboard-health .card-header h2, .card-header h2 { margin: 0; color: #dedee3; font-size: 12px; font-weight: 600; }
 .dashboard-health .card-header p { margin: 5px 0 0; color: var(--muted); font-size: 9px; }
+.companion-status { margin: 0 0 13px; padding: 9px 11px; border: 1px solid var(--line-soft); border-radius: 7px; color: var(--muted); background: var(--panel-raised); font-size: 9px; line-height: 1.5; }
+.companion-status.online { border-color: #347b5d66; color: #8bd4ad; background: #347b5d12; }
+.companion-status.checking { border-color: #857fca55; color: #b6b1e7; background: #857fca12; }
+.companion-status.offline { border-color: #be8e4e66; color: #e4bd80; background: #be8e4e12; }
 .dashboard-health-grid { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 7px; }
 .health-metric { min-width: 0; padding: 10px 9px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--panel-raised); }
 .health-metric strong { display: block; color: #dcdbe5; font: 700 17px Manrope, sans-serif; letter-spacing: -.04em; }

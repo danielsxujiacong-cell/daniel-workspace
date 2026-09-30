@@ -1,22 +1,24 @@
 # Daniel Workspace
 
-本地优先的个人 AI 工作台 V2.4。首页优先回答今天继续什么、工作区哪里需要处理、最近发生了什么；建议结合本机只读扫描、工作台 Tasks 和已缓存的公开 GitHub 快照。AI Assistant 仍使用本地 Mock，不需要登录或 Token。
+本地优先的个人 AI 工作台 V2.4.1。首页优先回答今天继续什么、工作区哪里需要处理、最近发生了什么；建议结合本机只读扫描、工作台 Tasks 和已缓存的公开 GitHub 快照。AI Assistant 仍使用本地 Mock，不需要登录或 Token。
 
 ## Status
 
-- **Stage:** V2.4 complete; local project scanner and GitHub reads are read-only; Real AI server route is reserved but not enabled
+- **Stage:** V2.4.1 complete; local project scanner and GitHub reads are read-only; Real AI server route is reserved but not enabled
 - **Last updated:** 2026-09-30
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
 ## Quick start
 
-需要 Python 3 和 Git，并在本机项目目录运行 companion。它会同时提供静态页面和只读扫描 API：
+需要 Python 3 和 Git。Windows 登录后，任务计划程序会静默启动 Companion（`pythonw.exe`，任务名 `DanielWorkspaceLocalCompanion`）；它会同时提供静态页面和只读扫描 API。也可以手动运行：
 
 ```powershell
 python local_companion.py
 ```
 
-在浏览器打开 [http://localhost:4174](http://localhost:4174)。按 `Ctrl+K` 或 `⌘K` 聚焦全局搜索。停止服务按 `Ctrl+C`。GitHub Pages 版本仍可浏览工作台，但浏览器不能扫描本机磁盘。
+在浏览器打开 [http://127.0.0.1:4174](http://127.0.0.1:4174)。按 `Ctrl+K` 或 `⌘K` 聚焦全局搜索。首页启动时自动检查 Companion 并刷新扫描；暂时离线时继续展示当前浏览器保存的上次成功扫描，并标记数据可能不是最新。GitHub Pages 也会尝试从本机 `127.0.0.1:4174` 读取扫描；浏览器可能要求允许页面访问本地网络。
+
+手动控制 Companion：前台运行 `python local_companion.py` 时按 `Ctrl+C` 停止；开机任务启动的后台实例可在 PowerShell 执行 `Stop-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion"` 停止。取消后续登录自动启动，执行 `Unregister-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion" -Confirm:$false`。重新登录 Windows 会再次启动仍注册的任务。
 
 项目、资料、决策、任务与主题偏好保存在当前浏览器的 `localStorage`（同一浏览器配置和站点来源内）。刷新或重开页面后会保留；“重置演示数据”会恢复样例内容并保留主题选择。
 
@@ -52,9 +54,9 @@ python local_companion.py
 
 `python local_companion.py` 仅绑定 `127.0.0.1:4174`，服务页面静态资源和 `GET /api/local-projects`。扫描范围固定为 `D:\_Codex project`；隐藏目录、Git 元数据和常见依赖/构建/缓存目录不会作为项目或修改时间来源。Git 状态命令仅读取本地数据，并设置 `GIT_OPTIONAL_LOCKS=0`；companion 不执行 fetch、pull、commit、push、checkout 或其他网络/写操作。`origin/main` 和 ahead/behind 使用本地已有引用，不保证它刚与 GitHub 同步。
 
-文档扫描只检查根目录和 `docs/` 中 README、HANDOFF、PROJECT_STATUS、TODO、PROJECT_CONTEXT、CHANGELOG 文件名是否存在，不读取正文。完整扫描快照只保存在当前页面内存，不写入扫描到的项目。V2.4 为跨次比较额外保存一份轻量基线：项目身份使用散列键，仅记录 HEAD、分支、clean、ahead/behind、README/HANDOFF/TODO 是否存在和最后修改时间，不保存项目名或路径；基线保存在当前浏览器的单独 localStorage 项中，不跨设备同步。companion 只允许本机 loopback Host、页面静态文件白名单与 GET；GitHub Pages 不会调用它。
+文档扫描只检查根目录和 `docs/` 中 README、HANDOFF、PROJECT_STATUS、TODO、PROJECT_CONTEXT、CHANGELOG 文件名是否存在，不读取正文。扫描不会写入扫描到的项目。V2.4 为跨次比较保存一份轻量基线；V2.4.1 另在当前浏览器的独立 localStorage 项中保留上次成功扫描，以便 Companion 暂时离线时显示旧数据并标记“数据可能不是最新”。缓存只在当前浏览器来源内使用，不跨设备同步。Companion 仅绑定 `127.0.0.1:4174`；API 保持只读 GET，并只允许工作台的 GitHub Pages 来源跨源读取。
 
-不支持私有仓库授权、GitHub 写操作/自动化、云同步/数据库、扫描 `D:\` 全盘、文档正文解析、PDF/网页自动解析或真实 AI 服务；未实现部分不属于 V2.4。
+不支持私有仓库授权、GitHub 写操作/自动化、云同步/数据库、扫描 `D:\` 全盘、文档正文解析、PDF/网页自动解析或真实 AI 服务；未实现部分不属于 V2.4.1。
 
 ### `/api/chat` 预留契约
 

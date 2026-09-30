@@ -1,4 +1,4 @@
-import { loadData, loadLocalScanBaseline, resetData, saveData, saveLocalScanBaseline } from "./store.js";
+import { loadData, loadLocalScanBaseline, loadLocalScanCache, resetData, saveData, saveLocalScanBaseline, saveLocalScanCache } from "./store.js";
 import { buildAssistantContext } from "./ai/context.js";
 import { chat as chatWithAI, getAIStatus } from "./ai/service.js";
 import { fetchPublicGitHubRepository, parsePublicGitHubRepository } from "./github/public-api.js";
@@ -6,12 +6,17 @@ import { buildLocalDashboardModel, compareLocalProjects } from "./dashboard.js";
 
 const app = document.querySelector("#app");
 let db = loadData();
+const scanCache = loadLocalScanCache();
+const localScanEndpoint = getLocalScanEndpoint();
 const ui = {
   page: "home",
   projectId: null,
   localProjectId: null,
-  localProjects: null,
-  localProjectsStatus: ["localhost", "127.0.0.1"].includes(window.location.hostname) ? "loading" : "unavailable",
+  localProjects: scanCache.inventory,
+  localProjectsSource: scanCache.inventory ? "cache" : null,
+  localProjectsStatus: localScanEndpoint ? "loading" : "unavailable",
+  localScanAttemptAt: "",
+  localScanCacheSaved: true,
   localComparison: null,
   taskFilter: "all",
   query: "",
@@ -26,6 +31,15 @@ const ui = {
 };
 
 const colorScheme = window.matchMedia("(prefers-color-scheme: light)");
+
+function getLocalScanEndpoint() {
+  const hostname = window.location.hostname.toLowerCase();
+  if (hostname === "localhost" || hostname === "127.0.0.1") return "/api/local-projects";
+  if (hostname === "danielsxujiacong-cell.github.io" && /^\/daniel-workspace(?:\/|$)/.test(window.location.pathname)) {
+    return "http://127.0.0.1:4174/api/local-projects";
+  }
+  return null;
+}
 
 function applyTheme() {
   const preference = db.settings?.theme || "system";
@@ -289,12 +303,27 @@ function localDashboardModel() {
   });
 }
 
+function localScanStatusMessage() {
+  const lastSuccess = ui.localProjects?.scannedAt ? formattedTimestamp(ui.localProjects.scannedAt) : "无";
+  const lastAttempt = ui.localScanAttemptAt ? formattedTimestamp(ui.localScanAttemptAt) : "尚未尝试";
+  if (ui.localProjectsStatus === "ready") {
+    return `Companion 在线 · 本次扫描成功 · ${formattedTimestamp(ui.localProjects.scannedAt)}${ui.localScanCacheSaved ? "" : " · 离线缓存未能保存"}`;
+  }
+  if (ui.localProjectsStatus === "loading") {
+    return ui.localProjects
+      ? `正在检测 Companion · 暂时显示上次成功扫描，数据可能不是最新 · 上次成功 ${lastSuccess}`
+      : "正在连接 Companion · 首页和工作台内容保持可用";
+  }
+  if (ui.localProjects) {
+    return `Companion 离线或不可达 · 显示上次成功扫描，数据可能不是最新 · 上次成功 ${lastSuccess} · 本次尝试 ${lastAttempt}`;
+  }
+  return `Companion 离线 · 本次扫描失败 · ${lastAttempt} · 暂无成功扫描缓存`;
+}
+
 function renderDashboardHealth(model) {
+  const statusClass = ui.localProjectsStatus === "ready" ? "online" : ui.localProjectsStatus === "loading" ? "checking" : "offline";
   if (!model) {
-    const message = ui.localProjectsStatus === "loading" ? "正在读取本机项目状态…"
-      : ui.localProjectsStatus === "error" ? "本次扫描失败；以下数据暂不可用。"
-        : "启动本地 companion 后即可显示真实健康状态：python local_companion.py";
-    return `<section class="card dashboard-health grid-span-12"><div class="card-header"><h2>工作区健康状态</h2><button class="button quiet small" data-action="refresh-local-projects">重新扫描 ${icon("reset")}</button></div><div class="local-companion-notice"><strong>${esc(message)}</strong><p>GitHub Pages 无法读取本机磁盘；该区域不会用演示数字代替扫描结果。</p></div></section>`;
+    return `<section class="card dashboard-health grid-span-12"><div class="card-header"><h2>工作区健康状态</h2><button class="button quiet small" data-action="refresh-local-projects" ${ui.localProjectsStatus === "loading" ? "disabled" : ""}>${icon("reset")} 重新扫描</button></div><div class="companion-status ${statusClass}" role="status" aria-live="polite">${esc(localScanStatusMessage())}</div><div class="local-companion-notice"><strong>本机扫描数据暂不可用</strong><p>工作台仍可使用。确认 Companion 已启动后可重新扫描；GitHub Pages 会尝试访问本机 127.0.0.1:4174。</p></div></section>`;
   }
   const health = model.health;
   const metrics = [
@@ -308,7 +337,7 @@ function renderDashboardHealth(model) {
     ["缺 TODO", health.missingTodo, "文档文件"],
     [`超过 ${health.staleDays} 天未更新`, health.stale, "按本地 / GitHub 时间"],
   ];
-  return `<section class="card dashboard-health grid-span-12"><div class="card-header"><div><h2>工作区健康状态</h2><p>${health.total} 个本地项目 · 扫描于 ${esc(formattedTimestamp(ui.localProjects.scannedAt))}</p></div><button class="button quiet small" data-action="refresh-local-projects" ${ui.localProjectsStatus === "loading" ? "disabled" : ""}>${icon("reset")} 重新扫描</button></div><div class="dashboard-health-grid">${metrics.map(([label, value, note]) => `<div class="health-metric ${value > 0 && ["未提交修改", "落后 origin/main", "缺 README", "缺 HANDOFF", "缺 TODO", `超过 ${health.staleDays} 天未更新`].includes(label) ? "needs-attention" : ""}"><strong>${value}</strong><span>${esc(label)}</span><small>${esc(note)}</small></div>`).join("")}</div><div class="dashboard-data-note">ahead / behind 依据本机缓存的 origin/main；扫描不会 fetch 或修改 Git。</div></section>`;
+  return `<section class="card dashboard-health grid-span-12"><div class="card-header"><div><h2>工作区健康状态</h2><p>${health.total} 个本地项目 · 数据扫描于 ${esc(formattedTimestamp(ui.localProjects.scannedAt))}</p></div><button class="button quiet small" data-action="refresh-local-projects" ${ui.localProjectsStatus === "loading" ? "disabled" : ""}>${icon("reset")} 重新扫描</button></div><div class="companion-status ${statusClass}" role="status" aria-live="polite">${esc(localScanStatusMessage())}</div><div class="dashboard-health-grid">${metrics.map(([label, value, note]) => `<div class="health-metric ${value > 0 && ["未提交修改", "落后 origin/main", "缺 README", "缺 HANDOFF", "缺 TODO", `超过 ${health.staleDays} 天未更新`].includes(label) ? "needs-attention" : ""}"><strong>${value}</strong><span>${esc(label)}</span><small>${esc(note)}</small></div>`).join("")}</div><div class="dashboard-data-note">ahead / behind 依据本机缓存的 origin/main；扫描不会 fetch 或修改 Git。</div></section>`;
 }
 
 function renderDashboardAlerts(model) {
@@ -344,10 +373,10 @@ function renderDashboard() {
   const today = model?.todayContinue;
   const workspaceProject = today?.projectId ? projectById(today.projectId) : null;
   const assistantStatus = getAIStatus();
-  const localStatus = ui.localProjectsStatus === "loading" ? "扫描中" : ui.localProjectsStatus === "error" ? "扫描失败" : ui.localProjects ? `${ui.localProjects.items.length} 个本地项目` : "Companion 未连接";
+  const localStatus = ui.localProjectsStatus === "ready" ? `Companion 在线 · ${ui.localProjects.items.length} 个本地项目` : ui.localProjectsStatus === "loading" ? (ui.localProjects ? `正在检测 · 缓存 ${ui.localProjects.items.length} 个项目` : "正在连接 Companion") : ui.localProjects ? `Companion 离线 · 缓存 ${ui.localProjects.items.length} 个项目` : "Companion 离线";
   const continueCard = today
     ? `<div class="today-continue-main"><div class="today-continue-copy"><div class="suggestion-kicker">${icon("sparkle", "icon spark")} 今日继续 · AI 建议下一步 <span class="tag">Mock · 基于真实扫描</span></div><h2>${esc(today.projectName)}</h2><p class="today-last-work">${esc(today.lastWork)}</p><div class="today-status"><span>${esc(today.workspaceStatus)}</span><span>${esc(today.gitStatus)}</span><span>${esc(today.remoteStatus)}</span></div><div class="today-next"><span>建议下一步</span><strong>${esc(today.nextStep)}</strong></div></div><div class="today-continue-actions"><span class="tag ai-mode mock">${esc(assistantStatus.label)}</span><button class="button primary" data-action="view-local-project" data-id="${esc(today.localProjectId)}">查看项目 ${icon("arrow")}</button><button class="button quiet small" data-action="open-assistant">问 Assistant</button></div></div>`
-    : `<div class="local-companion-notice"><strong>${ui.localProjectsStatus === "loading" ? "正在选取最值得继续的项目…" : "暂时无法生成今日继续建议"}</strong><p>本建议依赖本机扫描数据，不会用演示项目或模拟状态补齐。</p></div>`;
+    : `<div class="local-companion-notice"><strong>${ui.localProjectsStatus === "loading" ? "正在选取最值得继续的项目…" : "暂无可用的本机扫描数据"}</strong><p>工作台仍可使用；连接 Companion 后会用真实扫描生成建议，不会以演示状态代替。</p></div>`;
   return `<div class="page-heading"><div><div class="eyebrow">${formattedDate()} · ${esc(localStatus)}</div><h1>今天继续什么</h1><p>先看最值得推进的项目，再处理真实的工作区提醒。</p></div><div class="heading-actions"><button class="button quiet small" data-action="refresh-local-projects" ${ui.localProjectsStatus === "loading" ? "disabled" : ""}>${icon("reset")} 重新扫描</button><button class="button primary" data-action="open-create-task">${icon("plus")} 新建任务</button></div></div>
     <div class="dashboard-grid"><section class="today-continue-card grid-span-12">${continueCard}</section>
       ${renderDashboardHealth(model)}
@@ -364,14 +393,14 @@ function renderProjects() {
   const connectedCount = configured.filter((project) => project.githubData?.refreshedAt).length;
   const connectionLabel = hasRequestFailure ? "GitHub 请求失败" : !configured.length ? "GitHub 未配置" : connectedCount ? "GitHub 已连接" : "GitHub 待刷新";
   const localProjects = ui.localProjects?.items || [];
-  const scanLabel = ui.localProjectsStatus === "loading" ? "正在扫描" : ui.localProjectsStatus === "error" ? "扫描失败" : ui.localProjects ? `${localProjects.length} 个项目` : "companion 未连接";
+  const scanLabel = ui.localProjectsStatus === "ready" ? `${localProjects.length} 个项目 · 在线` : ui.localProjectsStatus === "loading" ? (ui.localProjects ? `检测中 · 缓存 ${localProjects.length} 个` : "正在连接") : ui.localProjects ? `${localProjects.length} 个项目 · 可能过期` : "Companion 离线";
   const localSection = `<section class="local-project-section"><div class="section-title"><div><h2>本地项目</h2><p class="local-section-note">只读扫描 D:\\_Codex project；不会修改项目文件或联网刷新 Git。</p></div><div class="heading-actions"><span class="github-overview-status">${esc(scanLabel)}</span><button class="button small" data-action="refresh-local-projects" ${ui.localProjectsStatus === "loading" ? "disabled aria-busy=\"true\"" : ""}>${icon("reset")} 重新扫描</button></div></div>${localProjects.length ? `<div class="local-project-list">${localProjects.map((item) => {
     const linked = workspaceProjectForLocal(item);
     const repository = safeExternal(item.githubRepository || "");
     const gitLabel = localGitLabel(item);
     const gitClass = !item.hasGit || item.clean === false ? "warning" : item.clean === true ? "ok" : "";
     return `<article class="card local-project-row"><div class="local-project-main"><h3>${esc(item.name)}</h3><code>${esc(item.path)}</code><span class="local-project-link">${linked ? `工作台项目：${esc(linked.name)}` : repository ? `<a href="${esc(repository)}" target="_blank" rel="noreferrer">${esc(repository.replace("https://github.com/", ""))}</a>` : "未关联工作台项目"}</span></div><div class="local-project-meta"><span class="local-state ${gitClass}">${esc(gitLabel)}</span><span>分支 ${esc(item.branch || (item.hasGit ? "未知" : "—"))}</span><span>${esc(localAheadBehind(item))}</span></div><button class="button small" data-action="view-local-project" data-id="${esc(item.id)}">查看状态 ${icon("chevron")}</button></article>`;
-  }).join("")}</div>` : ui.localProjects ? `<div class="card empty-state">扫描目录中没有发现本地项目。</div>` : `<div class="card local-companion-notice"><strong>${ui.localProjectsStatus === "loading" ? "正在读取本地项目" : "尚未连接本地 companion"}</strong><p>在项目目录运行 <code>python local_companion.py</code>，然后重新扫描。在线 Pages 版本不具备本机磁盘访问权限。</p></div>`}</section>`;
+  }).join("")}</div>` : ui.localProjects ? `<div class="card empty-state">扫描目录中没有发现本地项目。</div>` : `<div class="card local-companion-notice"><strong>${ui.localProjectsStatus === "loading" ? "正在读取本地项目" : "尚未连接本地 Companion"}</strong><p>请确认开机 Companion 已启动，或在本机项目目录运行 <code>python local_companion.py</code>，然后重新扫描。GitHub Pages 通过允许的跨源请求尝试访问本机 127.0.0.1:4174。</p></div>`}</section>`;
   return `<div class="page-heading"><div><div class="eyebrow">工作空间</div><h1>Projects</h1><p>项目、当前阶段与下一步都在这里。</p></div><div class="heading-actions"><span class="github-overview-status">${esc(connectionLabel)}</span><button class="button" data-action="refresh-github" ${ui.githubRefreshing ? "disabled aria-busy=\"true\"" : ""}>${icon("reset")} 刷新 GitHub 数据</button><button class="button primary" data-action="open-create-project">${icon("plus")} 新建项目</button></div></div>
     ${localSection}
     ${projects.length ? `<div class="project-cards">${projects.map((project) => {
@@ -508,7 +537,7 @@ function pageTitle() {
 
 function renderNav() {
   const items = [["home", "grid", "Home"], ["projects", "folder", "Projects"], ["knowledge", "inbox", "Knowledge"], ["decisions", "bulb", "Decisions"], ["tasks", "checkSquare", "Tasks"]];
-  return `<aside class="sidebar"><div class="brand"><div class="brand-mark">D</div><div><div class="brand-name">Daniel Workspace · V2.4</div><div class="brand-caption">个人 AI 工作台</div></div></div><div class="nav-label">Workspace</div><nav class="nav-list" aria-label="主导航">${items.map(([page, iconName, label]) => `<button class="nav-item ${(ui.page === page || (ui.page === "project" && page === "projects")) ? "active" : ""}" data-page="${page}">${icon(iconName)}<span>${label}</span>${page === "tasks" ? `<span class="nav-count">${openTasks().length}</span>` : ""}</button>`).join("")}</nav><div class="sidebar-spacer"></div><div class="workspace-mini"><div class="avatar">D</div><div><div class="workspace-title">Daniel 的工作区</div><div class="workspace-sub">仅保存在此浏览器</div></div><button class="icon-button" data-action="reset-demo" title="重置演示数据" aria-label="重置演示数据">${icon("more")}</button></div><div class="sidebar-footer"><span class="local-label"><span class="local-dot"></span> 本地数据已启用</span><button class="icon-button" data-action="reset-demo" title="重置演示数据" aria-label="重置演示数据">${icon("reset")}</button></div></aside>`;
+  return `<aside class="sidebar"><div class="brand"><div class="brand-mark">D</div><div><div class="brand-name">Daniel Workspace · V2.4.1</div><div class="brand-caption">个人 AI 工作台</div></div></div><div class="nav-label">Workspace</div><nav class="nav-list" aria-label="主导航">${items.map(([page, iconName, label]) => `<button class="nav-item ${(ui.page === page || (ui.page === "project" && page === "projects")) ? "active" : ""}" data-page="${page}">${icon(iconName)}<span>${label}</span>${page === "tasks" ? `<span class="nav-count">${openTasks().length}</span>` : ""}</button>`).join("")}</nav><div class="sidebar-spacer"></div><div class="workspace-mini"><div class="avatar">D</div><div><div class="workspace-title">Daniel 的工作区</div><div class="workspace-sub">仅保存在此浏览器</div></div><button class="icon-button" data-action="reset-demo" title="重置演示数据" aria-label="重置演示数据">${icon("more")}</button></div><div class="sidebar-footer"><span class="local-label"><span class="local-dot"></span> 本地数据已启用</span><button class="icon-button" data-action="reset-demo" title="重置演示数据" aria-label="重置演示数据">${icon("reset")}</button></div></aside>`;
 }
 
 function searchItems(query) {
@@ -759,18 +788,27 @@ async function refreshGitHubData(projectId = null) {
 }
 
 async function refreshLocalProjects() {
-  if (!["localhost", "127.0.0.1"].includes(window.location.hostname)) {
+  if (!localScanEndpoint) {
     ui.localProjectsStatus = "unavailable";
+    ui.localScanAttemptAt = new Date().toISOString();
     render();
     return;
   }
   ui.localProjectsStatus = "loading";
   render();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
   try {
-    const response = await fetch("/api/local-projects", { method: "GET", cache: "no-store", credentials: "same-origin" });
+    const response = await fetch(localScanEndpoint, {
+      method: "GET",
+      cache: "no-store",
+      credentials: "omit",
+      mode: localScanEndpoint.startsWith("http") ? "cors" : "same-origin",
+      signal: controller.signal,
+    });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const inventory = await response.json();
-    if (!Array.isArray(inventory.items)) throw new Error("Invalid local project inventory");
+    if (!Array.isArray(inventory.items) || typeof inventory.scannedAt !== "string") throw new Error("Invalid local project inventory");
     const prior = loadLocalScanBaseline();
     const comparison = compareLocalProjects(inventory.items, prior.baseline, inventory.scannedAt);
     const saved = saveLocalScanBaseline(comparison.current);
@@ -784,10 +822,17 @@ async function refreshLocalProjects() {
           ? "浏览器未能保存比较基线；下次打开时可能无法比较。"
           : "",
     };
+    ui.localScanCacheSaved = saveLocalScanCache(inventory);
     ui.localProjects = inventory;
+    ui.localProjectsSource = "live";
     ui.localProjectsStatus = "ready";
-  } catch {
+    ui.localScanAttemptAt = inventory.scannedAt;
+  } catch (error) {
     ui.localProjectsStatus = ui.localProjects ? "error" : "unavailable";
+    ui.localProjectsSource = ui.localProjects ? "cache" : null;
+    ui.localScanAttemptAt = new Date().toISOString();
+  } finally {
+    clearTimeout(timeoutId);
   }
   render();
 }
@@ -976,4 +1021,4 @@ if (initialLocalProjectRoute) {
 }
 
 render();
-if (["localhost", "127.0.0.1"].includes(window.location.hostname)) refreshLocalProjects();
+if (localScanEndpoint) refreshLocalProjects();

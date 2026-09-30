@@ -2,6 +2,7 @@ import { createDemoData } from "./mock-data.js";
 
 const STORAGE_KEY = "daniel-workspace-v1";
 const LOCAL_SCAN_BASELINE_KEY = "daniel-workspace-local-scan-baseline-v1";
+const LOCAL_SCAN_CACHE_KEY = "daniel-workspace-local-scan-cache-v1";
 
 export function loadData() {
   try {
@@ -53,6 +54,30 @@ export function loadLocalScanBaseline() {
 export function saveLocalScanBaseline(baseline) {
   try {
     localStorage.setItem(LOCAL_SCAN_BASELINE_KEY, JSON.stringify(baseline));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function loadLocalScanCache() {
+  try {
+    const raw = localStorage.getItem(LOCAL_SCAN_CACHE_KEY);
+    if (!raw) return { inventory: null, readable: true };
+    const cached = JSON.parse(raw);
+    const inventory = cached?.version === 1 ? cached.inventory : null;
+    if (!inventory || !Array.isArray(inventory.items) || typeof inventory.scannedAt !== "string") {
+      return { inventory: null, readable: true };
+    }
+    return { inventory, readable: true };
+  } catch {
+    return { inventory: null, readable: false };
+  }
+}
+
+export function saveLocalScanCache(inventory) {
+  try {
+    localStorage.setItem(LOCAL_SCAN_CACHE_KEY, JSON.stringify({ version: 1, inventory }));
     return true;
   } catch {
     return false;
