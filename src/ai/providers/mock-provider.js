@@ -78,8 +78,28 @@ export function createMockReply({ message = "", currentPage = "home", currentPro
     if (!dashboard) return "Dashboard 当前还没有可用数据。添加一个项目或任务后，我可以根据工作区现状建议下一步。";
     const counts = dashboard.counts;
     const firstTask = dashboard.todoTasks[0];
+    const local = dashboard.todayContinue;
+    const health = dashboard.localHealth;
+    const healthSummary = health
+      ? `本地扫描 ${health.total} 个项目：Clean ${health.clean}，未提交修改 ${health.dirty}，领先 ${health.ahead}，落后 ${health.behind}；缺 README ${health.missingReadme}、HANDOFF ${health.missingHandoff}、TODO ${health.missingTodo}，超过 ${health.staleDays} 天未更新 ${health.stale}。`
+      : "当前没有可用的本机扫描数据。";
     if (nextIntent.test(message)) {
-      return `Dashboard 里有 ${counts.activeProjects} 个进行中的项目、${counts.todoTasks} 项待办。建议先处理${firstTask ? taskSummary(firstTask) : "最近活跃项目的下一步"}。${firstTask ? `\n打开任务「${firstTask.title}」后就可以推进「${firstTask.project}」。` : "\n当前没有未完成任务，可以检查最近决策和项目下一步。"}`;
+      if (local) {
+        const github = local.githubData;
+        return `根据本地 Git、项目修改时间、GitHub 快照、工作台待办和文档存在状态，今天建议继续「${local.projectName}」。\n最近进展：${local.lastWork}。\n当前状态：${local.workspaceStatus}；${local.gitStatus}；${local.remoteStatus}。\n下一步：${local.nextStep}。${local.priorityTask ? `\n关联待办：${local.priorityTask.title}（${local.priorityTask.priority}优先级${local.priorityTask.due ? `，${local.priorityTask.due}到期` : ""}）。` : ""}${local.missingDocuments?.length ? `\n缺少项目记录：${local.missingDocuments.join("、")}。` : ""}${github ? `\nGitHub：${github.repositoryName || local.projectName}，更新时间 ${github.updatedAt || "未知"}${github.latestCommit?.message ? `，最近 commit「${github.latestCommit.message}」` : ""}。` : ""}\n${healthSummary}`;
+      }
+      return `Dashboard 里有 ${counts.activeProjects} 个进行中的工作台项目、${counts.todoTasks} 项待办。${healthSummary}建议先处理${firstTask ? taskSummary(firstTask) : "启动本地 Companion 后查看今日继续建议"}。`;
+    }
+    if (issueIntent.test(message)) {
+      const reminders = dashboard.localReminders || [];
+      return `${healthSummary}${reminders.length ? `\n今天需要处理：\n${reminders.map((item) => `• ${item.projectName}：${item.text}`).join("\n")}` : "\n当前扫描没有生成需要处理的提醒。"}`;
+    }
+    if (recentChangeIntent.test(message)) {
+      const changes = dashboard.changesSinceLastScan || [];
+      if (dashboard.comparisonFirstScan) return "本次扫描已建立对比基线；下次扫描时才能判断新 commit、状态变化或同步情况。";
+      return changes.length
+        ? `自上次扫描后发现 ${changes.length} 项变化：\n${changes.map((item) => `• ${item.projectName}：${item.text}`).join("\n")}`
+        : "自上次扫描后暂无新的项目变化。";
     }
     if (/资料|知识|收件箱|knowledge|inbox/i.test(message)) {
       const records = dashboard.recentKnowledge || [];
@@ -97,7 +117,7 @@ export function createMockReply({ message = "", currentPage = "home", currentPro
     const recentActivity = dashboard.recentActivities[0];
     const recentKnowledge = dashboard.recentKnowledge[0];
     const recentDecision = dashboard.recentDecisions[0];
-    return `Dashboard 概况：${counts.projects} 个项目（进行中 ${counts.activeProjects} 个）、${counts.todoTasks} 项待办、${counts.knowledge} 条资料、${counts.decisions} 条决策。${recentProject ? `\n最近项目：${recentProject.name}，当前阶段${recentProject.stage || "未设置"}。` : ""}${firstTask ? `\n优先待办：${firstTask.title}（${firstTask.priority}优先级）。` : ""}${recentKnowledge ? `\n最近资料：${recentKnowledge.title}。` : ""}${recentDecision ? `\n最近决策：${recentDecision.question} · ${recentDecision.final || "待定"}。` : ""}${recentActivity ? `\n最近活动：${recentActivity.title}` : ""}`;
+    return `Dashboard 概况：${healthSummary}${local ? `\n今日继续：${local.projectName} · ${local.nextStep}` : ""}${dashboard.changesSinceLastScan?.length ? `\n自上次扫描：${dashboard.changesSinceLastScan.slice(0, 3).map((item) => `${item.projectName} ${item.text}`).join("；")}` : ""}${firstTask ? `\n工作台待办：${firstTask.title}（${firstTask.priority}优先级）。` : ""}${recentKnowledge ? `\n最近资料：${recentKnowledge.title}。` : ""}${recentDecision ? `\n最近决策：${recentDecision.question} · ${recentDecision.final || "待定"}。` : ""}${recentActivity ? `\n最近活动：${recentActivity.title}` : ""}`;
   }
 
   if (currentPage === "project" || project) {

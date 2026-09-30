@@ -2,13 +2,13 @@
 
 ## Current state
 
-- **Updated:** 2026-09-29
-- **Status:** V2.3 complete and pushed to `main`; GitHub Pages built the implementation commit `ec0a3b2`.
-- **Last completed:** Added a loopback-only read-only companion for `D:\_Codex project`; Projects displays 14 local repositories and matches the Daniel Workspace repo to its existing project by GitHub identity. Details show local Git, last commit, modification time, and document presence; Dashboard shows local warnings; project Mock AI uses local status, cached GitHub data, TODOs, and document presence. Companion excludes hidden verification fixtures and does not fetch or mutate Git repositories. Browser regression covered V1 task and Knowledge flows, V2.1 Mock AI context, V2.2 GitHub refresh/cache, and V2.3 scan/details/AI.
+- **Updated:** 2026-09-30
+- **Status:** V2.4 Dashboard implementation and regression are complete; final GitHub push and Pages deployment verification are part of this handoff.
+- **Last completed:** Rebuilt Dashboard around the best next project, live scan health, actionable findings, changes since the prior scan, and recently active local projects. Mock AI uses the current scan, cached GitHub snapshot, tasks, and document presence. The Companion remains read-only; a minimal browser-local baseline stores hashed identity, Git/document state, and modification time without project names or paths.
 
 ## Next action
 
-Do not start V2.4 unless Daniel explicitly requests it. To use the delivered V2.3 scanner, run `python local_companion.py` from this repository and open `http://localhost:4174`. V2.3 remains read-only: it scans only `D:\_Codex project`, checks document names without reading contents, compares only cached `origin/main` refs, and keeps scan results in page memory. Real AI remains separately disabled; the `/api/chat` contract and server-only key boundary are unchanged.
+To use the Dashboard with live local status, run `python local_companion.py` from this repository and open `http://localhost:4174`. The scanner still scans only `D:\_Codex project`, checks document names without reading contents, compares only cached `origin/main` refs, and never mutates repositories. Real AI remains disabled; the `/api/chat` contract and server-only key boundary are unchanged. No V2.5 work is in scope.
 
 ## How to resume
 

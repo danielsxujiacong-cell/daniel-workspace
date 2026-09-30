@@ -4,6 +4,11 @@ function byRecent(left, right) {
   return (right.createdAt || "").localeCompare(left.createdAt || "");
 }
 
+function githubRepositoryKey(value) {
+  const match = String(value || "").match(/^https?:\/\/github\.com\/([^/?#]+\/[^/?#]+)/i);
+  return match?.[1].replace(/\.git$/i, "").toLowerCase() || "";
+}
+
 function localProjectRecord(localProject) {
   if (!localProject) return null;
   return {
@@ -107,7 +112,7 @@ function activityRecord(activity, projects) {
   };
 }
 
-export function buildAssistantContext({ data, currentPage, projectId, taskFilter = "all", localProject = null }) {
+export function buildAssistantContext({ data, currentPage, projectId, taskFilter = "all", localProject = null, localProjects = [], dashboardModel = null, localChanges = [], comparisonFirstScan = false }) {
   const projects = data.projects || [];
   const tasks = data.tasks || [];
   const knowledge = data.knowledge || [];
@@ -150,11 +155,32 @@ export function buildAssistantContext({ data, currentPage, projectId, taskFilter
           knowledge: knowledge.length,
           decisions: decisions.length,
         },
-        projects: projects.slice(0, 5).map(projectRecord),
+        projects: projects.slice(0, 5).map((project) => {
+          const local = localProjects.find((item) => {
+            const repo = githubRepositoryKey(project.github);
+            return (repo && githubRepositoryKey(item.githubRepository) === repo)
+              || (project.path && item.path && project.path.toLowerCase() === item.path.toLowerCase())
+              || project.name.toLowerCase() === item.name?.toLowerCase();
+          });
+          return projectRecord(project, local);
+        }),
         todoTasks: todoTasks.slice(0, 6).map((task) => taskRecord(task, projects)),
         recentKnowledge: [...knowledge].sort(byRecent).slice(0, 4).map((item) => knowledgeRecord(item, projects)),
         recentDecisions: [...decisions].sort(byRecent).slice(0, 4).map((item) => decisionRecord(item, projects)),
         recentActivities: [...activities].sort(byRecent).slice(0, 5).map((item) => activityRecord(item, projects)),
+        localProjects: localProjects.map((item) => localProjectRecord(item)),
+        localHealth: dashboardModel?.health || null,
+        localReminders: dashboardModel?.alerts || [],
+        todayContinue: dashboardModel?.todayContinue ? {
+          ...dashboardModel.todayContinue,
+          localProject: localProjectRecord(dashboardModel.todayContinue.localProject),
+        } : null,
+        recentlyActiveProjects: dashboardModel?.recentProjects.map(({ item, project, activityAt }) => ({
+          ...projectRecord(project || { id: item.id, name: item.name, status: "本地项目", path: item.path }, item),
+          activityAt: activityAt ? new Date(activityAt).toISOString() : "",
+        })) || [],
+        changesSinceLastScan: localChanges.slice(0, 10),
+        comparisonFirstScan,
       },
     };
   } else if (currentPage === "project") {

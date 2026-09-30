@@ -1,6 +1,7 @@
 import { createDemoData } from "./mock-data.js";
 
 const STORAGE_KEY = "daniel-workspace-v1";
+const LOCAL_SCAN_BASELINE_KEY = "daniel-workspace-local-scan-baseline-v1";
 
 export function loadData() {
   try {
@@ -35,6 +36,27 @@ export function loadData() {
 
 export function saveData(data) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+export function loadLocalScanBaseline() {
+  try {
+    const raw = localStorage.getItem(LOCAL_SCAN_BASELINE_KEY);
+    if (!raw) return { baseline: null, readable: true };
+    const baseline = JSON.parse(raw);
+    if (baseline?.version !== 1 || !Array.isArray(baseline.items)) return { baseline: null, readable: true };
+    return { baseline, readable: true };
+  } catch {
+    return { baseline: null, readable: false };
+  }
+}
+
+export function saveLocalScanBaseline(baseline) {
+  try {
+    localStorage.setItem(LOCAL_SCAN_BASELINE_KEY, JSON.stringify(baseline));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function resetData(settings = {}) {
