@@ -8,6 +8,7 @@
 - Configured the project URL and public publishable key from the local Lanlan Cloud Pet project; no service-role key or password was used.
 - Added the sole allowed user's UUID to the Auth allowlist; blank configuration still fails closed.
 - Verified via the public Auth settings endpoint that new-user signup is disabled. Site URL/Redirect URL were reported configured; real login/refresh/logout/16-project scan acceptance remains pending.
+- Published commit `81939d7` to GitHub Pages; the configured index, auth gate, and auth config return HTTP 200.
 
 ## 2026-09-30 · V2.4.1
 
