@@ -1,4 +1,4 @@
-import { loadData, loadLocalScanBaseline, loadLocalScanCache, resetData, saveData, saveLocalScanBaseline, saveLocalScanCache } from "./store.js";
+import { loadData, loadLocalScanBaseline, loadLocalScanCache, resetData, saveData, saveLocalScanBaseline, saveLocalScanCache } from "./store.js?v=2.4.1";
 import { buildAssistantContext } from "./ai/context.js";
 import { chat as chatWithAI, getAIStatus } from "./ai/service.js";
 import { fetchPublicGitHubRepository, parsePublicGitHubRepository } from "./github/public-api.js";
