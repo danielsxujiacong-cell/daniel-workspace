@@ -1,4 +1,4 @@
-import { SUPABASE_ANON_KEY, SUPABASE_URL } from "./config.js";
+import { SUPABASE_ALLOWED_USER, SUPABASE_ANON_KEY, SUPABASE_URL } from "./config.js";
 
 const app = document.querySelector("#app");
 const colorScheme = window.matchMedia("(prefers-color-scheme: light)");
@@ -38,8 +38,24 @@ function isConfigured() {
   }
 }
 
-async function enterWorkspace() {
+function isAllowedUser(user) {
+  const allowedUser = SUPABASE_ALLOWED_USER.trim();
+  if (!allowedUser || !user) return false;
+  if (allowedUser.includes("@")) {
+    return typeof user.email === "string" && user.email.toLowerCase() === allowedUser.toLowerCase();
+  }
+  return typeof user.id === "string" && user.id.toLowerCase() === allowedUser.toLowerCase();
+}
+
+function unauthorizedMessage() {
+  return SUPABASE_ALLOWED_USER.trim()
+    ? "此 Supabase 账号没有进入工作台的权限。"
+    : "登录配置尚未指定唯一允许账号，工作台保持锁定。";
+}
+
+async function enterWorkspace(user) {
   if (workspaceVisible) return;
+  if (!isAllowedUser(user)) throw new Error("Unauthorized user");
   globalThis.DANIEL_WORKSPACE_AUTHENTICATED = true;
   try {
     workspaceModule = await import("../app.js?v=2.5.0");
@@ -91,7 +107,15 @@ async function handleLogin(event) {
     if (error) throw error;
     const { data: { user }, error: userError } = await authClient.auth.getUser();
     if (userError || !user) throw userError || new Error("Authentication failed");
-    await enterWorkspace();
+    if (!isAllowedUser(user)) {
+      await authClient.auth.signOut({ scope: "local" }).catch(() => {});
+      clearAuthSessionStorage();
+      setLoginStatus(unauthorizedMessage());
+      submit.disabled = false;
+      submit.textContent = "登录";
+      return;
+    }
+    await enterWorkspace(user);
   } catch {
     const passwordField = form.elements.password;
     if (passwordField) passwordField.value = "";
@@ -153,11 +177,13 @@ async function boot() {
     if (error) throw error;
     if (!session) return;
     const { data: { user }, error: userError } = await authClient.auth.getUser();
-    if (userError || !user) {
+    if (userError || !user || !isAllowedUser(user)) {
       await authClient.auth.signOut({ scope: "local" }).catch(() => {});
+      clearAuthSessionStorage();
+      if (user && !userError) showLogin(unauthorizedMessage());
       return;
     }
-    await enterWorkspace();
+    await enterWorkspace(user);
   } catch {
     authClient = null;
     showLogin("登录服务暂不可用，请检查网络或认证配置。");

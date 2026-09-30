@@ -1,11 +1,13 @@
 # Changelog
 
-## 2026-09-30 · V2.5 (configuration pending)
+## 2026-09-30 · V2.5 (acceptance pending)
 
 - Added an authentication-first public entry: the private app module, Workspace localStorage, scan caches, and Local Companion are not loaded before Supabase validates an existing email/password session.
 - Added a minimal responsive login page, persistent Supabase client session, logout that clears the private page and app memory, and no public registration UI.
 - Replaced personal repository/path values in fresh-install demo data with empty generic fields; existing browser Workspace data remains local and compatible.
-- Supabase project URL, public anon/publishable key, disabled-signup setting, and an existing account still need configuration before login acceptance can be completed.
+- Configured the project URL and public publishable key from the local Lanlan Cloud Pet project; no service-role key or password was used.
+- Added a single-user Auth allowlist. It fails closed while the allowed user's UUID/email is blank.
+- The Supabase Dashboard signup/URL settings, allowed account identifier, and real login/refresh/logout/16-project scan acceptance remain pending.
 
 ## 2026-09-30 · V2.4.1
 
