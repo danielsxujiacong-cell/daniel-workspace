@@ -46,6 +46,13 @@ STATIC_SUFFIXES = {".html", ".css", ".js", ".svg", ".png", ".webp", ".ico"}
 def git(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["GIT_OPTIONAL_LOCKS"] = "0"
+    startupinfo = None
+    creationflags = 0
+    if os.name == "nt":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0
+        creationflags = subprocess.CREATE_NO_WINDOW
     return subprocess.run(
         ["git", "-c", "core.fsmonitor=false", "-C", str(path), *args],
         capture_output=True,
@@ -55,6 +62,8 @@ def git(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
         timeout=5,
         check=False,
         env=env,
+        startupinfo=startupinfo,
+        creationflags=creationflags,
     )
 
 
