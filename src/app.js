@@ -2,14 +2,52 @@ if (globalThis.DANIEL_WORKSPACE_AUTHENTICATED !== true) {
   throw new Error("Workspace requires a validated Supabase session.");
 }
 
-const { loadData, loadLocalScanBaseline, loadLocalScanCache, resetData, saveData, saveLocalScanBaseline, saveLocalScanCache } = await import("./store.js?v=2.5.0");
+let workspaceAuth = globalThis.DANIEL_WORKSPACE_AUTH;
+if (!workspaceAuth?.client || !workspaceAuth.userId) throw new Error("Workspace cloud sync requires a validated user session.");
+
+const {
+  loadCloudCache,
+  loadCloudMigrationState,
+  loadData,
+  loadLocalScanBaseline,
+  loadLocalScanCache,
+  resetData,
+  saveCloudCache,
+  saveCloudMigrationState,
+  saveData,
+  saveLocalScanBaseline,
+  saveLocalScanCache,
+} = await import("./store.js?v=2.6.0");
 const { buildAssistantContext } = await import("./ai/context.js");
 const { chat: chatWithAI, getAIStatus } = await import("./ai/service.js");
 const { fetchPublicGitHubRepository, parsePublicGitHubRepository } = await import("./github/public-api.js");
 const { buildLocalDashboardModel, compareLocalProjects } = await import("./dashboard.js");
+const {
+  countLocalMigrationCandidates,
+  hasCloudRecords,
+  hasLocalMigrationCandidates,
+  loadCloudWorkspace,
+  mergePendingCloudChanges,
+  migrateLocalWorkspace,
+  preserveDeviceOnlyData,
+  saveCloudChanges,
+} = await import("./cloud/sync.js?v=2.6.0");
 
 const app = document.querySelector("#app");
-let db = loadData();
+let legacyData = loadData();
+let cloudCache = loadCloudCache(workspaceAuth.userId);
+let db = cloudCache?.data || legacyData;
+const legacyCandidateCounts = countLocalMigrationCandidates(legacyData);
+const legacyCandidateTotal = Object.values(legacyCandidateCounts).reduce((sum, count) => sum + count, 0);
+let cloudBaseline = cloudCache?.baseline || null;
+let cloudCacheActive = Boolean(cloudCache);
+let cloudSyncEnabled = false;
+let cloudSyncRunning = false;
+let cloudSyncRequested = false;
+let cloudSyncTimer = null;
+let cloudInitializationRunning = false;
+let workspaceDataRevision = 0;
+let migrationState = loadCloudMigrationState(workspaceAuth.userId);
 let scanCache = loadLocalScanCache();
 const localScanEndpoint = getLocalScanEndpoint();
 let workspaceActive = true;
@@ -33,6 +71,14 @@ const ui = {
   chatBusy: false,
   githubRefreshing: false,
   githubRefreshStatus: {},
+  cloud: {
+    status: navigator.onLine === false ? "offline" : "loading",
+    lastSyncedAt: cloudCache?.lastSyncedAt || "",
+    migrationAvailable: false,
+    migrationDismissed: false,
+    localDataUnmerged: cloudCache && !migrationState.completed ? legacyCandidateTotal : 0,
+    error: "",
+  },
   chat: [{ role: "assistant", text: "你好，我是 Daniel Workspace Assistant。可以问我当前页面的数据、进展和下一步。" }],
 };
 
@@ -185,12 +231,216 @@ function formattedDate() {
 
 function persist() {
   if (!workspaceActive) return;
-  saveData(db);
+  workspaceDataRevision += 1;
+  if (cloudCacheActive) {
+    const saved = saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt);
+    if (!saved) ui.cloud.error = "浏览器未能保存云端缓存";
+  } else {
+    saveData(db);
+  }
+  if (cloudSyncEnabled) scheduleCloudSync();
 }
+
+function currentCloudData() {
+  return { projects: db.projects, tasks: db.tasks, knowledge: db.knowledge, decisions: db.decisions };
+}
+
+function activateCloudWorkspace(remote, localState, mergePending = false) {
+  const records = mergePending
+    ? mergePendingCloudChanges(remote.data, localState, cloudBaseline)
+    : remote.data;
+  db = preserveDeviceOnlyData(records, localState);
+  cloudBaseline = remote.baseline;
+  cloudCacheActive = true;
+  cloudSyncEnabled = true;
+  ui.cloud.lastSyncedAt = new Date().toISOString();
+  ui.cloud.status = "synced";
+  ui.cloud.error = "";
+  ui.cloud.migrationAvailable = false;
+  const saved = saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt);
+  if (!saved) ui.cloud.error = "云端可用，但浏览器未能保存离线缓存";
+}
+
+async function initializeCloudSync() {
+  if (!workspaceActive || cloudInitializationRunning) return;
+  if (navigator.onLine === false) {
+    ui.cloud.status = "offline";
+    render();
+    return;
+  }
+
+  cloudInitializationRunning = true;
+  ui.cloud.status = "loading";
+  ui.cloud.error = "";
+  render();
+  try {
+    const remote = await loadCloudWorkspace(workspaceAuth.client, workspaceAuth.userId, () => workspaceActive);
+    if (!workspaceActive) return;
+
+    if (cloudCacheActive && cloudBaseline) {
+      activateCloudWorkspace(remote, db, true);
+      await syncCloudNow();
+      return;
+    }
+
+    migrationState = loadCloudMigrationState(workspaceAuth.userId);
+    if (migrationState.approved && !migrationState.completed) {
+      ui.cloud.status = "migrating";
+      render();
+      let migrated;
+      let revision;
+      do {
+        revision = workspaceDataRevision;
+        migrated = await migrateLocalWorkspace(workspaceAuth.client, workspaceAuth.userId, db, () => workspaceActive);
+        if (!workspaceActive) return;
+      } while (workspaceDataRevision !== revision);
+      migrationState = { approved: true, completed: true };
+      saveCloudMigrationState(workspaceAuth.userId, migrationState);
+      activateCloudWorkspace(migrated, db);
+      ui.cloud.localDataUnmerged = 0;
+      return;
+    }
+
+    if (!migrationState.completed && !hasCloudRecords(remote.data) && hasLocalMigrationCandidates(db)) {
+      ui.cloud.status = "migration";
+      ui.cloud.migrationAvailable = true;
+      ui.cloud.localDataUnmerged = 0;
+      return;
+    }
+
+    const unmergedCount = hasCloudRecords(remote.data)
+      ? Object.values(countLocalMigrationCandidates(db)).reduce((sum, count) => sum + count, 0)
+      : 0;
+    activateCloudWorkspace(remote, db);
+    ui.cloud.localDataUnmerged = unmergedCount;
+    if (unmergedCount) {
+      saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt);
+    }
+  } catch (error) {
+    if (!workspaceActive) return;
+    cloudSyncRequested = false;
+    ui.cloud.status = navigator.onLine === false ? "offline" : "error";
+    ui.cloud.error = typeof error?.message === "string" ? error.message : "云端连接失败";
+  } finally {
+    cloudInitializationRunning = false;
+    if (workspaceActive) render();
+  }
+}
+
+function scheduleCloudSync() {
+  clearTimeout(cloudSyncTimer);
+  cloudSyncTimer = setTimeout(() => {
+    cloudSyncTimer = null;
+    if (cloudSyncRunning) {
+      cloudSyncRequested = true;
+      return;
+    }
+    void syncCloudNow();
+  }, 350);
+}
+
+async function syncCloudNow() {
+  if (!workspaceActive || !cloudSyncEnabled) return;
+  if (navigator.onLine === false) {
+    ui.cloud.status = "offline";
+    render();
+    return;
+  }
+  if (cloudSyncRunning) {
+    cloudSyncRequested = true;
+    return;
+  }
+
+  cloudSyncRunning = true;
+  try {
+    do {
+      cloudSyncRequested = false;
+      ui.cloud.status = "syncing";
+      render();
+      const revision = workspaceDataRevision;
+      const nextBaseline = await saveCloudChanges(workspaceAuth.client, workspaceAuth.userId, currentCloudData(), cloudBaseline, () => workspaceActive);
+      if (!workspaceActive) return;
+      cloudBaseline = nextBaseline;
+      ui.cloud.lastSyncedAt = new Date().toISOString();
+      ui.cloud.status = "synced";
+      ui.cloud.error = "";
+      saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt);
+      if (workspaceDataRevision !== revision) cloudSyncRequested = true;
+    } while (cloudSyncRequested && workspaceActive);
+  } catch (error) {
+    if (!workspaceActive) return;
+    cloudSyncRequested = false;
+    ui.cloud.status = navigator.onLine === false ? "offline" : "error";
+    ui.cloud.error = typeof error?.message === "string" ? error.message : "云端保存失败";
+    saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt);
+  } finally {
+    cloudSyncRunning = false;
+    if (workspaceActive) render();
+    if (cloudSyncRequested && workspaceActive) void syncCloudNow();
+  }
+}
+
+async function migrateLegacyData() {
+  if (!workspaceActive || !ui.cloud.migrationAvailable) return;
+  const approved = saveCloudMigrationState(workspaceAuth.userId, { approved: true, completed: false });
+  if (!approved) {
+    ui.cloud.status = "error";
+    ui.cloud.error = "浏览器未能保存迁移确认，请检查本机存储空间后重试";
+    render();
+    return;
+  }
+
+  ui.cloud.status = "migrating";
+  ui.cloud.error = "";
+  render();
+  try {
+    let migrated;
+    let revision;
+    do {
+      revision = workspaceDataRevision;
+      migrated = await migrateLocalWorkspace(workspaceAuth.client, workspaceAuth.userId, db, () => workspaceActive);
+      if (!workspaceActive) return;
+    } while (workspaceDataRevision !== revision);
+    migrationState = { approved: true, completed: true };
+    saveCloudMigrationState(workspaceAuth.userId, migrationState);
+    activateCloudWorkspace(migrated, db);
+    ui.cloud.localDataUnmerged = 0;
+    toast("本机真实资料已安全迁移到云端；演示资料和旧本地副本仍保留在此设备");
+  } catch (error) {
+    if (!workspaceActive) return;
+    ui.cloud.status = navigator.onLine === false ? "offline" : "error";
+    ui.cloud.error = typeof error?.message === "string" ? error.message : "迁移失败，本机资料仍保留";
+  }
+  render();
+}
+
+function deferLegacyMigration() {
+  ui.cloud.migrationDismissed = true;
+  render();
+}
+
+window.addEventListener("online", () => {
+  if (workspaceActive) void initializeCloudSync();
+});
+
+window.addEventListener("offline", () => {
+  if (!workspaceActive) return;
+  ui.cloud.status = "offline";
+  render();
+});
 
 export function clearPrivateWorkspace() {
   if (!workspaceActive) return;
   workspaceActive = false;
+  cloudSyncEnabled = false;
+  cloudCacheActive = false;
+  cloudBaseline = null;
+  cloudCache = null;
+  legacyData = { version: 1, settings: {}, projects: [], tasks: [], knowledge: [], decisions: [], activities: [] };
+  workspaceAuth = null;
+  migrationState = null;
+  clearTimeout(cloudSyncTimer);
+  cloudSyncTimer = null;
   activeLocalScanController?.abort();
   activeLocalScanController = null;
   db = { version: 1, settings: { theme: "system" }, projects: [], tasks: [], knowledge: [], decisions: [], activities: [] };
@@ -205,6 +455,9 @@ export function clearPrivateWorkspace() {
   ui.confirmation = null;
   ui.assistantOpen = false;
   ui.query = "";
+  ui.cloud.migrationAvailable = false;
+  ui.cloud.lastSyncedAt = "";
+  ui.cloud.localDataUnmerged = 0;
   app.replaceChildren();
 }
 
@@ -258,7 +511,7 @@ function taskRow(task, compact = false) {
     <button class="check-button ${task.status === "done" ? "checked" : ""}" data-action="toggle-task" data-id="${esc(task.id)}" aria-label="${task.status === "done" ? "重新打开" : "完成"}任务">${task.status === "done" ? icon("checkSquare") : ""}</button>
     <div class="task-text">${esc(task.title)}${!compact ? `<div class="task-sub">${esc(project?.name || "无关联项目")}${task.due ? ` · ${esc(task.due)}` : ""}</div>` : ""}</div>
     <span class="priority ${priorityClass(task.priority)}">${esc(task.priority || "低")}优先级</span>
-    ${compact ? "" : `<button class="icon-button" data-action="edit-task" data-id="${esc(task.id)}" aria-label="编辑任务">${icon("edit")}</button>`}
+    ${compact ? "" : `<button class="icon-button" data-action="edit-task" data-id="${esc(task.id)}" aria-label="编辑任务">${icon("edit")}</button><button class="icon-button" data-action="delete-task" data-id="${esc(task.id)}" aria-label="删除任务">${icon("trash")}</button>`}
   </div>`;
 }
 
@@ -428,8 +681,9 @@ function renderProjects() {
     const gitClass = !item.hasGit || item.clean === false ? "warning" : item.clean === true ? "ok" : "";
     return `<article class="card local-project-row"><div class="local-project-main"><h3>${esc(item.name)}</h3><code>${esc(item.path)}</code><span class="local-project-link">${linked ? `工作台项目：${esc(linked.name)}` : repository ? `<a href="${esc(repository)}" target="_blank" rel="noreferrer">${esc(repository.replace("https://github.com/", ""))}</a>` : "未关联工作台项目"}</span></div><div class="local-project-meta"><span class="local-state ${gitClass}">${esc(gitLabel)}</span><span>分支 ${esc(item.branch || (item.hasGit ? "未知" : "—"))}</span><span>${esc(localAheadBehind(item))}</span></div><button class="button small" data-action="view-local-project" data-id="${esc(item.id)}">查看状态 ${icon("chevron")}</button></article>`;
   }).join("")}</div>` : ui.localProjects ? `<div class="card empty-state">扫描目录中没有发现本地项目。</div>` : `<div class="card local-companion-notice"><strong>${ui.localProjectsStatus === "loading" ? "正在读取本地项目" : "尚未连接本地 Companion"}</strong><p>请确认开机 Companion 已启动，或在本机项目目录运行 <code>python local_companion.py</code>，然后重新扫描。GitHub Pages 通过允许的跨源请求尝试访问本机 127.0.0.1:4174。</p></div>`}</section>`;
-  return `<div class="page-heading"><div><div class="eyebrow">工作空间</div><h1>Projects</h1><p>项目、当前阶段与下一步都在这里。</p></div><div class="heading-actions"><span class="github-overview-status">${esc(connectionLabel)}</span><button class="button" data-action="refresh-github" ${ui.githubRefreshing ? "disabled aria-busy=\"true\"" : ""}>${icon("reset")} 刷新 GitHub 数据</button><button class="button primary" data-action="open-create-project">${icon("plus")} 新建项目</button></div></div>
+  return `<div class="page-heading"><div><div class="eyebrow">工作空间</div><h1>Projects</h1><p>云端保存项目基础资料；本机 Git 状态由当前设备的 Companion 提供。</p></div><div class="heading-actions"><span class="github-overview-status">${esc(connectionLabel)}</span><button class="button" data-action="refresh-github" ${ui.githubRefreshing ? "disabled aria-busy=\"true\"" : ""}>${icon("reset")} 刷新 GitHub 数据</button><button class="button primary" data-action="open-create-project">${icon("plus")} 新建项目</button></div></div>
     ${localSection}
+    <div class="section-title cloud-project-heading"><div><h2>云端项目资料</h2><p>名称、描述、状态、GitHub URL 和手工备注随账号同步。</p></div></div>
     ${projects.length ? `<div class="project-cards">${projects.map((project) => {
       const tasks = db.tasks.filter((item) => item.projectId === project.id);
       const done = tasks.filter((item) => item.status === "done").length;
@@ -473,12 +727,20 @@ function renderGitHubDetails(project) {
     </div></section>`;
 }
 
-function renderLocalProjectDetails(localProject, fallbackPath = "") {
+function missingLocalProjectLabel() {
+  if (ui.localProjectsStatus === "ready") return "此设备未发现本地项目";
+  if (ui.localProjectsStatus === "loading") return ui.localProjects ? "正在扫描；当前缓存未发现匹配项目" : "Companion 正在扫描此设备";
+  if (ui.localProjects) return "扫描缓存未发现匹配项目（缓存可能过期）";
+  return "Companion 离线，本机状态暂不可用";
+}
+
+function renderLocalProjectDetails(localProject) {
   const value = (label, content) => `<div class="local-data-cell"><div class="meta-label">${label}</div><div class="local-data-value">${content}</div></div>`;
   const documents = localProject?.documents || {};
   const commit = localProject?.lastLocalCommit;
-  const cleanLabel = localProject ? localGitLabel(localProject) : "尚未读取";
-  const aheadBehind = localProject ? localAheadBehind(localProject) : "尚未读取";
+  const missing = localProject ? "" : missingLocalProjectLabel();
+  const cleanLabel = localProject ? localGitLabel(localProject) : missing;
+  const aheadBehind = localProject ? localAheadBehind(localProject) : missing;
   const docRows = [
     ["README", documents.readme],
     ["HANDOFF", documents.handoff],
@@ -488,15 +750,15 @@ function renderLocalProjectDetails(localProject, fallbackPath = "") {
     ["CHANGELOG", documents.changelog],
   ];
   return `<section class="card local-data-card"><div class="github-info-head"><div><h3>本地扫描状态</h3><p>文件名、Git 元数据和最后修改时间；不读取文档正文。</p></div><span class="local-state ${localProject?.clean === false || !localProject?.hasGit ? "warning" : localProject?.clean === true ? "ok" : ""}">${esc(cleanLabel)}</span></div><div class="local-data-grid">
-    ${value("Local Path", esc(localProject?.path || fallbackPath || "未设置"))}
+    ${value("Local Path", esc(localProject?.path || missing))}
     ${value("Git Status", esc(cleanLabel))}
-    ${value("Branch", esc(localProject?.branch || (localProject?.hasGit ? "未知" : localProject ? "无 Git" : "尚未读取")))}
+    ${value("Branch", esc(localProject?.branch || (localProject?.hasGit ? "未知" : localProject ? "无 Git" : missing)))}
     ${value("Ahead / Behind", esc(aheadBehind))}
-    ${value("本地 HEAD", esc(localProject?.head || "尚未读取"))}
-    ${value("origin/main", esc(localProject?.originMain || "未找到本地引用"))}
-    ${value("Last Local Commit", commit ? `${esc(commit.message || "无提交说明")}<br><span class="minor">${esc(commit.sha)} · ${esc(commit.committedAt ? formattedTimestamp(commit.committedAt) : "时间未知")}</span>` : localProject?.hasGit ? "暂无提交记录" : "无 Git 仓库")}
-    ${value("最后修改", esc(localProject?.modifiedAt ? formattedTimestamp(localProject.modifiedAt) : "尚未读取"))}
-    </div><div class="local-documents"><div class="meta-label">项目文档（仅检查是否存在）</div><div class="local-document-grid">${docRows.map(([label, path]) => `<div class="local-document ${path ? "present" : "missing"}"><span>${path ? "✓" : "—"} ${label}</span><small>${esc(path || "缺失")}</small></div>`).join("")}</div></div>${!localProject ? `<p class="local-scan-note">本机扫描尚未发现与此工作台项目匹配的目录。</p>` : ""}</section>`;
+    ${value("本地 HEAD", esc(localProject?.head || missing))}
+    ${value("origin/main", esc(localProject ? (localProject.originMain || "未找到本地引用") : missing))}
+    ${value("Last Local Commit", commit ? `${esc(commit.message || "无提交说明")}<br><span class="minor">${esc(commit.sha)} · ${esc(commit.committedAt ? formattedTimestamp(commit.committedAt) : "时间未知")}</span>` : localProject?.hasGit ? "暂无提交记录" : localProject ? "无 Git 仓库" : esc(missing))}
+    ${value("最后修改", esc(localProject?.modifiedAt ? formattedTimestamp(localProject.modifiedAt) : missing))}
+    </div><div class="local-documents"><div class="meta-label">项目文档（仅检查是否存在）</div><div class="local-document-grid">${docRows.map(([label, path]) => `<div class="local-document ${path ? "present" : "missing"}"><span>${path ? "✓" : "—"} ${label}</span><small>${esc(path || (localProject ? "缺失" : missing))}</small></div>`).join("")}</div></div>${!localProject ? `<p class="local-scan-note">${esc(missing)}；云端项目资料仍可查看。</p>` : ""}</section>`;
 }
 
 function knowledgeContent(item) {
@@ -514,10 +776,11 @@ function renderProjectDetail() {
   const github = safeExternal(project.github);
   const live = safeExternal(project.url);
   return `<div class="detail-topline"><button class="icon-button" data-page="projects" aria-label="返回项目">${icon("back")}</button><span>Projects</span>${icon("chevron")}<span>${esc(project.name)}</span></div>
-    <section class="card detail-hero"><div class="detail-hero-head"><div class="detail-hero-copy">${statusPill(project.status)}<h2 style="margin-top:11px">${esc(project.name)}</h2><p>${esc(project.description || "还没有项目简介。")}</p></div><div class="detail-actions"><button class="button" data-action="edit-project" data-id="${esc(project.id)}">${icon("edit")} 编辑项目</button><button class="button quiet danger" data-action="delete-project" data-id="${esc(project.id)}">${icon("trash")} 删除</button></div></div><div class="detail-links"><span class="detail-link">${icon("folder")} ${esc(localProject?.path || project.path || "本地路径未设置")}</span>${github ? `<a class="detail-link" href="${esc(github)}" target="_blank" rel="noreferrer">${icon("external")} GitHub</a>` : ""}${live ? `<a class="detail-link" href="${esc(live)}" target="_blank" rel="noreferrer">${icon("external")} 在线网址</a>` : ""}</div></section>
+    <section class="card detail-hero"><div class="detail-hero-head"><div class="detail-hero-copy">${statusPill(project.status)}<h2 style="margin-top:11px">${esc(project.name)}</h2><p>${esc(project.description || "还没有项目简介。")}</p></div><div class="detail-actions"><button class="button" data-action="edit-project" data-id="${esc(project.id)}">${icon("edit")} 编辑项目</button><button class="button quiet danger" data-action="delete-project" data-id="${esc(project.id)}">${icon("trash")} 删除</button></div></div><div class="detail-links">${github ? `<a class="detail-link" href="${esc(github)}" target="_blank" rel="noreferrer">${icon("external")} GitHub</a>` : ""}${live ? `<a class="detail-link" href="${esc(live)}" target="_blank" rel="noreferrer">${icon("external")} 在线网址</a>` : ""}</div></section>
     <div class="detail-meta-grid"><div class="card meta-card"><div class="meta-label">当前阶段</div><div class="meta-value">${esc(project.stage || "未设置")}</div></div><div class="card meta-card"><div class="meta-label">下一步</div><div class="meta-value">${esc(project.next || "待补充")}</div></div><div class="card meta-card"><div class="meta-label">进度概览</div><div class="meta-value">${tasks.filter((task) => task.status === "done").length} / ${tasks.length} 项任务完成</div></div></div>
-    ${renderLocalProjectDetails(localProject, project.path)}
+    ${project.notes ? `<section class="card card-pad project-notes"><div class="meta-label">云端手工备注</div><p>${esc(project.notes)}</p></section>` : ""}
     ${renderGitHubDetails(project)}
+    ${renderLocalProjectDetails(localProject)}
     <div class="subgrid"><section class="card task-panel">${sectionTitle("TODO", `<button class="button quiet small" data-action="open-create-task" data-project-id="${esc(project.id)}">${icon("plus")} 添加任务</button>`)}<div>${tasks.map((task) => `<div class="task-detail-row"><button class="check-button ${task.status === "done" ? "checked" : ""}" data-action="toggle-task" data-id="${esc(task.id)}" aria-label="${task.status === "done" ? "重新打开" : "完成"}任务">${task.status === "done" ? icon("checkSquare") : ""}</button><div class="task-text">${esc(task.title)}</div><span class="priority ${priorityClass(task.priority)}">${esc(task.priority || "低")}</span></div>`).join("") || `<div class="empty-state">这个项目还没有任务。</div>`}</div></section>
       <section class="card card-pad">${sectionTitle("最近活动", `<span class="minor">${activities.length} 条</span>`)}<div>${activities.map(activityRow).join("") || `<div class="empty-state">项目活动会显示在这里。</div>`}</div></section>
       <section class="card card-pad" style="grid-column:1/-1">${sectionTitle("相关资料", `<button class="button quiet small" data-action="open-create-knowledge" data-project-id="${esc(project.id)}">${icon("plus")} 添加资料</button>`)}<div class="subgrid">${knowledge.map((item) => `<article class="card knowledge-card"><span class="type-pill">${esc(item.type)}</span><h3>${esc(item.title)}</h3><p>${esc(item.summary || item.content)}</p><div class="tag-row">${item.tags.map((tag) => `<span class="tag">#${esc(tag)}</span>`).join("")}</div></article>`).join("") || `<div class="empty-state">还没有关联资料。</div>`}</div></section></div>`;
@@ -528,20 +791,20 @@ function renderLocalProjectDetail() {
   if (!localProject) return `<div class="page-heading"><div><h1>找不到本地项目</h1><p>请返回 Projects 并重新扫描本机目录。</p></div><button class="button" data-page="projects">${icon("back")} 返回项目</button></div>`;
   const linked = workspaceProjectForLocal(localProject);
   const repository = safeExternal(localProject.githubRepository || linked?.github || "");
-  return `<div class="detail-topline"><button class="icon-button" data-page="projects" aria-label="返回项目">${icon("back")}</button><span>Projects</span>${icon("chevron")}<span>${esc(localProject.name)}</span></div><section class="card detail-hero"><div class="detail-hero-head"><div class="detail-hero-copy"><span class="status-pill">本地项目</span><h2 style="margin-top:11px">${esc(localProject.name)}</h2><p>${linked ? `已对应工作台项目「${esc(linked.name)}」。` : "此目录目前尚未关联工作台项目记录。"}</p></div><div class="detail-actions"><button class="button primary" data-action="open-assistant">${icon("sparkle")} 询问 AI</button></div></div><div class="detail-links"><span class="detail-link">${icon("folder")} ${esc(localProject.path)}</span>${repository ? `<a class="detail-link" href="${esc(repository)}" target="_blank" rel="noreferrer">${icon("external")} GitHub</a>` : ""}</div></section>${renderLocalProjectDetails(localProject, localProject.path)}${linked ? renderGitHubDetails(linked) : ""}<section class="card card-pad local-readonly-note"><strong>只读扫描</strong><p>工作区内文件、Git 提交、远端引用和文档内容均未被修改；扫描只读取项目文档文件名。</p></section>`;
+  return `<div class="detail-topline"><button class="icon-button" data-page="projects" aria-label="返回项目">${icon("back")}</button><span>Projects</span>${icon("chevron")}<span>${esc(localProject.name)}</span></div><section class="card detail-hero"><div class="detail-hero-head"><div class="detail-hero-copy"><span class="status-pill">当前设备本地状态</span><h2 style="margin-top:11px">${esc(localProject.name)}</h2><p>${linked ? `已对应云端项目「${esc(linked.name)}」。` : "此目录目前尚未关联云端项目资料。"}</p></div><div class="detail-actions"><button class="button primary" data-action="open-assistant">${icon("sparkle")} 询问 AI</button></div></div><div class="detail-links"><span class="detail-link">${icon("folder")} ${esc(localProject.path)}</span>${repository ? `<a class="detail-link" href="${esc(repository)}" target="_blank" rel="noreferrer">${icon("external")} GitHub</a>` : ""}</div></section>${renderLocalProjectDetails(localProject)}${linked ? renderGitHubDetails(linked) : ""}<section class="card card-pad local-readonly-note"><strong>只读扫描</strong><p>工作区内文件、Git 提交、远端引用和文档内容均未被修改；扫描只读取项目文档文件名。</p></section>`;
 }
 
 function renderTasks() {
   const filters = [["all", "全部"], ["todo", "待办"], ["done", "已完成"]];
   const tasks = [...db.tasks].filter((task) => ui.taskFilter === "all" || task.status === ui.taskFilter).sort((a, b) => Number(a.status === "done") - Number(b.status === "done") || ["高", "中", "低"].indexOf(a.priority) - ["高", "中", "低"].indexOf(b.priority));
-  return `<div class="page-heading"><div><div class="eyebrow">行动清单</div><h1>Tasks</h1><p>把下一步写清楚，一件一件完成。</p></div><div class="heading-actions"><button class="button primary" data-action="open-create-task">${icon("plus")} 新建任务</button></div></div>
+  return `<div class="page-heading"><div><div class="eyebrow">行动清单 · 云端同步</div><h1>Tasks</h1><p>把下一步写清楚，一件一件完成。</p></div><div class="heading-actions"><button class="button primary" data-action="open-create-task">${icon("plus")} 新建任务</button></div></div>
     <div class="toolbar"><div class="filter-list">${filters.map(([value, label]) => `<button class="filter-button ${ui.taskFilter === value ? "active" : ""}" data-action="filter-tasks" data-filter="${value}">${label}${value === "todo" ? ` · ${openTasks().length}` : ""}</button>`).join("")}</div><span class="muted">${tasks.length} 项任务</span></div>
     <section class="card card-pad"><div class="task-list">${tasks.map((task) => taskRow(task)).join("") || `<div class="empty-state"><strong>没有符合条件的任务</strong>创建一条任务，让下一步更清晰。</div>`}</div></section>`;
 }
 
 function renderKnowledge() {
   const records = [...db.knowledge].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return `<div class="page-heading"><div><div class="eyebrow">收件箱 · 本地资料</div><h1>Knowledge</h1><p>先收集，再整理。V1 保存文本、笔记和链接。</p></div><div class="heading-actions"><button class="button primary" data-action="open-create-knowledge">${icon("plus")} 添加资料</button></div></div>
+  return `<div class="page-heading"><div><div class="eyebrow">收件箱 · 云端同步</div><h1>Knowledge</h1><p>先收集，再整理。文本、笔记和链接随账号保存。</p></div><div class="heading-actions"><button class="button primary" data-action="open-create-knowledge">${icon("plus")} 添加资料</button></div></div>
     <section class="card card-pad"><div class="card-header"><h3>所有资料</h3><span class="minor">${records.length} 条</span></div>${records.map((item) => `<article class="knowledge-row"><div class="record-icon">${recordIcon(item.type)}</div><div class="record-copy"><div class="record-title">${esc(item.title)}</div><div class="record-meta">${esc(item.summary || "暂无摘要")} · ${esc(projectTitle(item.projectId))} · ${timeAgo(item.createdAt)}</div><details class="knowledge-details"><summary>查看内容</summary><div class="record-meta content-text">${knowledgeContent(item)}</div></details><div class="tag-row">${item.tags.map((tag) => `<span class="tag">#${esc(tag)}</span>`).join("")}</div></div><div class="record-actions" style="opacity:1"><button class="icon-button" data-action="edit-knowledge" data-id="${esc(item.id)}" aria-label="编辑资料">${icon("edit")}</button><button class="icon-button" data-action="delete-knowledge" data-id="${esc(item.id)}" aria-label="删除资料">${icon("trash")}</button></div></article>`).join("") || `<div class="empty-state"><strong>收件箱还空着</strong>添加一段文字、一则笔记或一个网页链接。</div>`}</section>`;
 }
 
@@ -552,7 +815,7 @@ function decisionCard(decision) {
 
 function renderDecisions() {
   const decisions = [...db.decisions].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return `<div class="page-heading"><div><div class="eyebrow">决策记录</div><h1>Decisions</h1><p>把问题、选项和最终原因放在一起，方便以后回看。</p></div><div class="heading-actions"><button class="button primary" data-action="open-create-decision">${icon("plus")} 新建决策</button></div></div>
+  return `<div class="page-heading"><div><div class="eyebrow">决策记录 · 云端同步</div><h1>Decisions</h1><p>把问题、选项和最终原因放在一起，方便以后回看。</p></div><div class="heading-actions"><button class="button primary" data-action="open-create-decision">${icon("plus")} 新建决策</button></div></div>
     <div class="section-title"><h2>历史决策</h2><span class="muted">${decisions.length} 条记录</span></div>${decisions.map(decisionCard).join("") || `<div class="card empty-state"><strong>还没有决策记录</strong>记录一次选择，之后就能回看当时的考虑。<br><br><button class="button primary" data-action="open-create-decision">${icon("plus")} 新建决策</button></div>`}`;
 }
 
@@ -564,7 +827,7 @@ function pageTitle() {
 
 function renderNav() {
   const items = [["home", "grid", "Home"], ["projects", "folder", "Projects"], ["knowledge", "inbox", "Knowledge"], ["decisions", "bulb", "Decisions"], ["tasks", "checkSquare", "Tasks"]];
-  return `<aside class="sidebar"><div class="brand"><div class="brand-mark">D</div><div><div class="brand-name">Daniel Workspace · V2.5</div><div class="brand-caption">个人 AI 工作台</div></div></div><div class="nav-label">Workspace</div><nav class="nav-list" aria-label="主导航">${items.map(([page, iconName, label]) => `<button class="nav-item ${(ui.page === page || (ui.page === "project" && page === "projects")) ? "active" : ""}" data-page="${page}">${icon(iconName)}<span>${label}</span>${page === "tasks" ? `<span class="nav-count">${openTasks().length}</span>` : ""}</button>`).join("")}</nav><div class="sidebar-spacer"></div><div class="workspace-mini"><div class="avatar">D</div><div><div class="workspace-title">Daniel 的工作区</div><div class="workspace-sub">仅保存在此浏览器</div></div><button class="icon-button" data-action="reset-demo" title="重置演示数据" aria-label="重置演示数据">${icon("more")}</button></div><div class="sidebar-footer"><span class="local-label"><span class="local-dot"></span> 本地数据已启用</span><button class="icon-button" data-action="reset-demo" title="重置演示数据" aria-label="重置演示数据">${icon("reset")}</button></div></aside>`;
+  return `<aside class="sidebar"><div class="brand"><div class="brand-mark">D</div><div><div class="brand-name">Daniel Workspace · V2.6</div><div class="brand-caption">个人 AI 工作台</div></div></div><div class="nav-label">Workspace</div><nav class="nav-list" aria-label="主导航">${items.map(([page, iconName, label]) => `<button class="nav-item ${(ui.page === page || (ui.page === "project" && page === "projects")) ? "active" : ""}" data-page="${page}">${icon(iconName)}<span>${label}</span>${page === "tasks" ? `<span class="nav-count">${openTasks().length}</span>` : ""}</button>`).join("")}</nav><div class="sidebar-spacer"></div><div class="workspace-mini"><div class="avatar">D</div><div><div class="workspace-title">Daniel 的工作区</div><div class="workspace-sub">云端资料 · 本机状态</div></div><button class="icon-button" data-action="reset-demo" title="重置演示数据" aria-label="重置演示数据">${icon("more")}</button></div><div class="sidebar-footer"><span class="local-label"><span class="local-dot"></span> Companion 只读扫描</span><button class="icon-button" data-action="reset-demo" title="重置演示数据" aria-label="重置演示数据">${icon("reset")}</button></div></aside>`;
 }
 
 function searchItems(query) {
@@ -645,18 +908,18 @@ function renderModal() {
   let title = "", subtitle = "", form = "", wide = "";
 
   if (kind === "project") {
-    title = isEdit ? "编辑项目" : "新建项目"; subtitle = "记录当前阶段、路径与下一步。";
-    form = `<div class="form-grid">${field("项目名称", "name", existing?.name || "", { full: true })}${field("项目简介", "description", existing?.description || "", { full: true, textarea: true, short: true, required: false, placeholder: "这个项目要解决什么问题？" })}${field("当前状态", "status", existing?.status || "计划中", { select: ["计划中", "进行中", "暂停", "已完成"].map((x) => `<option ${x === (existing?.status || "计划中") ? "selected" : ""}>${x}</option>`).join("") })}${field("当前阶段", "stage", existing?.stage || "", { placeholder: "例如：原型验证" })}${field("本地路径", "path", existing?.path || "", { full: true, optional: true, required: false, placeholder: "本机项目路径" })}${field("GitHub 地址", "github", existing?.github || "", { optional: true, required: false, placeholder: "https://github.com/..." })}${field("在线网址", "url", existing?.url || "", { optional: true, required: false, placeholder: "https://..." })}${field("下一步", "next", existing?.next || "", { full: true, textarea: true, short: true, required: false })}</div>`;
+    title = isEdit ? "编辑项目" : "新建项目"; subtitle = "项目基础资料随账号同步；本机路径只保存在此设备。";
+    form = `<div class="form-grid">${field("项目名称", "name", existing?.name || "", { full: true })}${field("项目简介", "description", existing?.description || "", { full: true, textarea: true, short: true, required: false, placeholder: "这个项目要解决什么问题？" })}${field("当前状态", "status", existing?.status || "计划中", { select: ["计划中", "进行中", "暂停", "已完成"].map((x) => `<option ${x === (existing?.status || "计划中") ? "selected" : ""}>${x}</option>`).join("") })}${field("当前阶段", "stage", existing?.stage || "", { placeholder: "例如：原型验证" })}${field("本地路径（仅此设备）", "path", existing?.path || "", { full: true, optional: true, required: false, placeholder: "本机项目路径" })}${field("GitHub 地址", "github", existing?.github || "", { optional: true, required: false, placeholder: "https://github.com/..." })}${field("在线网址", "url", existing?.url || "", { optional: true, required: false, placeholder: "https://..." })}${field("下一步", "next", existing?.next || "", { full: true, textarea: true, short: true, required: false })}${field("手工备注", "notes", existing?.notes || "", { full: true, textarea: true, short: true, optional: true, required: false, placeholder: "跨设备保留的项目背景或补充信息" })}</div>`;
   } else if (kind === "task") {
-    title = isEdit ? "编辑任务" : "新建任务"; subtitle = "任务保存在本地，可以随时调整优先级和关联项目。";
+    title = isEdit ? "编辑任务" : "新建任务"; subtitle = "任务自动保存到此账号的云端工作区。";
     const selectedProject = existing?.projectId || ui.modal.projectId || "";
     form = `<div class="form-grid">${field("任务名称", "title", existing?.title || "", { full: true })}${field("关联项目", "projectId", "", { select: projectOptions(selectedProject), required: false })}${field("优先级", "priority", "", { select: ["高", "中", "低"].map((x) => `<option ${x === (existing?.priority || "中") ? "selected" : ""}>${x}</option>`).join("") })}${field("到期提示", "due", existing?.due || "", { optional: true, required: false, placeholder: "例如：周五" })}</div>`;
   } else if (kind === "knowledge") {
-    title = isEdit ? "编辑资料" : "添加资料"; subtitle = "手动保存文本、笔记或链接，不会解析网页内容。"; wide = "wide";
+    title = isEdit ? "编辑资料" : "添加资料"; subtitle = "内容自动保存到此账号的云端收件箱，不会解析网页内容。"; wide = "wide";
     const typeSelect = ["文本", "笔记", "链接"].map((x) => `<option ${x === (existing?.type || "笔记") ? "selected" : ""}>${x}</option>`).join("");
     form = `<div class="form-grid">${field("资料类型", "type", "", { select: typeSelect })}${field("关联项目", "projectId", "", { select: projectOptions(existing?.projectId || ui.modal.projectId || ""), required: false })}${field("标题", "title", existing?.title || "", { full: true })}${field("内容", "content", existing?.content || "", { full: true, textarea: true, placeholder: "粘贴文字、写一则笔记或输入网页链接…" })}${field("简单摘要", "summary", existing?.summary || "", { full: true, textarea: true, short: true, optional: true, required: false, placeholder: "一句话概括这条资料" })}${field("标签", "tags", existing?.tags.join(", ") || "", { full: true, optional: true, required: false, placeholder: "用逗号分隔，例如：产品, 灵感" })}</div>`;
   } else if (kind === "decision") {
-    title = isEdit ? "编辑决策" : "新建决策"; subtitle = "把目标、方案、取舍和最终理由保留在一起。"; wide = "wide";
+    title = isEdit ? "编辑决策" : "新建决策"; subtitle = "决策内容自动保存到此账号的云端工作区。"; wide = "wide";
     const optionsText = existing?.options.join("\n") || "";
     form = `<div class="form-grid">${field("问题", "question", existing?.question || "", { full: true })}${field("目标", "goal", existing?.goal || "", { full: true, textarea: true, short: true })}${field("可选方案", "options", optionsText, { full: true, textarea: true, short: true, placeholder: "每行一个方案" })}${field("时间", "time", existing?.time || "", { textarea: true, short: true, optional: true, required: false })}${field("成本", "cost", existing?.cost || "", { textarea: true, short: true, optional: true, required: false })}${field("风险", "risk", existing?.risk || "", { full: true, textarea: true, short: true, optional: true, required: false })}<div class="field full"><label>AI 建议 <span class="tag">Mock</span></label><div class="recommendation-box" id="decision-recommendation">${esc(existing?.recommendation || recommendationFor([], existing?.goal || "", existing?.risk || ""))}</div></div>${field("最终决定", "final", existing?.final || "", { full: true, optional: true, required: false, placeholder: "填写最终选择的方案" })}${field("决定原因", "reason", existing?.reason || "", { full: true, textarea: true, short: true, optional: true, required: false })}${field("关联项目", "projectId", "", { full: true, select: projectOptions(existing?.projectId || ""), required: false })}</div>`;
   }
@@ -664,10 +927,39 @@ function renderModal() {
   return `<div class="modal-backdrop" data-action="close-modal-backdrop"><section class="modal ${wide}" role="dialog" aria-modal="true" aria-labelledby="modal-title"><header class="modal-head"><div class="modal-head-copy"><h2 id="modal-title">${title}</h2><p>${subtitle}</p></div><button class="icon-button" data-action="close-modal" aria-label="关闭">${icon("close")}</button></header><form id="record-form" data-kind="${kind}" data-id="${esc(id || "")}"><div class="modal-body">${form}</div><footer class="modal-foot"><button class="button" type="button" data-action="close-modal">取消</button><button class="button primary" type="submit">${isEdit ? "保存修改" : kind === "decision" ? "保存决策" : "保存"}</button></footer></form></section></div>`;
 }
 
+function cloudStatusLabel() {
+  if (ui.cloud.status === "synced") {
+    const time = ui.cloud.lastSyncedAt ? new Date(ui.cloud.lastSyncedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : "";
+    return time ? `已同步 ${time}` : "已同步";
+  }
+  if (ui.cloud.status === "syncing") return "正在同步…";
+  if (ui.cloud.status === "migrating") return "正在迁移…";
+  if (ui.cloud.status === "loading") return "正在读取…";
+  if (ui.cloud.status === "offline") return "离线 · 保留缓存";
+  if (ui.cloud.status === "migration") return ui.cloud.migrationDismissed ? "本机保存" : "待迁移";
+  return "同步失败 · 重试";
+}
+
+function renderCloudNotice() {
+  if (ui.cloud.migrationAvailable && !ui.cloud.migrationDismissed) {
+    const counts = countLocalMigrationCandidates(db);
+    const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
+    const summary = Object.entries(counts).filter(([, count]) => count).map(([kind, count]) => `${({ projects: "项目", tasks: "任务", knowledge: "资料", decisions: "决策" })[kind]} ${count}`).join(" · ");
+    return `<section class="cloud-notice" role="status"><div><strong>发现此设备的旧工作区资料</strong><p>Supabase 云端目前为空。可以将 ${total} 条真实资料迁移到云端；演示内容会跳过，已有云端记录不会被覆盖。本机原始 localStorage 会保留。</p><span class="cloud-notice-detail">${esc(summary)}</span>${ui.cloud.status === "error" ? `<p class="cloud-notice-error">迁移没有完成；本机资料仍保留。${ui.cloud.error ? ` ${esc(ui.cloud.error)}` : ""}</p>` : ""}</div><div class="cloud-notice-actions"><button class="button primary small" data-action="migrate-legacy-data" ${ui.cloud.status === "migrating" ? "disabled" : ""}>迁移到云端</button><button class="button quiet small" data-action="defer-cloud-migration">稍后</button></div></section>`;
+  }
+  if (ui.cloud.localDataUnmerged) {
+    return `<section class="cloud-notice" role="status"><div><strong>云端已有工作区资料</strong><p>为保护云端内容，本机旧资料没有自动合并；它仍保存在这台设备原有的 localStorage 中。当前显示云端资料。</p></div></section>`;
+  }
+  if (ui.cloud.status === "error" || ui.cloud.status === "offline") {
+    return `<section class="cloud-notice cloud-notice-subtle" role="status"><div><strong>${ui.cloud.status === "offline" ? "当前离线" : "云端同步暂不可用"}</strong><p>页面保留最近的本机资料缓存；网络恢复或完成数据库初始化后，可点上方同步状态重试。</p></div></section>`;
+  }
+  return "";
+}
+
 function render() {
   if (!workspaceActive) return;
   const page = ui.page === "home" ? renderDashboard() : ui.page === "projects" ? renderProjects() : ui.page === "project" ? renderProjectDetail() : ui.page === "local-project" ? renderLocalProjectDetail() : ui.page === "tasks" ? renderTasks() : ui.page === "knowledge" ? renderKnowledge() : renderDecisions();
-  app.innerHTML = `${renderNav()}<main class="main-shell"><header class="topbar"><div class="breadcrumbs"><span>Daniel Workspace</span><span class="crumb-sep">/</span><strong>${esc(pageTitle())}</strong></div><div class="search-wrap"><div class="search-box">${icon("search")}<input id="global-search" type="search" value="${esc(ui.query)}" placeholder="搜索项目、资料、决策或任务…" autocomplete="off" aria-label="全局搜索"/><kbd class="search-hint">Ctrl K</kbd></div><div id="search-results"></div></div><div class="topbar-actions"><span class="today-label">${formattedDate()}</span><button class="icon-button theme-toggle" data-action="toggle-theme" title="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式" aria-label="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式">${icon(document.documentElement.dataset.theme === "light" ? "moon" : "sun")}</button><button class="icon-button" data-action="open-assistant" title="打开 AI Assistant" aria-label="打开 AI Assistant">${icon("sparkle")}</button><button class="button quiet small logout-button" data-action="logout">退出登录</button></div></header><div class="content">${page}</div></main>${renderAssistant()}${renderModal()}<div class="toast-region" id="toast-region" aria-live="polite"></div>`;
+  app.innerHTML = `${renderNav()}<main class="main-shell"><header class="topbar"><div class="breadcrumbs"><span>Daniel Workspace</span><span class="crumb-sep">/</span><strong>${esc(pageTitle())}</strong></div><div class="search-wrap"><div class="search-box">${icon("search")}<input id="global-search" type="search" value="${esc(ui.query)}" placeholder="搜索项目、资料、决策或任务…" autocomplete="off" aria-label="全局搜索"/><kbd class="search-hint">Ctrl K</kbd></div><div id="search-results"></div></div><div class="topbar-actions"><span class="today-label">${formattedDate()}</span><button class="cloud-sync-indicator ${esc(ui.cloud.status)}" data-action="retry-cloud-sync" title="点击重新检查 Supabase 同步状态" aria-live="polite" ${["loading", "syncing", "migrating"].includes(ui.cloud.status) ? "disabled" : ""}>${esc(cloudStatusLabel())}</button><button class="icon-button theme-toggle" data-action="toggle-theme" title="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式" aria-label="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式">${icon(document.documentElement.dataset.theme === "light" ? "moon" : "sun")}</button><button class="icon-button" data-action="open-assistant" title="打开 AI Assistant" aria-label="打开 AI Assistant">${icon("sparkle")}</button><button class="button quiet small logout-button" data-action="logout">退出登录</button></div></header><div class="content">${renderCloudNotice()}${page}</div></main>${renderAssistant()}${renderModal()}<div class="toast-region" id="toast-region" aria-live="polite"></div>`;
   renderSearchResults();
   if (ui.assistantOpen) document.querySelector("#assistant-messages")?.scrollTo({ top: 999999, behavior: "smooth" });
 }
@@ -745,7 +1037,7 @@ function submitRecord(form) {
   const now = new Date().toISOString();
 
   if (kind === "project") {
-    const item = { ...values, id: existing?.id || uid("project"), createdAt: existing?.createdAt || now, status: values.status || "计划中" };
+    const item = { ...values, id: existing?.id || uid("project"), createdAt: existing?.createdAt || now, updatedAt: now, status: values.status || "计划中" };
     if (existing) {
       const repositoryChanged = existing.github !== item.github;
       Object.assign(existing, item);
@@ -758,17 +1050,17 @@ function submitRecord(form) {
     ui.page = "project"; ui.projectId = item.id;
     history.replaceState({ page: "project", projectId: item.id }, "", `#project/${encodeURIComponent(item.id)}`);
   } else if (kind === "task") {
-    const item = { ...values, id: existing?.id || uid("task"), status: existing?.status || "todo", createdAt: existing?.createdAt || now };
+    const item = { ...values, id: existing?.id || uid("task"), status: existing?.status || "todo", createdAt: existing?.createdAt || now, updatedAt: now };
     if (existing) Object.assign(existing, item);
     else { db.tasks.unshift(item); logActivity("task-added", `创建任务「${item.title}」`, item.projectId || null); }
   } else if (kind === "knowledge") {
-    const item = { ...values, id: existing?.id || uid("knowledge"), tags: values.tags.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean), createdAt: existing?.createdAt || now };
+    const item = { ...values, id: existing?.id || uid("knowledge"), tags: values.tags.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean), createdAt: existing?.createdAt || now, updatedAt: now };
     if (existing) Object.assign(existing, item);
     else { db.knowledge.unshift(item); logActivity("knowledge-added", `新增资料「${item.title}」`, item.projectId || null); }
   } else if (kind === "decision") {
     const options = values.options.split(/\r?\n/).map((option) => option.trim()).filter(Boolean);
     const recommendation = recommendationFor(options, values.goal, values.risk);
-    const item = { ...values, options, recommendation, id: existing?.id || uid("decision"), createdAt: existing?.createdAt || now };
+    const item = { ...values, options, recommendation, id: existing?.id || uid("decision"), createdAt: existing?.createdAt || now, updatedAt: now };
     if (existing) Object.assign(existing, item);
     else { db.decisions.unshift(item); logActivity("decision-saved", `保存决策「${item.question}」`, item.projectId || null); }
     ui.page = "decisions";
@@ -890,6 +1182,9 @@ function handleAction(action, element, sourceEvent) {
     return;
   }
   if (action === "open-create-project") openModal("project");
+  if (action === "retry-cloud-sync") void initializeCloudSync();
+  if (action === "migrate-legacy-data") void migrateLegacyData();
+  if (action === "defer-cloud-migration") deferLegacyMigration();
   if (action === "open-create-task") openModal("task", null, element.dataset.projectId || null);
   if (action === "open-create-knowledge") openModal("knowledge", null, element.dataset.projectId || null);
   if (action === "open-create-decision") openModal("decision");
@@ -923,6 +1218,20 @@ function handleAction(action, element, sourceEvent) {
     render();
   }
   if (action === "edit-task") openModal("task", id);
+  if (action === "delete-task") {
+    const task = db.tasks.find((item) => item.id === id);
+    if (task) {
+      openConfirmation({
+        title: "删除任务",
+        message: `确定删除任务「${task.title}」吗？`,
+        confirmLabel: "删除任务",
+        onConfirm: () => {
+          db.tasks = db.tasks.filter((item) => item.id !== id);
+          persist(); render(); toast("任务已删除");
+        },
+      });
+    }
+  }
   if (action === "edit-knowledge") openModal("knowledge", id);
   if (action === "edit-decision") openModal("decision", id);
   if (action === "view-project") go("project", id);
@@ -935,6 +1244,7 @@ function handleAction(action, element, sourceEvent) {
     const task = db.tasks.find((item) => item.id === id);
     if (task) {
       task.status = task.status === "done" ? "todo" : "done";
+      task.updatedAt = new Date().toISOString();
       if (task.status === "done") logActivity("task-done", `完成任务「${task.title}」`, task.projectId || null);
       persist(); render(); toast(task.status === "done" ? "任务已完成" : "任务已重新打开");
     }
@@ -963,6 +1273,10 @@ function handleAction(action, element, sourceEvent) {
   if (action === "send-prompt") sendChat(element.dataset.prompt || "");
   if (action === "refresh-github") refreshGitHubData(id || null);
   if (action === "refresh-local-projects") refreshLocalProjects();
+  if (action === "reset-demo" && cloudSyncEnabled) {
+    toast("云端工作区不会通过演示重置删除；请逐条管理云端记录");
+    return;
+  }
   if (action === "reset-demo") {
     openConfirmation({
       title: "重置演示数据",
@@ -1054,4 +1368,5 @@ if (initialLocalProjectRoute) {
 }
 
 render();
+void initializeCloudSync();
 if (localScanEndpoint) refreshLocalProjects();

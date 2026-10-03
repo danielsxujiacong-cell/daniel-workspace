@@ -1,6 +1,14 @@
 # Changelog
 
-## 2026-09-30 · V2.5 (acceptance pending)
+## 2026-10-03 · V2.6 (等待数据库初始化)
+
+- 增加 Tasks、Knowledge、Decisions 和 Projects 基础资料的 Supabase 云同步客户端，继续复用现有 Auth 客户端，并对每张表按当前用户查询。
+- 新增 `supabase/v2.6-cloud-sync.sql`：四张表、`auth.uid() = user_id` RLS、仅 authenticated CRUD 权限和更新时间触发器。当前数据库尚无这些表，真实 RLS 和线上 CRUD 验收待 SQL 执行后完成。
+- 首次迁移必须由用户确认；跳过未修改的演示记录，迁移使用冲突忽略、不覆盖云端，并保留原有 `daniel-workspace-v1` 数据。离线编辑写入独立云端缓存，联网后可手动或自动重试。
+- Projects 增加云端手工备注，并在界面分开展示云端基础资料与当前设备 Companion 状态。项目绝对路径、Git 状态、HEAD、远端比较、commit 和扫描缓存未加入云端字段。
+- 验证：ESM 语法检查、`git diff --check`，以及 stubbed Supabase CRUD/隔离/迁移字段模拟通过；真实账号登录、RLS、设备间同步和 GitHub Pages 发布仍待完成。
+
+## 2026-09-30 · V2.5 (user accepted 2026-10-03)
 
 - Fixed delegated login submission to use the submitted form instead of the `#app` event listener target; added visible in-progress and actionable error states so handler failures cannot leave the button inert.
 - Added an authentication-first public entry: the private app module, Workspace localStorage, scan caches, and Local Companion are not loaded before Supabase validates an existing email/password session.
@@ -8,7 +16,7 @@
 - Replaced personal repository/path values in fresh-install demo data with empty generic fields; existing browser Workspace data remains local and compatible.
 - Configured the project URL and public publishable key from the local Lanlan Cloud Pet project; no service-role key or password was used.
 - Added the sole allowed user's UUID to the Auth allowlist; blank configuration still fails closed.
-- Verified via the public Auth settings endpoint that new-user signup is disabled. Site URL/Redirect URL were reported configured; real login/refresh/logout/16-project scan acceptance remains pending.
+- Verified via the public Auth settings endpoint that new-user signup is disabled. On 2026-10-03 the user confirmed V2.5 acceptance; the current Local Companion endpoint also returned 16 projects.
 - Published commit `81939d7` to GitHub Pages; the configured index, auth gate, and auth config return HTTP 200.
 
 ## 2026-09-30 · V2.4.1

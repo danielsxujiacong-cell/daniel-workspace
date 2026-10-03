@@ -1,11 +1,11 @@
 # Daniel Workspace
 
-本地优先的私人 AI 工作台 V2.5。GitHub Pages 对未登录访客只显示登录页；现有 Supabase email/password 用户登录后，才加载当前浏览器的 Workspace 数据并连接本机只读 Companion。内容继续保存在本机 localStorage，不做云同步；AI Assistant 仍为本地 Mock。
+私人 AI 工作台 V2.6。GitHub Pages 对未登录访客只显示登录页；现有 Supabase email/password 用户登录后，Tasks、Knowledge、Decisions 和 Projects 基础资料通过同一 Supabase 账号同步。本机路径、Git 状态与 Companion 扫描仍由当前设备提供；AI Assistant 仍为本地 Mock。
 
 ## Status
 
-- **Stage:** V2.5 login gate, public Supabase client configuration, and single-user allowlist are in place; online auth acceptance is pending
-- **Last updated:** 2026-09-30
+- **Stage:** V2.6 client and RLS schema are implemented; database initialization and real multi-device acceptance are pending
+- **Last updated:** 2026-10-03
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
 ## Quick start
@@ -20,7 +20,7 @@ python local_companion.py
 
 手动控制 Companion：前台运行 `python local_companion.py` 时按 `Ctrl+C` 停止；开机任务启动的后台实例可在 PowerShell 执行 `Stop-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion"` 停止。取消后续登录自动启动，执行 `Unregister-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion" -Confirm:$false`。重新登录 Windows 会再次启动仍注册的任务。
 
-项目、资料、决策、任务与主题偏好保存在当前浏览器的 `localStorage`（同一浏览器配置和站点来源内）。刷新或重开页面后会保留；“重置演示数据”会恢复样例内容并保留主题选择。
+主题、本机 Companion 扫描缓存、GitHub 只读快照和云端离线副本保存在当前浏览器的 `localStorage`。云端业务资料以 Supabase 为准，可在已登录设备间共享；首次遇到旧版本机内容时会先询问是否迁移。旧 `daniel-workspace-v1` 数据不会因迁移或云端读取而被删除。
 
 ## V2.5 登录配置
 
@@ -28,7 +28,13 @@ python local_companion.py
 
 `src/auth/config.js` 的 `SUPABASE_ALLOWED_USER` 设为唯一允许账号的 User UUID；留空时默认拒绝所有账号。只允许已存在的 Email + Password 账号登录，不能从应用注册。项目 URL 和 publishable key 属于公开前端配置；绝不填 `service_role` key、数据库密码、用户密码或私密 Token。
 
-登录门在 `getUser()` 成功验证会话前不会导入 `src/app.js`，读取 Workspace localStorage 或扫描缓存，也不会请求 Local Companion。退出会立即清空页面和应用内存并停止扫描请求；原有 `daniel-workspace-v1` 浏览器数据会保留，供此设备下一次成功登录继续使用。Supabase 只管理认证会话，不存储 Workspace 内容。
+登录门在 `getUser()` 成功验证会话前不会导入 `src/app.js`，读取 Workspace localStorage 或扫描缓存，也不会请求 Local Companion。退出会立即清空页面和应用内存并停止扫描请求；原有 `daniel-workspace-v1` 浏览器数据会保留，供此设备下一次成功登录继续使用。
+
+## V2.6 云同步配置
+
+`src/cloud/sync.js` 只上传 Task、Knowledge、Decision 和 Project 基础资料，并在每条记录上附加当前 `auth.uid()`。Project 的本机绝对路径、GitHub 只读快照、Companion 状态和扫描缓存不会发送到 Supabase。所有四张表启用 RLS，策略检查 `auth.uid() = user_id`；客户端继续使用现有 public publishable key，不含 service role key。
+
+本项目已检查 `workspace_tasks`、`workspace_knowledge`、`workspace_decisions`、`workspace_projects`，当前数据库尚无这些表。完成代码提交后，请在 Supabase Dashboard → SQL Editor → New query 中打开并复制 [v2.6-cloud-sync.sql](supabase/v2.6-cloud-sync.sql) 的全部内容，点 **Run**。完成后登录工作台并点击顶部同步状态重试；旧版浏览器里有真实内容时，按页面提示确认一次迁移。未初始化数据库时应用保留本机数据并显示同步失败状态。
 
 ## V1 功能
 
@@ -38,7 +44,7 @@ python local_companion.py
 - 本地项目只读扫描：Projects 显示 `D:\_Codex project` 下发现的项目、路径、Git 仓库/分支/clean 状态、HEAD、`origin/main`、领先/落后、最近本地 commit、常见文档文件是否存在和最后修改时间。
 - 本地项目详情与 GitHub 仓库按安全提取的 GitHub owner/repository 地址优先匹配；详情展示完整本地 Git 与文档状态。
 - Dashboard 健康指标与提醒：按本地扫描统计 clean、未提交修改、ahead/behind、README/HANDOFF/TODO 缺失和超过 30 天未更新，并提供项目入口。
-- Authentication gate：Supabase 校验已有账号后才导入私人 Workspace 并读取本机数据；未登录只显示邮箱和密码表单，界面不提供注册入口。
+- Authentication gate：Supabase 校验已有账号后才导入私人 Workspace；未登录只显示邮箱和密码表单，界面不提供注册入口。
 - Dashboard “自上次打开后”对比新 commit、Git 状态、文档、文件更新时间和同步变化；完整扫描只保留在页面内存，比较基线不保存本地路径或项目名。
 - Knowledge：添加、编辑、删除文本、笔记和网页链接，支持标签和项目关联。
 - Decisions：记录问题、方案、目标、时间、成本、风险、Mock AI 建议和最终决定。
@@ -53,7 +59,7 @@ python local_companion.py
 
 ## V1 范围边界
 
-工作区数据和 GitHub 快照保存在当前浏览器 `localStorage`，不会在设备或浏览器之间同步。当前 AI 没有服务端路由或 API Key，所有对话都由 Mock Provider 在浏览器本地回答，不会发送到网络。以后启用 Real AI 时，需部署服务端/serverless `POST /api/chat`，将 `OPENAI_API_KEY` 配在服务端环境变量，并由服务端输出不含密钥的 `window.DANIEL_AI_CONFIG = { provider: "real", chatEndpoint: "/api/chat" }`。Key 绝不能放入前端代码或静态托管配置。
+主题、活动时间线、GitHub 只读快照和 Companion 状态按设备保存在浏览器 `localStorage`；Tasks、Knowledge、Decisions 和 Projects 基础资料从 Supabase 同步。当前 AI 没有服务端路由或 API Key，所有对话都由 Mock Provider 在浏览器本地回答，不会发送到网络。以后启用 Real AI 时，需部署服务端/serverless `POST /api/chat`，将 `OPENAI_API_KEY` 配在服务端环境变量，并由服务端输出不含密钥的 `window.DANIEL_AI_CONFIG = { provider: "real", chatEndpoint: "/api/chat" }`。Key 绝不能放入前端代码或静态托管配置。
 
 ### V2.2 GitHub 只读数据
 
@@ -65,7 +71,7 @@ python local_companion.py
 
 文档扫描只检查根目录和 `docs/` 中 README、HANDOFF、PROJECT_STATUS、TODO、PROJECT_CONTEXT、CHANGELOG 文件名是否存在，不读取正文。扫描不会写入扫描到的项目。V2.4 为跨次比较保存一份轻量基线；V2.4.1 另在当前浏览器的独立 localStorage 项中保留上次成功扫描，以便 Companion 暂时离线时显示旧数据并标记“数据可能不是最新”。缓存只在当前浏览器来源内使用，不跨设备同步。Companion 仅绑定 `127.0.0.1:4174`；API 保持只读 GET，并只允许工作台的 GitHub Pages 来源跨源读取。
 
-不支持私有仓库授权、GitHub 写操作/自动化、云同步/数据库、扫描 `D:\` 全盘、文档正文解析、PDF/网页自动解析或真实 AI 服务；未实现部分不属于 V2.4.1。
+不支持私有仓库授权、GitHub 写操作/自动化、扫描 `D:\` 全盘、文档正文解析、PDF/网页自动解析或真实 AI 服务。V2.6 云同步不包含实时协作和 Companion 本地状态。
 
 ### `/api/chat` 预留契约
 
@@ -78,6 +84,7 @@ python local_companion.py
 | `index.html` | 应用入口 |
 | `src/auth/gate.js` | Login-first session validation and private app boot |
 | `src/auth/config.js` | Public Supabase URL and anon/publishable-key configuration |
+| `src/cloud/sync.js` | RLS-bound workspace queries, safe local migration, cloud diff and offline rebase |
 | `src/app.js` | 页面、交互、Assistant 面板和记录表单 |
 | `src/ai/service.js` | 统一 chat 接口、provider 选择与安全回退 |
 | `src/ai/context.js` | 从当前页面构造最小相关上下文 |
@@ -86,6 +93,7 @@ python local_companion.py
 | `src/github/public-api.js` | 公开 GitHub 仓库只读 API 与响应归一化 |
 | `local_companion.py` | loopback 静态服务和 `D:\_Codex project` 只读扫描 API |
 | `src/store.js` | localStorage 读写与演示数据恢复 |
+| `supabase/v2.6-cloud-sync.sql` | V2.6 tables, per-user RLS, grants, and updated_at triggers |
 | `src/mock-data.js` | 初始演示数据 |
 | `assets/styles.css` | 浅色/深色响应式界面 |
 | `AGENTS.md` | 项目操作指引 |
