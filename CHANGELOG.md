@@ -8,6 +8,12 @@
 - Projects 增加云端手工备注，并在界面分开展示云端基础资料与当前设备 Companion 状态。项目绝对路径、Git 状态、HEAD、远端比较、commit 和扫描缓存未加入云端字段。
 - 验证：ESM 语法检查、`git diff --check`，以及 stubbed Supabase CRUD/隔离/迁移字段模拟通过；真实账号登录、RLS、设备间同步和 GitHub Pages 发布仍待完成。
 
+## 2026-10-04 · V2.6 线上验收
+
+- 用户确认已执行 Supabase SQL 并完成线上迁移。登录后的 GitHub Pages 会话在主动重试和刷新后显示“已同步”；Task 与 Project 云端资料刷新后仍可读取。
+- Knowledge 与 Decisions 当前显示空状态；Projects 分开展示云端基础资料和本机 Companion 状态，Companion 在线发现 16 个本地项目。
+- SQL 中的四张表均使用 `auth.uid() = user_id` RLS，匿名/公开角色无表权限；另一台设备和第二个 Auth 用户的隔离测试仍待人工验证。
+
 ## 2026-09-30 · V2.5 (user accepted 2026-10-03)
 
 - Fixed delegated login submission to use the submitted form instead of the `#app` event listener target; added visible in-progress and actionable error states so handler failures cannot leave the button inert.

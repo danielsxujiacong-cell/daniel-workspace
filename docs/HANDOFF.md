@@ -2,29 +2,29 @@
 
 ## Current state
 
-- **Updated:** 2026-10-03
-- **Status:** V2.6 client is implemented; awaiting Supabase database initialization and final authenticated acceptance.
-- **V2.5:** The user confirmed it was completed and accepted. This turn independently confirmed the Companion GET endpoint returns 16 projects.
-- **V2.6 code:** Existing Supabase Auth client is reused. Tasks, Knowledge, Decisions, and Project base fields are scoped to the validated user; project paths, GitHub snapshots, Companion scans, and local Git state are excluded from cloud row serializers. A user-approved, conflict-ignoring legacy migration and a separate offline cloud cache are implemented.
-- **Database:** A read-only PostgREST check returned `PGRST205` for all four tables. SQL is ready at `supabase/v2.6-cloud-sync.sql`; it has not been run.
-- **Verification:** ESM syntax checks, `git diff --check`, and a stubbed Supabase simulation for demo filtering, user scoping, insert-only migration, project field exclusion, upsert, and delete passed. The local browser shows the unauthenticated login-only screen. Real authenticated CRUD and RLS are pending SQL initialization; no password was entered or collected.
-- **Pages:** Push to `main` triggers the existing GitHub Pages workflow. Record its result and the final commit after deployment verification.
+- **Updated:** 2026-10-04
+- **Status:** V2.6 is deployed and authenticated same-account refresh/read acceptance passed. A second-device read and cross-user RLS negative test remain for manual acceptance.
+- **V2.5:** The user confirmed it was completed and accepted. The Companion remains loopback-only and read-only.
+- **V2.6 database/migration:** The user confirmed `supabase/v2.6-cloud-sync.sql` was run and online migration completed. Do not run another migration automatically. The authenticated Pages session showed “已同步” after retry and refresh.
+- **Live acceptance:** After refresh, one Task and one cloud Project remained visible. Knowledge and Decisions showed empty states with successful sync status. Projects separated cloud base data from the online local Companion inventory (16 local projects). The old `daniel-workspace-v1` notice remained in this Codex browser; the local source was preserved and not merged again.
+- **RLS:** The SQL defines `auth.uid() = user_id` policies for all four tables, revokes `anon`/`public`, and grants CRUD to `authenticated`. The authenticated account read succeeded. No second Auth user was available to exercise cross-user isolation directly.
+- **Implementation checks:** ESM syntax, `git diff --check`, and stubbed Supabase checks for demo filtering, user scoping, insert-only migration, Project field exclusion, upsert, and delete passed during V2.6 implementation.
+- **Pages:** Current V2.6 entry and `src/cloud/sync.js` were published and returned HTTP 200.
 
 ## Next action
 
-1. Commit and push the V2.6 source and publish it with the existing Pages workflow.
-2. In Supabase Dashboard → SQL Editor → New query, copy all of `supabase/v2.6-cloud-sync.sql` and click **Run**.
-3. Sign in directly on the existing account, click the top sync status if it still shows an error, and accept the one-time migration only if the page finds old local records.
-4. Verify Task create/edit/delete across refresh, Knowledge and Decision writes, Project notes/GitHub URL, local Companion independence, RLS isolation, and a second device.
+1. Sign in on a separate physical device with the same account and confirm the Task and Project are readable there.
+2. If a second Auth user is ever added, verify that user's queries cannot read or change the allowlisted user's rows; keep the current single-account allowlist unchanged otherwise.
+3. If Knowledge or Decisions are expected to contain migrated rows, verify those records on the second device; this account currently shows both collections empty.
 
 ## How to resume
 
 1. Inspect Git status and current `main`/`origin/main` before editing.
 2. Read this file, `README.md`, and `docs/PROJECT_CONTEXT.md`.
-3. Complete the SQL initialization and authenticated acceptance above. Keep Companion read-only and stop after V2.6.
+3. Complete only the remaining second-device and cross-user acceptance if available. Keep Companion read-only and stop after V2.6.
 
 ## Open limitations
 
-- Until SQL runs, cloud tables and their RLS policies do not exist, so cloud reads/writes cannot pass the final live acceptance. The app retains local data and reports sync failure.
+- The second-device read and cross-user RLS isolation checks have not been run. The user's current Codex browser showed a preserved legacy-local-data notice; no second migration was triggered.
 - This repository has no build step; ESM syntax and browser page startup are the applicable source checks.
-- The user must enter their own password in the Pages login form; never request or copy it.
+- Never request or copy the user's password.

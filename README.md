@@ -4,8 +4,8 @@
 
 ## Status
 
-- **Stage:** V2.6 client and RLS schema are implemented; database initialization and real multi-device acceptance are pending
-- **Last updated:** 2026-10-03
+- **Stage:** V2.6 database initialization and authenticated Pages refresh acceptance are complete; a second-device read check remains
+- **Last updated:** 2026-10-04
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
 ## Quick start
@@ -34,7 +34,7 @@ python local_companion.py
 
 `src/cloud/sync.js` 只上传 Task、Knowledge、Decision 和 Project 基础资料，并在每条记录上附加当前 `auth.uid()`。Project 的本机绝对路径、GitHub 只读快照、Companion 状态和扫描缓存不会发送到 Supabase。所有四张表启用 RLS，策略检查 `auth.uid() = user_id`；客户端继续使用现有 public publishable key，不含 service role key。
 
-本项目已检查 `workspace_tasks`、`workspace_knowledge`、`workspace_decisions`、`workspace_projects`，当前数据库尚无这些表。完成代码提交后，请在 Supabase Dashboard → SQL Editor → New query 中打开并复制 [v2.6-cloud-sync.sql](supabase/v2.6-cloud-sync.sql) 的全部内容，点 **Run**。完成后登录工作台并点击顶部同步状态重试；旧版浏览器里有真实内容时，按页面提示确认一次迁移。未初始化数据库时应用保留本机数据并显示同步失败状态。
+用户于 2026-10-04 确认已在 Supabase 执行 [v2.6-cloud-sync.sql](supabase/v2.6-cloud-sync.sql) 并完成线上迁移。已登录的 Pages 会话在重试及刷新后均显示“已同步”；Task 与 Project 云端资料刷新后仍可读取。当前账号的 Knowledge 和 Decisions 页面为空。Projects 同时显示云端资料与本机 Companion 的 16 个项目。另一台设备读取及第二个 Auth 用户的 RLS 隔离尚待人工验收。若为新的 Supabase 项目部署本应用，需在该项目执行上述 SQL；不要把本机旧 localStorage 自动并入已有云端数据。
 
 ## V1 功能
 
