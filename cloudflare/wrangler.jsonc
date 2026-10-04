@@ -1,0 +1,15 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "daniel-workspace-api",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-04",
+  "workers_dev": true,
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "ALLOWED_ORIGINS": "https://danielsxujiacong-cell.github.io,http://127.0.0.1:4174,http://localhost:4174",
+    "AI_BASE_URL": "https://open.bigmodel.cn/api/paas/v4/",
+    "AI_MODEL": "glm-4-flash-250414"
+  }
+}

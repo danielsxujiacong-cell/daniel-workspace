@@ -1,0 +1,12 @@
+{
+  "name": "daniel-workspace",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "ai:worker:dev": "wrangler dev --config cloudflare/wrangler.jsonc --ip 127.0.0.1 --port 8787",
+    "ai:worker:deploy": "wrangler deploy --config cloudflare/wrangler.jsonc"
+  },
+  "devDependencies": {
+    "wrangler": "^4.141.0"
+  }
+}

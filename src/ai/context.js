@@ -4,6 +4,10 @@ function byRecent(left, right) {
   return (right.createdAt || "").localeCompare(left.createdAt || "");
 }
 
+function shortText(value, limit = 500) {
+  return typeof value === "string" ? value.slice(0, limit) : "";
+}
+
 function githubRepositoryKey(value) {
   const match = String(value || "").match(/^https?:\/\/github\.com\/([^/?#]+\/[^/?#]+)/i);
   return match?.[1].replace(/\.git$/i, "").toLowerCase() || "";
@@ -12,136 +16,137 @@ function githubRepositoryKey(value) {
 function localProjectRecord(localProject) {
   if (!localProject) return null;
   return {
-    name: localProject.name || "",
-    path: localProject.path || "",
+    name: shortText(localProject.name, 120),
     hasGit: localProject.hasGit === true,
-    branch: localProject.branch || "",
-    clean: localProject.clean,
-    head: localProject.head || "",
-    originMain: localProject.originMain || "",
-    ahead: localProject.ahead,
-    behind: localProject.behind,
+    branch: shortText(localProject.branch, 120),
+    clean: typeof localProject.clean === "boolean" ? localProject.clean : null,
+    ahead: Number.isFinite(localProject.ahead) ? localProject.ahead : null,
+    behind: Number.isFinite(localProject.behind) ? localProject.behind : null,
     lastLocalCommit: localProject.lastLocalCommit ? {
-      sha: localProject.lastLocalCommit.sha || "",
-      message: localProject.lastLocalCommit.message || "",
-      committedAt: localProject.lastLocalCommit.committedAt || "",
+      message: shortText(localProject.lastLocalCommit.message, 240),
+      committedAt: shortText(localProject.lastLocalCommit.committedAt, 40),
     } : null,
-    githubRepository: localProject.githubRepository || "",
-    documents: { ...(localProject.documents || {}) },
-    modifiedAt: localProject.modifiedAt || "",
-    gitError: localProject.gitError || "",
+    documents: {
+      readme: localProject.documents?.readme === true,
+      handoff: localProject.documents?.handoff === true,
+      todo: localProject.documents?.todo === true,
+      projectContext: localProject.documents?.projectContext === true,
+    },
+    modifiedAt: shortText(localProject.modifiedAt, 40),
   };
 }
 
 function projectRecord(project, localProject = null) {
   return {
-    id: project.id,
-    name: project.name,
-    status: project.status,
-    stage: project.stage || "",
-    next: project.next || "",
-    description: project.description || "",
-    path: project.path || "",
-    github: project.github || "",
+    name: shortText(project.name, 120),
+    status: shortText(project.status, 80),
+    stage: shortText(project.stage, 120),
+    next: shortText(project.next, 500),
+    description: shortText(project.description, 800),
     localData: localProjectRecord(localProject),
     githubData: project.githubData ? {
-      repositoryName: project.githubData.repositoryName || "",
-      repositoryUrl: project.githubData.repositoryUrl || "",
-      defaultBranch: project.githubData.defaultBranch || "",
-      updatedAt: project.githubData.updatedAt || "",
+      repositoryName: shortText(project.githubData.repositoryName, 120),
+      defaultBranch: shortText(project.githubData.defaultBranch, 120),
+      updatedAt: shortText(project.githubData.updatedAt, 40),
       latestCommit: project.githubData.latestCommit ? {
-        sha: project.githubData.latestCommit.sha || "",
-        message: project.githubData.latestCommit.message || "",
-        url: project.githubData.latestCommit.url || "",
-        committedAt: project.githubData.latestCommit.committedAt || "",
+        message: shortText(project.githubData.latestCommit.message, 240),
+        committedAt: shortText(project.githubData.latestCommit.committedAt, 40),
       } : null,
-      pagesUrl: project.githubData.pagesUrl || "",
-      pagesUrlEstimated: project.githubData.pagesUrlEstimated === true,
-      isPublic: project.githubData.isPublic === true,
-      refreshedAt: project.githubData.refreshedAt || "",
+      refreshedAt: shortText(project.githubData.refreshedAt, 40),
     } : null,
   };
 }
 
 function taskRecord(task, projects) {
   return {
-    id: task.id,
-    title: task.title,
-    priority: task.priority || "中",
-    status: task.status,
-    due: task.due || "",
-    project: projects.find((project) => project.id === task.projectId)?.name || "未关联项目",
+    title: shortText(task.title, 240),
+    priority: shortText(task.priority || "中", 20),
+    status: shortText(task.status, 20),
+    due: shortText(task.due, 40),
+    project: shortText(projects.find((project) => project.id === task.projectId)?.name || "未关联项目", 120),
   };
 }
 
 function knowledgeRecord(item, projects) {
   return {
-    id: item.id,
-    title: item.title,
-    type: item.type,
-    summary: item.summary || "",
-    content: (item.content || "").slice(0, 240),
-    tags: Array.isArray(item.tags) ? item.tags : [],
-    project: projects.find((project) => project.id === item.projectId)?.name || "未关联项目",
-    createdAt: item.createdAt || "",
+    title: shortText(item.title, 200),
+    type: shortText(item.type, 40),
+    summary: shortText(item.summary, 400),
+    content: shortText(item.content, 500),
+    tags: Array.isArray(item.tags) ? item.tags.slice(0, 8).map((tag) => shortText(tag, 60)) : [],
+    project: shortText(projects.find((project) => project.id === item.projectId)?.name || "未关联项目", 120),
+    createdAt: shortText(item.createdAt, 40),
   };
 }
 
 function decisionRecord(item, projects) {
   return {
-    id: item.id,
-    question: item.question,
-    goal: item.goal || "",
-    options: Array.isArray(item.options) ? item.options : [],
-    time: item.time || "",
-    cost: item.cost || "",
-    risk: item.risk || "",
-    recommendation: item.recommendation || "",
-    final: item.final || "",
-    reason: item.reason || "",
-    project: projects.find((project) => project.id === item.projectId)?.name || "未关联项目",
-    createdAt: item.createdAt || "",
+    question: shortText(item.question, 300),
+    goal: shortText(item.goal, 400),
+    options: Array.isArray(item.options) ? item.options.slice(0, 5).map((option) => shortText(option, 240)) : [],
+    time: shortText(item.time, 160),
+    cost: shortText(item.cost, 160),
+    risk: shortText(item.risk, 240),
+    recommendation: shortText(item.recommendation, 400),
+    final: shortText(item.final, 400),
+    reason: shortText(item.reason, 400),
+    project: shortText(projects.find((project) => project.id === item.projectId)?.name || "未关联项目", 120),
+    createdAt: shortText(item.createdAt, 40),
   };
 }
 
 function activityRecord(activity, projects) {
   return {
-    title: activity.title,
-    project: projects.find((project) => project.id === activity.projectId)?.name || "",
-    createdAt: activity.createdAt || "",
+    title: shortText(activity.title, 180),
+    project: shortText(projects.find((project) => project.id === activity.projectId)?.name || "", 120),
+    createdAt: shortText(activity.createdAt, 40),
   };
 }
 
-export function buildAssistantContext({ data, currentPage, projectId, taskFilter = "all", localProject = null, localProjects = [], dashboardModel = null, localChanges = [], comparisonFirstScan = false }) {
+function localMatch(project, localProjects) {
+  return localProjects.find((item) => {
+    const repository = githubRepositoryKey(project.github);
+    return (repository && githubRepositoryKey(item.githubRepository) === repository)
+      || (project.name.toLowerCase() === item.name?.toLowerCase());
+  }) || null;
+}
+
+export function buildAssistantContext({
+  data,
+  currentPage,
+  projectId,
+  taskFilter = "all",
+  localProject = null,
+  localProjects = [],
+  dashboardModel = null,
+  localChanges = [],
+  comparisonFirstScan = false,
+  selectedContent = "",
+  companionStatus = "unavailable",
+  companionScannedAt = "",
+}) {
   const projects = data.projects || [];
   const tasks = data.tasks || [];
   const knowledge = data.knowledge || [];
   const decisions = data.decisions || [];
   const activities = data.activities || [];
   const storedProject = projects.find((project) => project.id === projectId);
-  const projectById = storedProject || (localProject ? {
-    id: localProject.id,
-    name: localProject.name,
-    status: "本地项目",
-    path: localProject.path,
-    github: localProject.githubRepository,
-  } : null);
+  const projectById = storedProject || (localProject ? { id: localProject.id, name: localProject.name, status: "本地项目" } : null);
   const projectTodos = projectById
-    ? tasks.filter((task) => task.projectId === projectById.id).map((task) => taskRecord(task, projects))
+    ? tasks.filter((task) => task.projectId === projectById.id).map((task) => taskRecord(task, projects)).slice(0, 20)
     : [];
   const projectMaterials = projectById
-    ? knowledge.filter((item) => item.projectId === projectById.id).map((item) => knowledgeRecord(item, projects))
+    ? knowledge.filter((item) => item.projectId === projectById.id).sort(byRecent).map((item) => knowledgeRecord(item, projects)).slice(0, 12)
     : [];
   const projectActivities = projectById
     ? activities.filter((item) => item.projectId === projectById.id).slice(0, 5).map((item) => activityRecord(item, projects))
     : [];
   const projectDecisions = projectById
-    ? decisions.filter((item) => item.projectId === projectById.id).sort(byRecent).map((item) => decisionRecord(item, projects))
+    ? decisions.filter((item) => item.projectId === projectById.id).sort(byRecent).map((item) => decisionRecord(item, projects)).slice(0, 10)
     : [];
-
   const currentProject = projectById ? projectRecord(projectById, localProject) : null;
-
   let relevantContext = {};
+
   if (currentPage === "home") {
     const todoTasks = tasks.filter((task) => task.status !== "done")
       .sort((left, right) => (priorityRank[left.priority] ?? 1) - (priorityRank[right.priority] ?? 1));
@@ -155,58 +160,67 @@ export function buildAssistantContext({ data, currentPage, projectId, taskFilter
           knowledge: knowledge.length,
           decisions: decisions.length,
         },
-        projects: projects.slice(0, 5).map((project) => {
-          const local = localProjects.find((item) => {
-            const repo = githubRepositoryKey(project.github);
-            return (repo && githubRepositoryKey(item.githubRepository) === repo)
-              || (project.path && item.path && project.path.toLowerCase() === item.path.toLowerCase())
-              || project.name.toLowerCase() === item.name?.toLowerCase();
-          });
-          return projectRecord(project, local);
-        }),
-        todoTasks: todoTasks.slice(0, 6).map((task) => taskRecord(task, projects)),
+        projects: projects.slice(0, 6).map((project) => projectRecord(project, localMatch(project, localProjects))),
+        todoTasks: todoTasks.slice(0, 8).map((task) => taskRecord(task, projects)),
         recentKnowledge: [...knowledge].sort(byRecent).slice(0, 4).map((item) => knowledgeRecord(item, projects)),
         recentDecisions: [...decisions].sort(byRecent).slice(0, 4).map((item) => decisionRecord(item, projects)),
         recentActivities: [...activities].sort(byRecent).slice(0, 5).map((item) => activityRecord(item, projects)),
-        localProjects: localProjects.map((item) => localProjectRecord(item)),
+        localProjects: localProjects.slice(0, 12).map((item) => localProjectRecord(item)),
         localHealth: dashboardModel?.health || null,
-        localReminders: dashboardModel?.alerts || [],
+        localReminders: (dashboardModel?.alerts || []).slice(0, 5).map(({ projectName, kind, text }) => ({ projectName: shortText(projectName, 120), kind, text: shortText(text, 300) })),
         todayContinue: dashboardModel?.todayContinue ? {
-          ...dashboardModel.todayContinue,
+          projectName: shortText(dashboardModel.todayContinue.projectName, 120),
+          workspaceStatus: shortText(dashboardModel.todayContinue.workspaceStatus, 120),
+          gitStatus: shortText(dashboardModel.todayContinue.gitStatus, 100),
+          remoteStatus: shortText(dashboardModel.todayContinue.remoteStatus, 100),
+          lastWork: shortText(dashboardModel.todayContinue.lastWork, 300),
+          nextStep: shortText(dashboardModel.todayContinue.nextStep, 300),
+          priorityTask: dashboardModel.todayContinue.priorityTask ? taskRecord(dashboardModel.todayContinue.priorityTask, projects) : null,
+          githubData: dashboardModel.todayContinue.githubData ? {
+            repositoryName: shortText(dashboardModel.todayContinue.githubData.repositoryName, 120),
+            updatedAt: shortText(dashboardModel.todayContinue.githubData.updatedAt, 40),
+            latestCommit: dashboardModel.todayContinue.githubData.latestCommit ? {
+              message: shortText(dashboardModel.todayContinue.githubData.latestCommit.message, 240),
+              committedAt: shortText(dashboardModel.todayContinue.githubData.latestCommit.committedAt, 40),
+            } : null,
+          } : null,
+          missingDocuments: (dashboardModel.todayContinue.missingDocuments || []).slice(0, 5),
           localProject: localProjectRecord(dashboardModel.todayContinue.localProject),
         } : null,
-        recentlyActiveProjects: dashboardModel?.recentProjects.map(({ item, project, activityAt }) => ({
-          ...projectRecord(project || { id: item.id, name: item.name, status: "本地项目", path: item.path }, item),
-          activityAt: activityAt ? new Date(activityAt).toISOString() : "",
-        })) || [],
-        changesSinceLastScan: localChanges.slice(0, 10),
+        recentlyActiveProjects: (dashboardModel?.recentProjects || []).slice(0, 4).map(({ item, project }) => projectRecord(project || { name: item.name, status: "本地项目" }, item)),
+        changesSinceLastScan: localChanges.slice(0, 8).map(({ projectName, text, kind }) => ({ projectName: shortText(projectName, 120), text: shortText(text, 240), kind })),
         comparisonFirstScan,
       },
     };
   } else if (currentPage === "project") {
-    relevantContext = {
-      project: {
-        todos: projectTodos,
-        relatedMaterials: projectMaterials,
-        recentActivity: projectActivities,
-        decisions: projectDecisions,
-      },
-    };
+    relevantContext = { project: { todos: projectTodos, relatedMaterials: projectMaterials, recentActivity: projectActivities, decisions: projectDecisions } };
   } else if (currentPage === "projects") {
-    relevantContext = { projects: projects.map(projectRecord) };
+    relevantContext = { projects: projects.slice(0, 30).map((project) => projectRecord(project, localMatch(project, localProjects))) };
   } else if (currentPage === "knowledge") {
-    relevantContext = { knowledge: [...knowledge].sort(byRecent).map((item) => knowledgeRecord(item, projects)) };
+    relevantContext = { knowledge: [...knowledge].sort(byRecent).slice(0, 15).map((item) => knowledgeRecord(item, projects)) };
   } else if (currentPage === "decisions") {
-    relevantContext = { decisions: [...decisions].sort(byRecent).map((item) => decisionRecord(item, projects)) };
+    relevantContext = { decisions: [...decisions].sort(byRecent).slice(0, 15).map((item) => decisionRecord(item, projects)) };
   } else if (currentPage === "tasks") {
     const visibleTasks = taskFilter === "todo" ? tasks.filter((task) => task.status !== "done")
       : taskFilter === "done" ? tasks.filter((task) => task.status === "done") : tasks;
     relevantContext = {
       taskFilter,
       tasks: [...visibleTasks].sort((left, right) => (priorityRank[left.priority] ?? 1) - (priorityRank[right.priority] ?? 1))
-        .map((task) => taskRecord(task, projects)),
+        .slice(0, 30).map((task) => taskRecord(task, projects)),
     };
   }
 
+  if (["tasks", "knowledge", "decisions"].includes(currentPage)) {
+    relevantContext.projects = projects.slice(0, 10).map((project) => projectRecord(project, localMatch(project, localProjects)));
+  }
+  relevantContext.companion = {
+    status: shortText(companionStatus, 24),
+    projectCount: localProjects.length,
+    scannedAt: shortText(companionScannedAt, 40),
+    mayBeStale: companionStatus !== "ready",
+  };
+
+  const selected = shortText(selectedContent.trim(), 1_200);
+  if (selected) relevantContext.selectedContent = selected;
   return { currentProject, relevantContext };
 }

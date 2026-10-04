@@ -1,10 +1,10 @@
 # Daniel Workspace
 
-私人 AI 工作台 V2.6。GitHub Pages 对未登录访客只显示登录页；现有 Supabase email/password 用户登录后，Tasks、Knowledge、Decisions 和 Projects 基础资料通过同一 Supabase 账号同步。本机路径、Git 状态与 Companion 扫描仍由当前设备提供；AI Assistant 仍为本地 Mock。
+私人 AI 工作台 V2.7。GitHub Pages 对未登录访客只显示登录页；现有 Supabase email/password 用户登录后，Tasks、Knowledge、Decisions 和 Projects 基础资料通过同一 Supabase 账号同步。本机路径、Git 状态与 Companion 扫描仍由当前设备提供；登录后的 AI Assistant 通过独立 Cloudflare Worker 调用智谱 GLM。
 
 ## Status
 
-- **Stage:** V2.6 final acceptance completed on 2026-10-04
+- **Stage:** V2.7 Worker and frontend deployed; waiting for the user to configure `AI_API_KEY` Secret
 - **Last updated:** 2026-10-04
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -36,6 +36,18 @@ python local_companion.py
 
 用户于 2026-10-04 确认已在 Supabase 执行 [v2.6-cloud-sync.sql](supabase/v2.6-cloud-sync.sql) 并完成线上迁移。V2.6 最终验收中，Tasks 与 Knowledge 测试记录刷新后仍存在；用户要求保留 Knowledge 测试记录。Decisions 测试记录刷新后仍存在，用户随后确认永久删除；删除状态同步后再次刷新仍为 0 条。Projects 云端基础资料在 Companion 离线时仍可查看，本机 16 项缓存会标记为可能过期；最终页面检查时 Companion 在线。四张表的匿名 PostgREST 请求均返回 HTTP 401，RLS 隔离生效。登录重试与 Decisions 删除入口已部署，Pages 入口及版本化脚本可读取。另一台设备读取及第二个 Auth 用户的隔离测试尚未进行。不要自动再次迁移，也不要删除旧 `localStorage` 数据。
 
+## V2.7 智谱 GLM Assistant
+
+已部署独立 Worker `daniel-workspace-api`：[`https://daniel-workspace-api.ai-investment-dashboard.workers.dev`](https://daniel-workspace-api.ai-investment-dashboard.workers.dev)。它把 `/api/chat` 转发到 BigModel Chat Completions，模型为 `glm-4-flash-250414`；`AI_BASE_URL` 和 `AI_MODEL` 是 Worker 配置，`AI_API_KEY` 必须用 Wrangler Secret 保存。设置 Secret 的命令为：
+
+```powershell
+node .\node_modules\wrangler\bin\wrangler.js secret put AI_API_KEY --config .\cloudflare\wrangler.jsonc
+```
+
+终端提示输入时直接粘贴智谱 Key；不要把 Key 发到聊天或写入项目文件。Pages 已配置只访问该 Worker。登录后，前端最多发送最近 20 条对话消息和裁剪后的当前页面上下文；上下文包含 Tasks、Projects、Knowledge、Decisions、选中内容及 Companion 健康摘要，不包含本机路径、凭据、会话、仓库 URL 或 Git hash。Worker 对 429 和 Timeout 各最多重试一次；真实服务失败会显示可重试错误，不会改用 Mock。助手显示 `GLM-4-Flash` 和实际模型 ID。
+
+本地运行 Companion 后，另开终端执行 `npm run ai:worker:dev` 可在 `127.0.0.1:8787` 验证 Worker；本地无 Secret 时 `/api/chat` 会返回 `ai_not_configured`。静态应用不需要构建。
+
 ## V1 功能
 
 - Dashboard：今日继续项目、工作区健康指标、真实扫描提醒、扫描变化和最近活跃项目；弱化演示数量卡片。
@@ -51,15 +63,15 @@ python local_companion.py
 - Tasks：创建和完成任务，设置优先级与项目，并按状态筛选。
 - Dashboard 的最近活跃项目综合本地最后修改、最近本地 Git commit 和已缓存 GitHub 更新时间排序。
 - Global Search：搜索项目、资料、决策和任务；演示资料可试搜 `Supabase` 或 `GitHub Pages`。
-- AI Assistant：Dashboard、项目详情、Knowledge、Decisions、Tasks 和 Projects 使用各自的本地页面上下文生成 Mock 回复；调用统一的 AI service/provider 接口。
-- Dashboard 与项目页 Mock AI 可结合本地 Git 状态、ahead/behind、最近修改、已缓存 GitHub 快照、工作台 TODO 和文档存在状态建议下一步。
-- AI 状态：当前显示 Mock AI。只有安全配置服务端 `/api/chat` 后才会选择 Real AI；接口不可用时自动回退到 Mock。
+- AI Assistant：Dashboard、项目详情、Knowledge、Decisions、Tasks 和 Projects 通过统一的 AI service/provider 接口调用 GLM-4-Flash，并使用受控页面上下文。
+- Dashboard 与项目页 AI 会结合本机 Git 状态、ahead/behind、最近修改、工作台 TODO、文档存在状态和 GitHub 时间摘要建议下一步；不会发送本机绝对路径。
+- AI 状态清楚显示 `GLM-4-Flash` 与 `glm-4-flash-250414`。真实服务失败时显示分类错误并允许重试，不会永久切回 Mock。
 - Activity Timeline：记录新建项目、资料、任务、任务完成和决策保存。
 - Appearance：首次跟随系统浅色/深色偏好；可手动切换，选择保存在 `localStorage`。
 
 ## V1 范围边界
 
-主题、活动时间线、GitHub 只读快照和 Companion 状态按设备保存在浏览器 `localStorage`；Tasks、Knowledge、Decisions 和 Projects 基础资料从 Supabase 同步。当前 AI 没有服务端路由或 API Key，所有对话都由 Mock Provider 在浏览器本地回答，不会发送到网络。以后启用 Real AI 时，需部署服务端/serverless `POST /api/chat`，将 `OPENAI_API_KEY` 配在服务端环境变量，并由服务端输出不含密钥的 `window.DANIEL_AI_CONFIG = { provider: "real", chatEndpoint: "/api/chat" }`。Key 绝不能放入前端代码或静态托管配置。
+主题、活动时间线、GitHub 只读快照和 Companion 状态按设备保存在浏览器 `localStorage`；Tasks、Knowledge、Decisions 和 Projects 基础资料从 Supabase 同步。AI 请求仅在已登录 Workspace 内发往单独的 Cloudflare Worker，再由 Worker 调用智谱 BigModel；浏览器只持有公开 Worker 地址，Key 只存于 Worker Secret。若本地未配置真实 Worker 地址，可使用本地 Mock；真实服务出错时保持错误状态并支持重试。
 
 ### V2.2 GitHub 只读数据
 
@@ -86,10 +98,12 @@ python local_companion.py
 | `src/auth/config.js` | Public Supabase URL and anon/publishable-key configuration |
 | `src/cloud/sync.js` | RLS-bound workspace queries, safe local migration, cloud diff and offline rebase |
 | `src/app.js` | 页面、交互、Assistant 面板和记录表单 |
-| `src/ai/service.js` | 统一 chat 接口、provider 选择与安全回退 |
-| `src/ai/context.js` | 从当前页面构造最小相关上下文 |
+| `src/ai/config.js` | 公开 Worker 地址和模型配置，不含 API Key |
+| `src/ai/service.js` | 统一 chat 接口、provider 状态与错误处理 |
+| `src/ai/context.js` | 从当前页面构造裁剪后的相关上下文 |
 | `src/dashboard.js` | 首页健康统计、继续建议优先级和扫描状态比较 |
-| `src/ai/providers/` | 本地 Mock Provider 与 `/api/chat` HTTP Provider |
+| `src/ai/providers/` | 本地 Mock Provider 与 Cloudflare Worker HTTP Provider |
+| `cloudflare/` | 独立 `daniel-workspace-api` Worker、BigModel 转发和 Wrangler 配置 |
 | `src/github/public-api.js` | 公开 GitHub 仓库只读 API 与响应归一化 |
 | `local_companion.py` | loopback 静态服务和 `D:\_Codex project` 只读扫描 API |
 | `src/store.js` | localStorage 读写与演示数据恢复 |

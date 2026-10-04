@@ -18,8 +18,8 @@ const {
   saveLocalScanBaseline,
   saveLocalScanCache,
 } = await import("./store.js?v=2.6.0");
-const { buildAssistantContext } = await import("./ai/context.js");
-const { chat: chatWithAI, getAIStatus } = await import("./ai/service.js");
+const { buildAssistantContext } = await import("./ai/context.js?v=2.7.0");
+const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = await import("./ai/service.js?v=2.7.0");
 const { fetchPublicGitHubRepository, parsePublicGitHubRepository } = await import("./github/public-api.js");
 const { buildLocalDashboardModel, compareLocalProjects } = await import("./dashboard.js");
 const {
@@ -655,7 +655,7 @@ function renderDashboard() {
   const assistantStatus = getAIStatus();
   const localStatus = ui.localProjectsStatus === "ready" ? `Companion 在线 · ${ui.localProjects.items.length} 个本地项目` : ui.localProjectsStatus === "loading" ? (ui.localProjects ? `正在检测 · 缓存 ${ui.localProjects.items.length} 个项目` : "正在连接 Companion") : ui.localProjects ? `Companion 离线 · 缓存 ${ui.localProjects.items.length} 个项目` : "Companion 离线";
   const continueCard = today
-    ? `<div class="today-continue-main"><div class="today-continue-copy"><div class="suggestion-kicker">${icon("sparkle", "icon spark")} 今日继续 · AI 建议下一步 <span class="tag">Mock · 基于真实扫描</span></div><h2>${esc(today.projectName)}</h2><p class="today-last-work">${esc(today.lastWork)}</p><div class="today-status"><span>${esc(today.workspaceStatus)}</span><span>${esc(today.gitStatus)}</span><span>${esc(today.remoteStatus)}</span></div><div class="today-next"><span>建议下一步</span><strong>${esc(today.nextStep)}</strong></div></div><div class="today-continue-actions"><span class="tag ai-mode mock">${esc(assistantStatus.label)}</span><button class="button primary" data-action="view-local-project" data-id="${esc(today.localProjectId)}">查看项目 ${icon("arrow")}</button><button class="button quiet small" data-action="open-assistant">问 Assistant</button></div></div>`
+    ? `<div class="today-continue-main"><div class="today-continue-copy"><div class="suggestion-kicker">${icon("sparkle", "icon spark")} 今日继续 · AI 建议下一步 <span class="tag">${assistantStatus.mode === "real" ? "GLM-4-Flash · 基于真实扫描" : "本地 Mock · 基于真实扫描"}</span></div><h2>${esc(today.projectName)}</h2><p class="today-last-work">${esc(today.lastWork)}</p><div class="today-status"><span>${esc(today.workspaceStatus)}</span><span>${esc(today.gitStatus)}</span><span>${esc(today.remoteStatus)}</span></div><div class="today-next"><span>建议下一步</span><strong>${esc(today.nextStep)}</strong></div></div><div class="today-continue-actions"><span class="tag ai-mode ${assistantStatus.mode}">${esc(assistantStatus.label)}</span><button class="button primary" data-action="view-local-project" data-id="${esc(today.localProjectId)}">查看项目 ${icon("arrow")}</button><button class="button quiet small" data-action="open-assistant">问 Assistant</button></div></div>`
     : `<div class="local-companion-notice"><strong>${ui.localProjectsStatus === "loading" ? "正在选取最值得继续的项目…" : "暂无可用的本机扫描数据"}</strong><p>工作台仍可使用；连接 Companion 后会用真实扫描生成建议，不会以演示状态代替。</p></div>`;
   return `<div class="page-heading"><div><div class="eyebrow">${formattedDate()} · ${esc(localStatus)}</div><h1>今天继续什么</h1><p>先看最值得推进的项目，再处理真实的工作区提醒。</p></div><div class="heading-actions"><button class="button quiet small" data-action="refresh-local-projects" ${ui.localProjectsStatus === "loading" ? "disabled" : ""}>${icon("reset")} 重新扫描</button><button class="button primary" data-action="open-create-task">${icon("plus")} 新建任务</button></div></div>
     <div class="dashboard-grid"><section class="today-continue-card grid-span-12">${continueCard}</section>
@@ -861,9 +861,9 @@ function renderAssistant() {
   if (!ui.assistantOpen) return `<button class="assistant-launcher" data-action="open-assistant" aria-label="打开 AI 助手"><span class="assistant-orb">${icon("sparkle")}</span><span>问问 AI</span></button>`;
   const prompts = ["project", "local-project"].includes(ui.page) ? ["这个项目现在有什么问题？", "这个项目最近有什么变化？", "帮我总结下一步"] : ui.page === "decisions" ? ["帮我整理这个决定", "我最近做了什么决定？"] : ui.page === "tasks" ? ["我下一步应该做什么？", "哪个任务优先？"] : ui.page === "knowledge" ? ["最近收集了哪些资料？", "总结一下当前收件箱"] : ["我下一步应该做什么？", "最近有哪些进展？"];
   const status = getAIStatus();
-  const transportNote = status.mode === "real" ? "API Key 仅由服务端环境变量管理。" : status.hint === "Real AI（以后启用）" ? "回复基于本地数据，本次对话不会发送到网络。" : status.hint;
+  const transportNote = status.mode === "real" ? "API Key 仅由 Cloudflare Worker Secret 管理。" : status.hint;
   return `<section class="assistant-panel" aria-label="AI Assistant"><header class="assistant-head"><span class="assistant-orb">${icon("sparkle")}</span><div class="assistant-head-copy"><div class="assistant-head-title">Workspace Assistant <span class="tag ai-mode ${status.mode}">${esc(status.label)}</span></div><div class="ai-mode-hint">${esc(status.hint)}</div><div class="assistant-context">${esc(contextLabel())} · 当前页面数据上下文</div></div><button class="icon-button" data-action="clear-chat" title="清空对话" aria-label="清空对话">${icon("reset")}</button><button class="icon-button" data-action="close-assistant" aria-label="关闭助手">${icon("close")}</button></header>
-    <div class="assistant-messages" id="assistant-messages" aria-live="polite">${ui.chat.map((message) => `<div class="chat-message ${message.role === "user" ? "user" : ""} ${message.pending ? "pending" : ""}">${esc(message.text)}</div>`).join("")}</div>
+    <div class="assistant-messages" id="assistant-messages" aria-live="polite">${ui.chat.map((message) => `<div class="chat-message ${message.role === "user" ? "user" : ""} ${message.pending ? "pending" : ""} ${message.isError ? "error" : ""}">${esc(message.text)}${message.isError ? `<button class="chat-retry" data-action="retry-chat" data-id="${esc(message.requestId)}">重试</button>` : ""}</div>`).join("")}</div>
     <div class="assistant-suggestions">${prompts.map((prompt) => `<button class="suggestion-chip" data-action="send-prompt" data-prompt="${esc(prompt)}" ${ui.chatBusy ? "disabled" : ""}>${esc(prompt)}</button>`).join("")}</div>
     <form class="assistant-compose" id="assistant-form"><label class="sr-only" for="assistant-input">给 AI 助手发消息</label><textarea id="assistant-input" name="message" rows="1" placeholder="问问当前工作区…" required ${ui.chatBusy ? "disabled" : ""}></textarea><button class="send-button" type="submit" aria-label="发送" ${ui.chatBusy ? "disabled" : ""}>${icon("send")}</button></form><div class="assistant-note">${esc(status.label)} · ${esc(transportNote)}</div></section>`;
 }
@@ -991,6 +991,10 @@ async function sendChat(message) {
   if (!clean || ui.chatBusy) return;
   const localProject = ui.page === "local-project" ? localProjectById(ui.localProjectId) : ui.page === "project" ? localProjectForWorkspace(projectById(ui.projectId)) : null;
   const assistantPage = ui.page === "local-project" ? "project" : ui.page;
+  const selection = window.getSelection();
+  const selectedContent = selection?.anchorNode && document.querySelector(".main-shell .content")?.contains(selection.anchorNode.parentElement)
+    ? selection.toString().trim().slice(0, 1_200)
+    : "";
   const context = buildAssistantContext({
     data: db,
     currentPage: assistantPage,
@@ -1001,16 +1005,20 @@ async function sendChat(message) {
     dashboardModel: assistantPage === "home" ? localDashboardModel() : null,
     localChanges: ui.localComparison?.changes || [],
     comparisonFirstScan: ui.localComparison?.firstScan || false,
+    selectedContent,
+    companionStatus: ui.localProjectsStatus,
+    companionScannedAt: ui.localProjects?.scannedAt || "",
   });
+  const requestId = uid("chat");
   const request = {
     message: clean,
     currentPage: assistantPage,
     currentProject: context.currentProject,
     relevantContext: context.relevantContext,
-    history: ui.chat.slice(-10).filter((item) => !item.pending).map((item) => ({ role: item.role, content: item.text })),
+    history: ui.chat.filter((item) => !item.pending && !item.isError && ["user", "assistant"].includes(item.role)).slice(-20).map((item) => ({ role: item.role, content: item.text.slice(0, 1_200) })),
   };
-  const pendingMessage = { role: "assistant", text: "正在整理当前页面和本地数据…", pending: true };
-  ui.chat.push({ role: "user", text: clean }, pendingMessage);
+  const pendingMessage = { role: "assistant", text: "GLM-4-Flash 正在思考…", pending: true, requestId };
+  ui.chat.push({ role: "user", text: clean, requestId }, pendingMessage);
   ui.chatBusy = true;
   ui.assistantOpen = true;
   render();
@@ -1018,9 +1026,12 @@ async function sendChat(message) {
     const result = await chatWithAI(request);
     pendingMessage.text = result.message.content;
     pendingMessage.provider = result.provider;
-  } catch {
-    pendingMessage.text = "暂时无法生成回复，请稍后重试。当前工作区数据仍保存在本地。";
-    pendingMessage.provider = "mock";
+  } catch (error) {
+    const userMessage = ui.chat.find((item) => item.requestId === requestId && item.role === "user");
+    if (userMessage) userMessage.isError = true;
+    pendingMessage.text = getAIErrorMessage(error);
+    pendingMessage.provider = "real";
+    pendingMessage.isError = true;
   } finally {
     pendingMessage.pending = false;
     ui.chatBusy = false;
@@ -1286,6 +1297,15 @@ function handleAction(action, element, sourceEvent) {
   if (action === "close-assistant") { ui.assistantOpen = false; render(); }
   if (action === "clear-chat") { ui.chat = [{ role: "assistant", text: "对话已清空。我会继续根据你当前打开的页面和本地数据回答。" }]; render(); }
   if (action === "send-prompt") sendChat(element.dataset.prompt || "");
+  if (action === "retry-chat") {
+    const requestId = element.dataset.id;
+    const failed = ui.chat.find((item) => item.requestId === requestId && item.isError);
+    const original = ui.chat.find((item) => item.requestId === requestId && item.role === "user");
+    if (failed && original) {
+      ui.chat = ui.chat.filter((item) => item.requestId !== requestId);
+      sendChat(original.text);
+    }
+  }
   if (action === "refresh-github") refreshGitHubData(id || null);
   if (action === "refresh-local-projects") refreshLocalProjects();
   if (action === "reset-demo" && cloudSyncEnabled) {
@@ -1314,6 +1334,10 @@ app.addEventListener("click", (event) => {
 app.addEventListener("keydown", (event) => {
   const target = event.target.closest('[data-action="view-project"], [data-action="view-decision"], [data-action="toggle-decision"]');
   if (target && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); handleAction(target.dataset.action, target); }
+  if (event.target.id === "assistant-input" && event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    if (!ui.chatBusy) sendChat(event.target.value);
+  }
   if (event.target.id === "global-search" && event.key === "Enter") {
     event.preventDefault();
     const first = searchItems(ui.query)[0];

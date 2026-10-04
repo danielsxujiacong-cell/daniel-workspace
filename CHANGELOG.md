@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-04 · V2.7 GLM AI (等待 AI_API_KEY Secret)
+
+- 新增独立 Cloudflare Worker `daniel-workspace-api`，通过 BigModel Chat Completions 调用 `glm-4-flash-250414`；API Key 只从 Wrangler Secret 读取。
+- Assistant 改为请求 GLM，显示 Provider 与模型；保留最近 20 条有效对话，支持 Enter 发送、思考状态、一次失败重试和明确错误，不会在真实服务失败时回退到 Mock。
+- 只发送精简页面上下文、Tasks、Projects、Knowledge、Decisions、选中内容及 Companion 健康摘要；过滤本机路径、链接、登录数据和 Git hash。
+- 本地与线上 Worker 健康检查、无 Secret 错误、上下文过滤、429/Timeout 单次重试和 CORS 测试通过。真实智谱对话和多轮验收待用户在终端设置 `AI_API_KEY` Secret。
+
 ## 2026-10-04 · V2.6 最终验收
 
 - Tasks 与 Knowledge 测试记录刷新后仍存在；按用户要求保留 Knowledge 测试记录。

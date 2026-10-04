@@ -13,6 +13,11 @@ Thumbs.db
 
 # Runtime caches and logs
 node_modules/
+cache/
+.wrangler/
+cloudflare/.wrangler/
+cloudflare/.dev.vars
+cloudflare/.dev.vars.*
 __pycache__/
 *.py[cod]
 .pytest_cache/
