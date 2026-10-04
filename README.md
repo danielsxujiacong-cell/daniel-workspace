@@ -4,7 +4,7 @@
 
 ## Status
 
-- **Stage:** V2.6 database initialization and authenticated Pages refresh acceptance are complete; a second-device read check remains
+- **Stage:** V2.6 final acceptance is in progress; Tasks and Knowledge survived refresh, while the Decisions refresh check remains
 - **Last updated:** 2026-10-04
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -28,13 +28,13 @@ python local_companion.py
 
 `src/auth/config.js` 的 `SUPABASE_ALLOWED_USER` 设为唯一允许账号的 User UUID；留空时默认拒绝所有账号。只允许已存在的 Email + Password 账号登录，不能从应用注册。项目 URL 和 publishable key 属于公开前端配置；绝不填 `service_role` key、数据库密码、用户密码或私密 Token。
 
-登录门在 `getUser()` 成功验证会话前不会导入 `src/app.js`，读取 Workspace localStorage 或扫描缓存，也不会请求 Local Companion。退出会立即清空页面和应用内存并停止扫描请求；原有 `daniel-workspace-v1` 浏览器数据会保留，供此设备下一次成功登录继续使用。
+登录门在 `getUser()` 成功验证会话前不会导入 `src/app.js`，读取 Workspace localStorage 或扫描缓存，也不会请求 Local Companion。若启动时会话检查暂时失败，登录按钮会重新初始化 Auth 客户端并重试；成功验证前仍不会进入 Workspace。退出会立即清空页面和应用内存并停止扫描请求；原有 `daniel-workspace-v1` 浏览器数据会保留，供此设备下一次成功登录继续使用。
 
 ## V2.6 云同步配置
 
 `src/cloud/sync.js` 只上传 Task、Knowledge、Decision 和 Project 基础资料，并在每条记录上附加当前 `auth.uid()`。Project 的本机绝对路径、GitHub 只读快照、Companion 状态和扫描缓存不会发送到 Supabase。所有四张表启用 RLS，策略检查 `auth.uid() = user_id`；客户端继续使用现有 public publishable key，不含 service role key。
 
-用户于 2026-10-04 确认已在 Supabase 执行 [v2.6-cloud-sync.sql](supabase/v2.6-cloud-sync.sql) 并完成线上迁移。已登录的 Pages 会话在重试及刷新后均显示“已同步”；Task 与 Project 云端资料刷新后仍可读取。当前账号的 Knowledge 和 Decisions 页面为空。Projects 同时显示云端资料与本机 Companion 的 16 个项目。另一台设备读取及第二个 Auth 用户的 RLS 隔离尚待人工验收。若为新的 Supabase 项目部署本应用，需在该项目执行上述 SQL；不要把本机旧 localStorage 自动并入已有云端数据。
+用户于 2026-10-04 确认已在 Supabase 执行 [v2.6-cloud-sync.sql](supabase/v2.6-cloud-sync.sql) 并完成线上迁移。Tasks 和新建的 Knowledge 验收记录刷新后仍可读取；用户要求保留 Knowledge 测试记录。Projects 的云端基础资料在 Companion 离线时仍可查看，本机 16 项缓存标记为可能过期。匿名请求读取四张表均收到 HTTP 401。Decisions 测试记录已保存，但刷新后的登录服务错误阻止了持久性复核；请在已登录浏览器中复核后再决定是否删除该记录。另一台设备读取及第二个 Auth 用户的隔离测试尚未进行。不要把本机旧 localStorage 自动并入已有云端数据。
 
 ## V1 功能
 

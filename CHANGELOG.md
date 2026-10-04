@@ -10,9 +10,14 @@
 
 ## 2026-10-04 · V2.6 线上验收
 
-- 用户确认已执行 Supabase SQL 并完成线上迁移。登录后的 GitHub Pages 会话在主动重试和刷新后显示“已同步”；Task 与 Project 云端资料刷新后仍可读取。
-- Knowledge 与 Decisions 当前显示空状态；Projects 分开展示云端基础资料和本机 Companion 状态，Companion 在线发现 16 个本地项目。
-- SQL 中的四张表均使用 `auth.uid() = user_id` RLS，匿名/公开角色无表权限；另一台设备和第二个 Auth 用户的隔离测试仍待人工验证。
+- 用户确认已执行 Supabase SQL 并完成线上迁移。Task 与新建的 Knowledge 验收记录刷新后仍可读取；用户要求保留 Knowledge 记录。Decisions 验收记录已保存，但刷新后遇到 Auth 初始化错误，持久性待复核。
+- Projects 云端资料在 Companion 离线时仍可查看，本机 16 项缓存保留并标记为可能过期；重启 Companion 后只读 API 返回 16 项。
+- 对四张表的匿名 PostgREST 请求均返回 HTTP 401。第二台设备与第二个 Auth 用户的验证仍待完成。
+
+## 2026-10-04 · V2.6 登录重试修复
+
+- 登录启动遇到会话检查错误后，登录按钮会按需重新初始化 Supabase Auth 客户端并重试；在 `getUser()` 验证成功前仍不加载私人 Workspace。
+- Decisions 刷新后持久性和最新 GitHub Pages 部署状态须在本次推送后复核。
 
 ## 2026-09-30 · V2.5 (user accepted 2026-10-03)
 

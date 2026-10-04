@@ -39,6 +39,25 @@ function isConfigured() {
   }
 }
 
+async function initializeAuthClient() {
+  if (authClient) return authClient;
+  const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2?target=es2022");
+  const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+      autoRefreshToken: true,
+      persistSession: true,
+      detectSessionInUrl: false,
+      storageKey: AUTH_STORAGE_KEY,
+    },
+  });
+  client.auth.onAuthStateChange((event) => {
+    if (event === "SIGNED_OUT" && workspaceVisible) lockWorkspace("已退出登录。");
+  });
+  authClient = client;
+  authInitializationError = "";
+  return client;
+}
+
 function isAllowedUser(user) {
   const allowedUser = SUPABASE_ALLOWED_USER.trim();
   if (!allowedUser || !user) return false;
@@ -130,24 +149,20 @@ async function handleLogin(form) {
     setLoginStatus("Supabase 登录配置不完整，暂时无法登录。");
     return;
   }
-  if (!authClient) {
-    setLoginStatus(authInitializationError || "登录服务正在初始化，请稍后重试。", false);
-    return;
-  }
-
   signInBusy = true;
   submit.disabled = true;
   submit.textContent = "正在登录…";
   setLoginStatus("正在连接 Supabase Auth…", false);
   try {
+    const client = await initializeAuthClient();
     const email = emailInput.value.trim();
     const password = passwordInput.value;
-    const { error } = await authClient.auth.signInWithPassword({ email, password });
+    const { error } = await client.auth.signInWithPassword({ email, password });
     if (error) throw error;
-    const { data: { user }, error: userError } = await authClient.auth.getUser();
+    const { data: { user }, error: userError } = await client.auth.getUser();
     if (userError || !user) throw userError || new Error("Authentication failed");
     if (!isAllowedUser(user)) {
-      await authClient.auth.signOut({ scope: "local" }).catch(() => {});
+      await client.auth.signOut({ scope: "local" }).catch(() => {});
       clearAuthSessionStorage();
       passwordInput.value = "";
       setLoginStatus(unauthorizedMessage());
@@ -156,6 +171,7 @@ async function handleLogin(form) {
     await enterWorkspace(user);
   } catch (error) {
     passwordInput.value = "";
+    if (!authClient) authInitializationError = `登录服务初始化失败：${loginErrorMessage(error)}`;
     setLoginStatus(loginErrorMessage(error));
   } finally {
     signInBusy = false;
@@ -202,18 +218,7 @@ async function boot() {
   if (!isConfigured()) return;
 
   try {
-    const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2?target=es2022");
-    authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: {
-        autoRefreshToken: true,
-        persistSession: true,
-        detectSessionInUrl: false,
-        storageKey: AUTH_STORAGE_KEY,
-      },
-    });
-    authClient.auth.onAuthStateChange((event) => {
-      if (event === "SIGNED_OUT" && workspaceVisible) lockWorkspace("已退出登录。");
-    });
+    await initializeAuthClient();
 
     const { data: { session }, error } = await authClient.auth.getSession();
     if (error) throw error;
@@ -227,7 +232,6 @@ async function boot() {
     }
     await enterWorkspace(user);
   } catch (error) {
-    authClient = null;
     authInitializationError = `登录服务初始化失败：${loginErrorMessage(error)}`;
     showLogin(authInitializationError);
   }
