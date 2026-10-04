@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-04 · V2.6 最终验收
+
+- Tasks 与 Knowledge 测试记录刷新后仍存在；按用户要求保留 Knowledge 测试记录。
+- Decisions 测试记录刷新后仍存在；用户确认永久删除后，删除已同步并在再次刷新后保持不存在。
+- 复核 Projects 云端基础资料与 Companion 本地状态分离；Companion 离线时仍可查看云端资料，本机扫描缓存保留并标为可能过期。
+- 四张 workspace 表的匿名 PostgREST 请求均返回 HTTP 401；未再次执行 localStorage 迁移，也未删除旧 localStorage。
+- Decisions 删除入口随 `402f44e` 发布，GitHub Pages workflow 成功。
+
 ## 2026-10-03 · V2.6 (等待数据库初始化)
 
 - 增加 Tasks、Knowledge、Decisions 和 Projects 基础资料的 Supabase 云同步客户端，继续复用现有 Auth 客户端，并对每张表按当前用户查询。
