@@ -4,7 +4,7 @@
 
 ## Status
 
-- **Stage:** V2.8 implementation. Run `supabase/v2.8-task-suggestions.sql` once before syncing AI task descriptions/source keys; start the Action Runner manually when using local Codex execution.
+- **Stage:** V2.8 complete. The user confirmed the migration and authenticated acceptance on 2026-10-04. Start the Action Runner manually when using local Codex execution.
 - **Last updated:** 2026-10-04
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -56,7 +56,7 @@ node .\node_modules\wrangler\bin\wrangler.js secret put AI_API_KEY --config .\cl
 - Local Companion 仍保持只读；本机写入逻辑独立位于 `action_runner.py`。Runner 离线或 CLI 不可用时，界面提供受限的复制 Task fallback。
 - 页面显示版本来自 `src/version.js` 的 `APP_VERSION`。
 
-首次使用 V2.8 前，在 Supabase Dashboard → SQL Editor 中运行一次 [`supabase/v2.8-task-suggestions.sql`](supabase/v2.8-task-suggestions.sql)，为 Tasks 增加说明和幂等来源键；此迁移保留既有 RLS 策略。若尚未执行迁移，AI 建议任务会留在本机云缓存并显示同步错误，不能视为已同步。
+用户于 2026-10-04 确认已在 Supabase Dashboard → SQL Editor 执行 [`supabase/v2.8-task-suggestions.sql`](supabase/v2.8-task-suggestions.sql)。该迁移为 Tasks 增加说明与幂等来源键，并保留既有 RLS 策略。用户同时确认 V2.8 人工验收通过：任务创建与防重复、打开项目、交给 Codex、确认弹窗、Action Runner 执行和重新扫描均已测试。
 
 需要使用「交给 Codex」时，先确认官方 Codex CLI 的 `codex.exe` 可通过 `PATH` 找到，再于单独终端运行 `python action_runner.py`。Runner 仅监听 `127.0.0.1:4175`、只接受工作台来源和 `D:\_Codex project` 扫描清单内的项目，不会自动启动。
 

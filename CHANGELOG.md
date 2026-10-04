@@ -7,6 +7,7 @@
 - 新增独立 `action_runner.py`。只允许固定 D 盘项目根内、缺少 README/HANDOFF/TODO/PROJECT_STATUS 的单文件文档动作；Codex 只读沙箱生成草稿，检查 diff 后再次确认才创建文件。无 Runner/CLI 时提供完整复制 Task。
 - 页面版本改由 `src/version.js` 的 `APP_VERSION` 单点提供。
 - 增加 `supabase/v2.8-task-suggestions.sql`，为 Task 说明和幂等来源键新增兼容字段；执行后保留现有 RLS。线上需用户在 Supabase SQL Editor 运行此迁移后，才能验收任务详情的跨设备同步。
+- 2026-10-04 用户确认 Supabase 迁移已成功执行，并完成人工验收：任务创建、防重复、打开项目、Codex 确认、Action Runner 执行及重新扫描均通过；V2.8 验收完成。
 
 ## 2026-10-04 · V2.7 GLM AI 真实 API 验收
 
