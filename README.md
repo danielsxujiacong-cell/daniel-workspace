@@ -34,7 +34,7 @@ python local_companion.py
 
 `src/cloud/sync.js` 只上传 Task、Knowledge、Decision 和 Project 基础资料，并在每条记录上附加当前 `auth.uid()`。Project 的本机绝对路径、GitHub 只读快照、Companion 状态和扫描缓存不会发送到 Supabase。所有四张表启用 RLS，策略检查 `auth.uid() = user_id`；客户端继续使用现有 public publishable key，不含 service role key。
 
-用户于 2026-10-04 确认已在 Supabase 执行 [v2.6-cloud-sync.sql](supabase/v2.6-cloud-sync.sql) 并完成线上迁移。Tasks 和新建的 Knowledge 验收记录刷新后仍可读取；用户要求保留 Knowledge 测试记录。Projects 的云端基础资料在 Companion 离线时仍可查看，本机 16 项缓存标记为可能过期。匿名请求读取四张表均收到 HTTP 401。Decisions 测试记录已保存，但刷新后的登录服务错误阻止了持久性复核；请在已登录浏览器中复核后再决定是否删除该记录。另一台设备读取及第二个 Auth 用户的隔离测试尚未进行。不要把本机旧 localStorage 自动并入已有云端数据。
+用户于 2026-10-04 确认已在 Supabase 执行 [v2.6-cloud-sync.sql](supabase/v2.6-cloud-sync.sql) 并完成线上迁移。Tasks 和新建的 Knowledge 验收记录刷新后仍可读取；用户要求保留 Knowledge 测试记录。Projects 的云端基础资料在 Companion 离线时仍可查看，本机 16 项缓存标记为可能过期。匿名请求读取四张表均收到 HTTP 401。登录重试修复已部署，入口及 Auth 脚本返回 HTTP 200。Decisions 测试记录已保存，但刷新后的登录服务错误阻止了持久性复核；请在已登录浏览器中复核后再决定是否删除该记录。另一台设备读取及第二个 Auth 用户的隔离测试尚未进行。不要把本机旧 localStorage 自动并入已有云端数据。
 
 ## V1 功能
 

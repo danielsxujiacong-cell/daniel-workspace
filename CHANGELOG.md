@@ -17,7 +17,8 @@
 ## 2026-10-04 · V2.6 登录重试修复
 
 - 登录启动遇到会话检查错误后，登录按钮会按需重新初始化 Supabase Auth 客户端并重试；在 `getUser()` 验证成功前仍不加载私人 Workspace。
-- Decisions 刷新后持久性和最新 GitHub Pages 部署状态须在本次推送后复核。
+- commit `c87eea8` 的 GitHub Pages workflow 已成功；公开入口和版本化 Auth 脚本均返回 HTTP 200。
+- Decisions 刷新后的持久性仍待在已登录 Chrome 中复核。
 
 ## 2026-09-30 · V2.5 (user accepted 2026-10-03)
 
