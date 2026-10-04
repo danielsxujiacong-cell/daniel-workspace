@@ -4,7 +4,7 @@
 
 ## Status
 
-- **Stage:** V2.7 Worker and frontend deployed; real GLM and 8-turn API checks passed. Signed-in Assistant UI and refresh acceptance remain.
+- **Stage:** V2.7 complete. The user confirmed live GLM conversations, authenticated Workspace Context, and Companion context all work.
 - **Last updated:** 2026-10-04
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -44,7 +44,7 @@ python local_companion.py
 node .\node_modules\wrangler\bin\wrangler.js secret put AI_API_KEY --config .\cloudflare\wrangler.jsonc
 ```
 
-终端提示输入时直接粘贴智谱 Key；不要把 Key 发到聊天或写入项目文件。当前线上 Worker 已配置 `AI_API_KEY` Secret，健康检查报告 `configured: true`。真实提示“你好”、今日任务建议和项目问题均成功返回；8 轮连续对话正确回忆开场标记。以上线上 API 验收使用合成 Workspace 上下文；登录态 Assistant UI 和刷新后业务数据仍待浏览器人工登录验收。Pages 已配置只访问该 Worker。登录后，前端最多发送最近 20 条对话消息和裁剪后的当前页面上下文；上下文包含 Tasks、Projects、Knowledge、Decisions、选中内容及 Companion 健康摘要，不包含本机路径、凭据、会话、仓库 URL 或 Git hash。Worker 对 429 和 Timeout 各最多重试一次；真实服务失败会显示可重试错误，不会改用 Mock。助手显示 `GLM-4-Flash` 和实际模型 ID。
+终端提示输入时直接粘贴智谱 Key；不要把 Key 发到聊天或写入项目文件。当前线上 Worker 已配置 `AI_API_KEY` Secret，健康检查报告 `configured: true`。真实提示“你好”、今日任务建议和项目问题均成功返回；8 轮连续对话正确回忆开场标记。用户随后确认已完成登录态线上验收：真实 GLM 对话、Workspace Context 和 Companion 上下文均正常，V2.7 已完成。Pages 已配置只访问该 Worker。登录后，前端最多发送最近 20 条对话消息和裁剪后的当前页面上下文；上下文包含 Tasks、Projects、Knowledge、Decisions、选中内容及 Companion 健康摘要，不包含本机路径、凭据、会话、仓库 URL 或 Git hash。Worker 对 429 和 Timeout 各最多重试一次；真实服务失败会显示可重试错误，不会改用 Mock。助手显示 `GLM-4-Flash` 和实际模型 ID。
 
 本地运行 Companion 后，另开终端执行 `npm run ai:worker:dev` 可在 `127.0.0.1:8787` 验证 Worker；本地无 Secret 时 `/api/chat` 会返回 `ai_not_configured`。静态应用不需要构建。
 

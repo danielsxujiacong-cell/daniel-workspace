@@ -6,7 +6,7 @@
 - Assistant 改为请求 GLM，显示 Provider 与模型；保留最近 20 条有效对话，支持 Enter 发送、思考状态、一次失败重试和明确错误，不会在真实服务失败时回退到 Mock。
 - 只发送精简页面上下文、Tasks、Projects、Knowledge、Decisions、选中内容及 Companion 健康摘要；过滤本机路径、链接、登录数据和 Git hash。
 - 线上 `/health` 报告 `configured: true`，Wrangler Secret 列表确认 `AI_API_KEY` 存在。问候、今日任务建议和项目问题的真实对话成功；8 轮对话回忆了开场标记。无效请求返回 400，未授权来源返回 403。
-- 真实 API 验收使用合成 Workspace 上下文；登录态 Assistant UI 和刷新后业务数据持久性仍待人工登录浏览器验收。此前本地与线上健康检查、上下文过滤、429/Timeout 单次重试和 CORS 测试通过。
+- 此前的直接 Worker 探针使用合成上下文；用户随后于 2026-10-04 确认完成登录态线上验收，真实 GLM 对话、Workspace Context 和 Companion 上下文均正常，V2.7 验收完成。此前本地与线上健康检查、上下文过滤、429/Timeout 单次重试和 CORS 测试通过。
 - Commit `3fde19d` 已推送到 `main`；GitHub Pages 的入口、Auth gate、应用、AI 模块和样式均返回 HTTP 200 并包含 V2.7 版本内容。
 
 ## 2026-10-04 · V2.6 最终验收
