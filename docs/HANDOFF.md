@@ -3,17 +3,21 @@
 ## Current state
 
 - **Updated:** 2026-10-04
-- **Stage:** V2.7 is complete. The user confirmed the live signed-in acceptance: GLM conversations, Workspace Context, and Companion context all work.
-- **Model:** BigModel `glm-4-flash-250414`; live `/health` reports `configured: true`. Wrangler Secret listing confirms `AI_API_KEY` exists as `secret_text`; the value was never read or logged.
-- **Secret setup:** If the secret must be rotated later, run `node .\node_modules\wrangler\bin\wrangler.js secret put AI_API_KEY --config .\cloudflare\wrangler.jsonc` from this repository root and enter the key only at Wrangler's terminal prompt. Never paste the key into chat or put it in a file.
-- **Architecture:** The authenticated Workspace calls the dedicated Worker; only the Worker calls BigModel. Context is explicitly bounded and excludes local paths, repository URLs, credentials, session data, and Git hashes. A configured real-provider failure stays visible and retryable; Mock is used only when no safe endpoint is configured.
-- **Verification:** Live prompts “你好”, “我今天最应该推进什么？” and a current-project issue question all returned HTTP 200 from `glm-4-flash-250414`. An 8-turn conversation recalled its opening marker `K7`. Invalid requests return HTTP 400 with `ai_invalid_request`; an unapproved origin returns HTTP 403. Those direct Worker probes used synthetic context. The user subsequently confirmed that signed-in live GLM conversations, Workspace Context, and Companion context all work. Context-builder checks passed for Dashboard, Project, Projects, Tasks, Knowledge, Decisions, selection, and Companion summaries; path/URL/hash filtering and retry/error behavior passed earlier focused checks.
-- **GitHub Pages:** The public entry, versioned Auth gate, app, AI config/service/context, and stylesheet returned HTTP 200 with V2.7 markers after deployment.
-- **Git:** This completion record is committed and pushed to `main`; final fetch confirms `HEAD = origin/main` and a clean working tree.
-- **Browser:** The user completed the signed-in online acceptance and confirmed real GLM conversation, Workspace Context, and Companion context work.
-- **V2.6 data:** Supabase SQL remains applied. Keep the Knowledge acceptance record, do not recreate the deleted Decisions record, and do not rerun or delete the legacy `daniel-workspace-v1` migration data.
-- **Scope:** Stop after V2.7 acceptance; do not start V2.8.
+- **Stage:** V2.8 implementation is ready for delivery. The user explicitly started V2.8; this replaces the earlier V2.7 stop note.
+- **Version:** The sidebar reads `APP_VERSION` from `src/version.js`, currently `V2.8`.
+- **Dashboard:** Local Companion findings are converted into structured suggestions. GLM may refine the title/reason/action text; only the application selects the issue and allowed actions. The card exposes project, task, and (for missing documentation) Codex actions.
+- **Tasks:** AI Tasks include a deterministic source key and description, use the current authenticated user's existing sync path, and are deduplicated locally and by the new per-user partial unique index. Existing V2.6 tasks with empty new fields omit the new DB columns until the migration is applied.
+- **Codex:** `action_runner.py` is separate from read-only `local_companion.py`, binds to `127.0.0.1:4175`, and only accepts exact Workspace origins and scanned projects under `D:\_Codex project`. Fixed missing-document actions include README, HANDOFF, TODO, and PROJECT_STATUS. Codex CLI runs with `--sandbox read-only`; the Runner returns a one-file diff and writes only after a second explicit confirmation. The file is created without overwriting. No arbitrary command, delete, commit, or push endpoint exists.
+- **Runner use:** Ensure `codex.exe` is on `PATH`, start Companion as usual, then run `python action_runner.py` in a separate terminal. The Runner is intentionally not auto-started. If it or Codex CLI is unavailable, the UI offers a precise copyable Codex Task.
+- **Database migration:** `supabase/v2.8-task-suggestions.sql` must be run once in the existing Supabase project's SQL Editor before claiming cloud persistence of AI Task descriptions/source keys or live duplicate protection. The current environment does not provide a signed-in Supabase Dashboard session, so migration and live sync acceptance remain pending.
+- **Verification:** JS and Python syntax, `git diff --check`, structured action allowlists, model action-field rejection, path-independent Task keys, Task serialization/user scope, V2.6 Task compatibility, Runner CORS, outside-root rejection, existing-document rejection, absent arbitrary-command endpoint, and a real Codex CLI read-only draft plus create-only apply against an ignored synthetic fixture passed. The signed-in Workspace UI and post-Runner Companion rescan were not available in this run; do not mark those browser acceptance items complete.
+- **Safety test fixture:** Runner test artifacts were kept in ignored `cache/` and removed after validation; no synthetic files are staged.
+- **V2.6 data:** Preserve Supabase records and the legacy `daniel-workspace-v1` browser data. Do not rerun the old localStorage migration.
 
-## Completion
+## Next action
 
-V2.7 acceptance is complete. Stop here; do not start V2.8.
+1. After the code is pushed, open Supabase Dashboard → SQL Editor, run `supabase/v2.8-task-suggestions.sql`, and verify it completes.
+2. Sign in to the deployed Workspace. Verify creating an AI Task, duplicate prevention after refresh, project navigation, canceling the Codex confirmation, and the Codex diff/second-confirmation flow; then rescan and confirm the missing document appears.
+3. Confirm the AI Task description/source remain visible after refresh and on the other signed-in device.
+
+V2.8 is the requested scope. Do not start V2.9.

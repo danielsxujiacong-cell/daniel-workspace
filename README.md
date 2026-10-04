@@ -1,10 +1,10 @@
 # Daniel Workspace
 
-私人 AI 工作台 V2.7。GitHub Pages 对未登录访客只显示登录页；现有 Supabase email/password 用户登录后，Tasks、Knowledge、Decisions 和 Projects 基础资料通过同一 Supabase 账号同步。本机路径、Git 状态与 Companion 扫描仍由当前设备提供；登录后的 AI Assistant 通过独立 Cloudflare Worker 调用智谱 GLM。
+私人 AI 工作台 V2.8。GitHub Pages 对未登录访客只显示登录页；现有 Supabase email/password 用户登录后，Tasks、Knowledge、Decisions 和 Projects 基础资料通过同一 Supabase 账号同步。本机路径、Git 状态与 Companion 扫描仍由当前设备提供；Dashboard 的 GLM 建议可以创建云端任务，或在两次明确确认后交给本机 Codex Runner 处理单个缺失文档。
 
 ## Status
 
-- **Stage:** V2.7 complete. The user confirmed live GLM conversations, authenticated Workspace Context, and Companion context all work.
+- **Stage:** V2.8 implementation. Run `supabase/v2.8-task-suggestions.sql` once before syncing AI task descriptions/source keys; start the Action Runner manually when using local Codex execution.
 - **Last updated:** 2026-10-04
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -47,6 +47,18 @@ node .\node_modules\wrangler\bin\wrangler.js secret put AI_API_KEY --config .\cl
 终端提示输入时直接粘贴智谱 Key；不要把 Key 发到聊天或写入项目文件。当前线上 Worker 已配置 `AI_API_KEY` Secret，健康检查报告 `configured: true`。真实提示“你好”、今日任务建议和项目问题均成功返回；8 轮连续对话正确回忆开场标记。用户随后确认已完成登录态线上验收：真实 GLM 对话、Workspace Context 和 Companion 上下文均正常，V2.7 已完成。Pages 已配置只访问该 Worker。登录后，前端最多发送最近 20 条对话消息和裁剪后的当前页面上下文；上下文包含 Tasks、Projects、Knowledge、Decisions、选中内容及 Companion 健康摘要，不包含本机路径、凭据、会话、仓库 URL 或 Git hash。Worker 对 429 和 Timeout 各最多重试一次；真实服务失败会显示可重试错误，不会改用 Mock。助手显示 `GLM-4-Flash` 和实际模型 ID。
 
 本地运行 Companion 后，另开终端执行 `npm run ai:worker:dev` 可在 `127.0.0.1:8787` 验证 Worker；本地无 Secret 时 `/api/chat` 会返回 `ai_not_configured`。静态应用不需要构建。
+
+## V2.8 AI 建议动作
+
+- Dashboard 根据本机扫描构造结构化问题；GLM 只负责整理标题、原因和建议。`projectId` 与 `allowedActions` 由应用根据本地状态确定，模型输出不能授权写操作。
+- 「查看项目」进入匹配的 Workspace Project 页面；没有云端匹配时进入本机项目详情。「创建任务」同步任务说明及稳定来源键；同一项目问题通过稳定任务 ID 和 Supabase 唯一索引防止重复。
+- 「交给 Codex」只对缺失 README、HANDOFF 或 TODO/PROJECT_STATUS 开放。第一次确认启动本机 CLI 的只读草稿任务；用户查看精确 diff 并再次确认后，Runner 才会创建那一个文档。不会删除、修改业务源码、操作其他项目、执行任意命令、commit 或 push。
+- Local Companion 仍保持只读；本机写入逻辑独立位于 `action_runner.py`。Runner 离线或 CLI 不可用时，界面提供受限的复制 Task fallback。
+- 页面显示版本来自 `src/version.js` 的 `APP_VERSION`。
+
+首次使用 V2.8 前，在 Supabase Dashboard → SQL Editor 中运行一次 [`supabase/v2.8-task-suggestions.sql`](supabase/v2.8-task-suggestions.sql)，为 Tasks 增加说明和幂等来源键；此迁移保留既有 RLS 策略。若尚未执行迁移，AI 建议任务会留在本机云缓存并显示同步错误，不能视为已同步。
+
+需要使用「交给 Codex」时，先确认官方 Codex CLI 的 `codex.exe` 可通过 `PATH` 找到，再于单独终端运行 `python action_runner.py`。Runner 仅监听 `127.0.0.1:4175`、只接受工作台来源和 `D:\_Codex project` 扫描清单内的项目，不会自动启动。
 
 ## V1 功能
 
@@ -98,6 +110,9 @@ node .\node_modules\wrangler\bin\wrangler.js secret put AI_API_KEY --config .\cl
 | `src/auth/config.js` | Public Supabase URL and anon/publishable-key configuration |
 | `src/cloud/sync.js` | RLS-bound workspace queries, safe local migration, cloud diff and offline rebase |
 | `src/app.js` | 页面、交互、Assistant 面板和记录表单 |
+| `src/version.js` | 单一页面版本来源 |
+| `src/suggestions.js` | Dashboard 建议结构、安全动作列表和 Codex Task 模板 |
+| `action_runner.py` | 独立 loopback Runner；生成并确认创建单个缺失文档 |
 | `src/ai/config.js` | 公开 Worker 地址和模型配置，不含 API Key |
 | `src/ai/service.js` | 统一 chat 接口、provider 状态与错误处理 |
 | `src/ai/context.js` | 从当前页面构造裁剪后的相关上下文 |
@@ -108,6 +123,7 @@ node .\node_modules\wrangler\bin\wrangler.js secret put AI_API_KEY --config .\cl
 | `local_companion.py` | loopback 静态服务和 `D:\_Codex project` 只读扫描 API |
 | `src/store.js` | localStorage 读写与演示数据恢复 |
 | `supabase/v2.6-cloud-sync.sql` | V2.6 tables, per-user RLS, grants, and updated_at triggers |
+| `supabase/v2.8-task-suggestions.sql` | Task description/source-key columns and idempotency index |
 | `src/mock-data.js` | 初始演示数据 |
 | `assets/styles.css` | 浅色/深色响应式界面 |
 | `AGENTS.md` | 项目操作指引 |

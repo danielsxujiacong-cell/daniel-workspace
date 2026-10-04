@@ -1,4 +1,4 @@
-import { SUPABASE_ALLOWED_USER, SUPABASE_ANON_KEY, SUPABASE_URL } from "./config.js?v=2.6.0";
+import { SUPABASE_ALLOWED_USER, SUPABASE_ANON_KEY, SUPABASE_URL } from "./config.js";
 
 const app = document.querySelector("#app");
 const colorScheme = window.matchMedia("(prefers-color-scheme: light)");
@@ -90,7 +90,7 @@ async function enterWorkspace(user) {
   globalThis.DANIEL_WORKSPACE_AUTHENTICATED = true;
   globalThis.DANIEL_WORKSPACE_AUTH = { client: authClient, userId: user.id };
   try {
-    workspaceModule = await import("../app.js?v=2.7.0");
+    workspaceModule = await import("../app.js");
     workspaceVisible = true;
   } catch (error) {
     globalThis.DANIEL_WORKSPACE_AUTHENTICATED = false;

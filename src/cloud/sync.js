@@ -29,18 +29,27 @@ const collections = {
   },
   tasks: {
     table: "workspace_tasks",
-    fields: ["title", "projectId", "status", "priority", "due"],
-    toRow: (item, userId) => ({
-      ...baseRow(item, userId),
-      title: item.title || "",
-      project_id: item.projectId || "",
-      status: item.status || "todo",
-      priority: item.priority || "中",
-      due: item.due || "",
-    }),
+    fields: ["title", "description", "sourceKey", "projectId", "status", "priority", "due"],
+    toRow: (item, userId) => {
+      const row = {
+        ...baseRow(item, userId),
+        title: item.title || "",
+        project_id: item.projectId || "",
+        status: item.status || "todo",
+        priority: item.priority || "中",
+        due: item.due || "",
+      };
+      if (item.sourceKey || item.description) {
+        row.description = item.description || "";
+        if (item.sourceKey) row.source_key = item.sourceKey;
+      }
+      return row;
+    },
     fromRow: (row) => ({
       ...baseRecord(row),
       title: row.title || "",
+      description: row.description || "",
+      sourceKey: row.source_key || "",
       projectId: row.project_id || "",
       status: row.status || "todo",
       priority: row.priority || "中",

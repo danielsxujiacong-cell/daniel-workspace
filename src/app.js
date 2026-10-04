@@ -17,9 +17,10 @@ const {
   saveData,
   saveLocalScanBaseline,
   saveLocalScanCache,
-} = await import("./store.js?v=2.6.0");
-const { buildAssistantContext } = await import("./ai/context.js?v=2.7.0");
-const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = await import("./ai/service.js?v=2.7.0");
+} = await import("./store.js");
+const { buildAssistantContext } = await import("./ai/context.js");
+const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = await import("./ai/service.js");
+const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = await import("./suggestions.js");
 const { fetchPublicGitHubRepository, parsePublicGitHubRepository } = await import("./github/public-api.js");
 const { buildLocalDashboardModel, compareLocalProjects } = await import("./dashboard.js");
 const {
@@ -31,7 +32,8 @@ const {
   migrateLocalWorkspace,
   preserveDeviceOnlyData,
   saveCloudChanges,
-} = await import("./cloud/sync.js?v=2.6.0");
+} = await import("./cloud/sync.js");
+const { APP_VERSION } = await import("./version.js");
 
 const app = document.querySelector("#app");
 let legacyData = loadData();
@@ -67,6 +69,11 @@ const ui = {
   searchOpen: false,
   modal: null,
   confirmation: null,
+  dashboardSuggestion: null,
+  dashboardSuggestionKey: "",
+  dashboardSuggestionStatus: "idle",
+  createdSuggestionKeys: [],
+  codex: null,
   assistantOpen: false,
   chatBusy: false,
   githubRefreshing: false,
@@ -450,6 +457,11 @@ export function clearPrivateWorkspace() {
   ui.localProjectsStatus = "unavailable";
   ui.localComparison = null;
   ui.localScanAttemptAt = "";
+  ui.dashboardSuggestion = null;
+  ui.dashboardSuggestionKey = "";
+  ui.dashboardSuggestionStatus = "idle";
+  ui.createdSuggestionKeys = [];
+  ui.codex = null;
   ui.chat = [];
   ui.modal = null;
   ui.confirmation = null;
@@ -507,9 +519,11 @@ function statusPill(status) {
 
 function taskRow(task, compact = false) {
   const project = projectById(task.projectId);
+  const description = task.description ? `<div class="task-description">${esc(task.description)}</div>` : "";
+  const source = task.sourceKey?.startsWith("ai-suggestion:") ? `<span class="tag task-source">AI Suggestion</span>` : "";
   return `<div class="task-row ${task.status === "done" ? "is-done" : ""}">
     <button class="check-button ${task.status === "done" ? "checked" : ""}" data-action="toggle-task" data-id="${esc(task.id)}" aria-label="${task.status === "done" ? "重新打开" : "完成"}任务">${task.status === "done" ? icon("checkSquare") : ""}</button>
-    <div class="task-text">${esc(task.title)}${!compact ? `<div class="task-sub">${esc(project?.name || "无关联项目")}${task.due ? ` · ${esc(task.due)}` : ""}</div>` : ""}</div>
+    <div class="task-text">${esc(task.title)}${description}${!compact ? `<div class="task-sub">${esc(project?.name || "无关联项目")}${task.due ? ` · ${esc(task.due)}` : ""} ${source}</div>` : ""}</div>
     <span class="priority ${priorityClass(task.priority)}">${esc(task.priority || "低")}优先级</span>
     ${compact ? "" : `<button class="icon-button" data-action="edit-task" data-id="${esc(task.id)}" aria-label="编辑任务">${icon("edit")}</button><button class="icon-button" data-action="delete-task" data-id="${esc(task.id)}" aria-label="删除任务">${icon("trash")}</button>`}
   </div>`;
@@ -583,6 +597,300 @@ function localDashboardModel() {
   });
 }
 
+function requestDashboardSuggestion(candidate, localProject) {
+  if (!candidate || candidate.suggestionKey === ui.dashboardSuggestionKey || !workspaceActive || ["loading", "syncing", "migrating"].includes(ui.cloud.status)) return;
+  ui.dashboardSuggestionKey = candidate.suggestionKey;
+  ui.dashboardSuggestion = candidate;
+  ui.dashboardSuggestionStatus = "generating";
+  if (getAIStatus().mode !== "real") {
+    ui.dashboardSuggestionStatus = "mock";
+    return;
+  }
+  const request = {
+    message: `根据单个本地扫描问题，生成简短的 Workspace 建议。严格返回 JSON：{"issueType":"${candidate.issueType}","severity":"low|medium|high","title":"项目名","reason":"为什么发现此问题","suggestedAction":"下一步建议"}。issueType 必须保持 ${candidate.issueType}。不要提出写文件、执行命令、删除、commit 或 push；不要输出路径、URL、仓库地址或 Git hash。`,
+    currentPage: "home",
+    currentProject: candidate.projectId ? { id: candidate.projectId, name: candidate.projectName } : null,
+    relevantContext: {
+      source: "bounded_workspace_health_summary",
+      candidate: {
+        projectName: candidate.projectName,
+        issueType: candidate.issueType,
+        finding: candidate.finding,
+        reason: candidate.reason,
+        severity: candidate.severity,
+        git: { hasGit: Boolean(localProject?.hasGit), clean: localProject?.clean ?? null, ahead: localProject?.ahead ?? null, behind: localProject?.behind ?? null },
+        documents: {
+          readme: Boolean(localProject?.documents?.readme),
+          handoff: Boolean(localProject?.documents?.handoff),
+          todo: Boolean(localProject?.documents?.todo),
+          projectStatus: Boolean(localProject?.documents?.projectStatus),
+        },
+        allowedActions: candidate.allowedActions,
+      },
+    },
+    history: [],
+  };
+  void chatWithAI(request).then((result) => {
+    if (!workspaceActive || ui.dashboardSuggestionKey !== candidate.suggestionKey) return;
+    if (result.provider !== "real") {
+      ui.dashboardSuggestionStatus = "mock";
+      render();
+      return;
+    }
+    const structured = parseStructuredSuggestion(result.message.content, candidate);
+    if (structured) {
+      ui.dashboardSuggestion = { ...structured, provider: "real" };
+      ui.dashboardSuggestionStatus = "ready";
+    } else {
+      ui.dashboardSuggestion = { ...candidate, error: "GLM 建议格式无效；保留本机扫描结论。" };
+      ui.dashboardSuggestionStatus = "error";
+    }
+    render();
+  }).catch((error) => {
+    if (!workspaceActive || ui.dashboardSuggestionKey !== candidate.suggestionKey) return;
+    ui.dashboardSuggestion = { ...candidate, error: getAIErrorMessage(error) };
+    ui.dashboardSuggestionStatus = "error";
+    render();
+  });
+}
+
+function suggestionTaskExists(suggestion) {
+  return db.tasks.some((task) => task.sourceKey === suggestion?.sourceKey || task.id === suggestion?.taskId);
+}
+
+function createSuggestionTask(suggestion) {
+  if (!workspaceActive || !suggestion || suggestionTaskExists(suggestion)) {
+    render();
+    toast("已在 Tasks 中");
+    return;
+  }
+  const documentLabel = ({ missing_readme: "README", missing_handoff: "HANDOFF", missing_todo: "TODO", missing_project_status: "PROJECT_STATUS" })[suggestion.issueType];
+  const item = {
+    id: suggestion.taskId,
+    sourceKey: suggestion.sourceKey,
+    title: documentLabel ? `补齐 ${suggestion.projectName} 的 ${documentLabel}` : `处理 ${suggestion.projectName}：${suggestion.finding}`,
+    description: `AI 在 Workspace 健康检查中发现「${suggestion.projectName}」：${suggestion.finding}。建议：${suggestion.suggestedAction}`,
+    projectId: suggestion.projectId || "",
+    status: "todo",
+    priority: ({ high: "高", medium: "中", low: "低" })[suggestion.severity] || "中",
+    due: "",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  db.tasks.unshift(item);
+  ui.createdSuggestionKeys.push(suggestion.sourceKey);
+  logActivity("task-added", `创建 AI 建议任务「${item.title}」`, item.projectId || null);
+  persist();
+  render();
+  toast("AI 建议任务已创建并排入云端同步");
+}
+
+function codexTaskFor(suggestion) {
+  const project = localProjectById(suggestion?.localProjectId);
+  return project ? { project, text: formatCodexTask(project, suggestion) } : null;
+}
+
+function openCodexConfirmation(suggestion) {
+  const prepared = codexTaskFor(suggestion);
+  if (!prepared?.text || !suggestion.allowedActions.includes("send_to_codex")) {
+    toast("此建议没有可安全交给 Codex 的文档动作");
+    return;
+  }
+  ui.confirmation = {
+    kind: "codex",
+    title: "准备交给 Codex",
+    confirmLabel: "确认交给 Codex",
+    suggestion,
+    project: prepared.project,
+    taskText: prepared.text,
+    runnerStatus: "checking",
+  };
+  render();
+  document.querySelector("[data-action=accept-confirm]")?.focus({ preventScroll: true });
+  void probeActionRunner(suggestion.sourceKey);
+}
+
+async function probeActionRunner(sourceKey) {
+  try {
+    const result = await runnerRequest("/health");
+    if (ui.confirmation?.kind !== "codex" || ui.confirmation.suggestion.sourceKey !== sourceKey) return;
+    ui.confirmation.runnerStatus = result.codexAvailable ? "ready" : "cli_missing";
+  } catch {
+    if (ui.confirmation?.kind !== "codex" || ui.confirmation.suggestion.sourceKey !== sourceKey) return;
+    ui.confirmation.runnerStatus = "offline";
+  }
+  render();
+}
+
+async function runnerRequest(path, method = "GET", body = null) {
+  const response = await fetch(`http://127.0.0.1:4175${path}`, {
+    method,
+    mode: "cors",
+    credentials: "omit",
+    cache: "no-store",
+    referrerPolicy: "no-referrer",
+    signal: AbortSignal.timeout(8_000),
+    headers: body ? { "Content-Type": "application/json", Accept: "application/json" } : { Accept: "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  let result;
+  try { result = await response.json(); } catch { result = {}; }
+  if (!response.ok) {
+    const error = new Error(result.error || `Action Runner returned HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
+  return result;
+}
+
+function showCodexFallback(suggestion, taskText, reason) {
+  ui.codex = {
+    sourceKey: suggestion.sourceKey,
+    projectName: suggestion.projectName,
+    localProjectId: suggestion.localProjectId,
+    taskText,
+    status: "fallback",
+    dialog: "fallback",
+    message: reason || "已准备好，粘贴到 Codex 即可。",
+  };
+  render();
+}
+
+async function startCodexAction(suggestion, taskText) {
+  ui.codex = { sourceKey: suggestion.sourceKey, projectName: suggestion.projectName, localProjectId: suggestion.localProjectId, taskText, status: "starting", dialog: "" };
+  render();
+  try {
+    const job = await runnerRequest("/actions/codex", "POST", {
+      projectId: suggestion.localProjectId,
+      actionType: "send_to_codex",
+      task: { issueType: suggestion.issueType },
+    });
+    if (!workspaceActive) return;
+    ui.codex.jobId = job.jobId;
+    ui.codex.status = job.status || "queued";
+    render();
+    void pollCodexJob(job.jobId, 0);
+  } catch (error) {
+    if (!workspaceActive) return;
+    const reason = error.status === 403
+      ? "Action Runner 拒绝了不在 D:\\_Codex project 项目清单中的路径；没有执行或写入。"
+      : error.status === 409
+        ? "扫描状态已变化或目标文档已存在；没有覆盖文件。"
+        : error.message === "Failed to fetch" || error instanceof TypeError
+          ? "本机 Action Runner 未连接；已生成复制到 Codex 的安全 Task。"
+          : "Action Runner 没有启动 Codex；原项目没有改动。";
+    showCodexFallback(suggestion, taskText, reason);
+  }
+}
+
+async function pollCodexJob(jobId, attempt) {
+  if (!workspaceActive || !ui.codex || ui.codex.jobId !== jobId) return;
+  try {
+    const job = await runnerRequest(`/jobs/${encodeURIComponent(jobId)}`);
+    if (!workspaceActive || ui.codex.jobId !== jobId) return;
+    ui.codex.status = job.status;
+    ui.codex.message = job.message || "";
+    if (job.status === "queued" || job.status === "running") {
+      render();
+      if (attempt < 250) setTimeout(() => void pollCodexJob(jobId, attempt + 1), 1_200);
+      else { ui.codex.status = "connection_error"; ui.codex.message = "Codex 仍在处理；可以稍后重新查看状态。"; render(); }
+      return;
+    }
+    if (job.status === "awaiting_confirmation") {
+      ui.codex = { ...ui.codex, ...job, status: "awaiting_confirmation", dialog: "preview" };
+      render();
+      return;
+    }
+    if (job.status === "failed") {
+      showCodexFallback(
+        { sourceKey: ui.codex.sourceKey, projectName: ui.codex.projectName, localProjectId: ui.codex.localProjectId },
+        ui.codex.taskText,
+        job.message || "Codex 没有生成可用草稿；原项目没有改动。",
+      );
+      return;
+    }
+    if (job.status === "complete") {
+      ui.codex = { ...ui.codex, ...job, status: "complete", dialog: "complete" };
+      render();
+    }
+  } catch {
+    if (!workspaceActive || ui.codex.jobId !== jobId) return;
+    ui.codex.status = "connection_error";
+    ui.codex.message = "暂时无法读取 Action Runner 状态；Codex 生成草稿时没有写入原项目。";
+    render();
+  }
+}
+
+async function applyCodexDocument() {
+  const job = ui.codex;
+  if (!job?.jobId || job.status !== "awaiting_confirmation") return;
+  job.status = "applying";
+  render();
+  try {
+    await runnerRequest("/actions/apply", "POST", { jobId: job.jobId });
+    if (!workspaceActive) return;
+    job.status = "complete";
+    job.dialog = "complete";
+    job.message = "Codex 已完成；仅创建了确认过的文档。";
+    render();
+    void refreshLocalProjects();
+  } catch (error) {
+    if (!workspaceActive) return;
+    if (error.status) {
+      void pollCodexJob(job.jobId, 0);
+      return;
+    }
+    job.status = "awaiting_confirmation";
+    job.message = "写入结果暂不可确认。重新检查 Action Runner 状态后再试。";
+    render();
+  }
+}
+
+async function copyCodexTask() {
+  const task = ui.confirmation?.taskText || ui.codex?.taskText || "";
+  if (!task) return;
+  try {
+    await navigator.clipboard.writeText(task);
+    toast("完整 Codex Task 已复制");
+  } catch {
+    const textarea = document.querySelector("#codex-task-text");
+    if (textarea) { textarea.focus(); textarea.select(); }
+    toast("请在任务框中全选并复制");
+  }
+}
+
+function suggestionForDashboard(today) {
+  if (!today?.localProject) return null;
+  const candidate = buildActionSuggestion(today.localProject, today.projectId ? projectById(today.projectId) : null);
+  if (ui.dashboardSuggestionKey !== candidate.suggestionKey) ui.dashboardSuggestion = candidate;
+  requestDashboardSuggestion(candidate, today.localProject);
+  return ui.dashboardSuggestionKey === candidate.suggestionKey && ui.dashboardSuggestion
+    ? ui.dashboardSuggestion
+    : candidate;
+}
+
+function renderCodexStatus(suggestion) {
+  const job = ui.codex;
+  if (!job || job.sourceKey !== suggestion?.sourceKey) return "";
+  if (["starting", "queued", "running", "applying"].includes(job.status)) {
+    const text = job.status === "applying" ? "正在创建确认过的文档…" : "Codex 正在只读沙箱中生成文档草稿…";
+    return `<div class="runner-status" role="status" aria-live="polite">${esc(text)}</div>`;
+  }
+  if (job.status === "awaiting_confirmation") {
+    return `<div class="runner-status" role="status">Codex 已生成 ${esc(job.fileName || "文档")} 草稿 · 等待确认写入</div>`;
+  }
+  if (job.status === "complete") {
+    return `<div class="runner-status runner-success" role="status">✅ Codex 已完成 · ${esc(job.fileName || "文档")} · +${Number(job.additions) || 0} / -${Number(job.deletions) || 0}</div>`;
+  }
+  if (job.status === "fallback") {
+    return `<div class="runner-status" role="status">${esc(job.message || "已准备好，粘贴到 Codex 即可")}</div>`;
+  }
+  if (job.status === "connection_error") {
+    return `<div class="runner-status" role="status">${esc(job.message || "Action Runner 状态暂不可用")}</div>`;
+  }
+  return "";
+}
+
 function localScanStatusMessage() {
   const lastSuccess = ui.localProjects?.scannedAt ? formattedTimestamp(ui.localProjects.scannedAt) : "无";
   const lastAttempt = ui.localScanAttemptAt ? formattedTimestamp(ui.localScanAttemptAt) : "尚未尝试";
@@ -651,11 +959,24 @@ function renderDashboardRecent(model) {
 function renderDashboard() {
   const model = localDashboardModel();
   const today = model?.todayContinue;
-  const workspaceProject = today?.projectId ? projectById(today.projectId) : null;
+  const suggestion = suggestionForDashboard(today);
   const assistantStatus = getAIStatus();
   const localStatus = ui.localProjectsStatus === "ready" ? `Companion 在线 · ${ui.localProjects.items.length} 个本地项目` : ui.localProjectsStatus === "loading" ? (ui.localProjects ? `正在检测 · 缓存 ${ui.localProjects.items.length} 个项目` : "正在连接 Companion") : ui.localProjects ? `Companion 离线 · 缓存 ${ui.localProjects.items.length} 个项目` : "Companion 离线";
-  const continueCard = today
-    ? `<div class="today-continue-main"><div class="today-continue-copy"><div class="suggestion-kicker">${icon("sparkle", "icon spark")} 今日继续 · AI 建议下一步 <span class="tag">${assistantStatus.mode === "real" ? "GLM-4-Flash · 基于真实扫描" : "本地 Mock · 基于真实扫描"}</span></div><h2>${esc(today.projectName)}</h2><p class="today-last-work">${esc(today.lastWork)}</p><div class="today-status"><span>${esc(today.workspaceStatus)}</span><span>${esc(today.gitStatus)}</span><span>${esc(today.remoteStatus)}</span></div><div class="today-next"><span>建议下一步</span><strong>${esc(today.nextStep)}</strong></div></div><div class="today-continue-actions"><span class="tag ai-mode ${assistantStatus.mode}">${esc(assistantStatus.label)}</span><button class="button primary" data-action="view-local-project" data-id="${esc(today.localProjectId)}">查看项目 ${icon("arrow")}</button><button class="button quiet small" data-action="open-assistant">问 Assistant</button></div></div>`
+  const taskExists = suggestion && suggestionTaskExists(suggestion);
+  const codexForSuggestion = ui.codex?.sourceKey === suggestion?.sourceKey ? ui.codex : null;
+  const codexLabel = codexForSuggestion?.status === "complete" ? "查看 Codex 结果"
+    : codexForSuggestion && ["starting", "queued", "running", "applying"].includes(codexForSuggestion.status) ? "Codex 正在处理…"
+      : codexForSuggestion?.status === "awaiting_confirmation" ? "查看 Codex 草稿"
+        : codexForSuggestion?.status === "fallback" ? "查看 Codex Task"
+          : "交给 Codex";
+  const codexDisabled = codexForSuggestion && ["starting", "queued", "running", "applying"].includes(codexForSuggestion.status);
+  const suggestionStatus = ui.dashboardSuggestionStatus === "generating" ? "GLM 正在整理建议…"
+    : ui.dashboardSuggestionStatus === "ready" ? "GLM-4-Flash · 结构化建议"
+      : ui.dashboardSuggestionStatus === "error" ? "GLM 暂不可用 · 显示扫描建议"
+        : assistantStatus.mode === "real" ? "GLM 建议" : "本地建议";
+  const taskLabel = taskExists ? (ui.createdSuggestionKeys.includes(suggestion?.sourceKey) ? "✅ 已创建任务" : "已在 Tasks 中") : "创建任务";
+  const continueCard = today && suggestion
+    ? `<div class="today-continue-main"><div class="today-continue-copy"><div class="suggestion-kicker">${icon("sparkle", "icon spark")} AI 建议下一步 <span class="tag">${esc(suggestionStatus)}</span></div><h2>${esc(suggestion.projectName)}</h2><p class="today-last-work">${esc(today.lastWork)}</p><div class="today-status"><span>${esc(today.workspaceStatus)}</span><span>${esc(today.gitStatus)}</span><span>${esc(today.remoteStatus)}</span></div><div class="suggestion-detail"><span>发现</span><strong>${esc(suggestion.finding)}</strong></div><div class="suggestion-detail"><span>原因</span><p>${esc(suggestion.reason)}</p></div><div class="suggestion-detail suggestion-advice"><span>AI 建议</span><p>${esc(suggestion.suggestedAction)}</p></div>${suggestion.error ? `<p class="suggestion-error">${esc(suggestion.error)}</p>` : ""}${renderCodexStatus(suggestion)}</div><div class="today-continue-actions"><button class="button" data-action="view-suggestion-project" data-id="${esc(suggestion.localProjectId)}">查看项目 ${icon("arrow")}</button><button class="button ${taskExists ? "quiet" : "primary"}" data-action="create-suggestion-task" ${taskExists ? "disabled" : ""}>${taskLabel}</button>${suggestion.allowedActions.includes("send_to_codex") ? `<button class="button quiet small" data-action="${codexForSuggestion && ["complete", "awaiting_confirmation", "fallback"].includes(codexForSuggestion.status) ? "show-codex-result" : "send-to-codex"}" ${codexDisabled ? "disabled" : ""}>${esc(codexLabel)}</button>` : ""}</div></div>`
     : `<div class="local-companion-notice"><strong>${ui.localProjectsStatus === "loading" ? "正在选取最值得继续的项目…" : "暂无可用的本机扫描数据"}</strong><p>工作台仍可使用；连接 Companion 后会用真实扫描生成建议，不会以演示状态代替。</p></div>`;
   return `<div class="page-heading"><div><div class="eyebrow">${formattedDate()} · ${esc(localStatus)}</div><h1>今天继续什么</h1><p>先看最值得推进的项目，再处理真实的工作区提醒。</p></div><div class="heading-actions"><button class="button quiet small" data-action="refresh-local-projects" ${ui.localProjectsStatus === "loading" ? "disabled" : ""}>${icon("reset")} 重新扫描</button><button class="button primary" data-action="open-create-task">${icon("plus")} 新建任务</button></div></div>
     <div class="dashboard-grid"><section class="today-continue-card grid-span-12">${continueCard}</section>
@@ -827,7 +1148,7 @@ function pageTitle() {
 
 function renderNav() {
   const items = [["home", "grid", "Home"], ["projects", "folder", "Projects"], ["knowledge", "inbox", "Knowledge"], ["decisions", "bulb", "Decisions"], ["tasks", "checkSquare", "Tasks"]];
-  return `<aside class="sidebar"><div class="brand"><div class="brand-mark">D</div><div><div class="brand-name">Daniel Workspace · V2.6</div><div class="brand-caption">个人 AI 工作台</div></div></div><div class="nav-label">Workspace</div><nav class="nav-list" aria-label="主导航">${items.map(([page, iconName, label]) => `<button class="nav-item ${(ui.page === page || (ui.page === "project" && page === "projects")) ? "active" : ""}" data-page="${page}">${icon(iconName)}<span>${label}</span>${page === "tasks" ? `<span class="nav-count">${openTasks().length}</span>` : ""}</button>`).join("")}</nav><div class="sidebar-spacer"></div><div class="workspace-mini"><div class="avatar">D</div><div><div class="workspace-title">Daniel 的工作区</div><div class="workspace-sub">云端资料 · 本机状态</div></div><button class="icon-button" data-action="reset-demo" title="重置演示数据" aria-label="重置演示数据">${icon("more")}</button></div><div class="sidebar-footer"><span class="local-label"><span class="local-dot"></span> Companion 只读扫描</span><button class="icon-button" data-action="reset-demo" title="重置演示数据" aria-label="重置演示数据">${icon("reset")}</button></div></aside>`;
+  return `<aside class="sidebar"><div class="brand"><div class="brand-mark">D</div><div><div class="brand-name">Daniel Workspace · ${APP_VERSION}</div><div class="brand-caption">个人 AI 工作台</div></div></div><div class="nav-label">Workspace</div><nav class="nav-list" aria-label="主导航">${items.map(([page, iconName, label]) => `<button class="nav-item ${(ui.page === page || (ui.page === "project" && page === "projects")) ? "active" : ""}" data-page="${page}">${icon(iconName)}<span>${label}</span>${page === "tasks" ? `<span class="nav-count">${openTasks().length}</span>` : ""}</button>`).join("")}</nav><div class="sidebar-spacer"></div><div class="workspace-mini"><div class="avatar">D</div><div><div class="workspace-title">Daniel 的工作区</div><div class="workspace-sub">云端资料 · 本机状态</div></div><button class="icon-button" data-action="reset-demo" title="重置演示数据" aria-label="重置演示数据">${icon("more")}</button></div><div class="sidebar-footer"><span class="local-label"><span class="local-dot"></span> Companion 只读扫描</span><button class="icon-button" data-action="reset-demo" title="重置演示数据" aria-label="重置演示数据">${icon("reset")}</button></div></aside>`;
 }
 
 function searchItems(query) {
@@ -896,9 +1217,27 @@ function recommendationFor(options, goal, risk) {
 }
 
 function renderModal() {
+  if (ui.confirmation?.kind === "codex") {
+    const { suggestion, project, taskText } = ui.confirmation;
+    const runnerStatus = ui.confirmation.runnerStatus === "ready" ? "本机 Action Runner 已连接 · Codex CLI 可用"
+      : ui.confirmation.runnerStatus === "cli_missing" ? "Action Runner 已连接，但未找到 Codex CLI；确认后提供复制 Task"
+        : ui.confirmation.runnerStatus === "offline" ? "Action Runner 未连接；确认后提供复制 Task"
+          : "正在检查本机 Action Runner…";
+    const confirmLabel = ui.confirmation.runnerStatus === "ready" ? "确认交给 Codex" : "确认并生成 Task";
+    const checking = ui.confirmation.runnerStatus === "checking";
+    return `<div class="modal-backdrop" data-action="close-confirm-backdrop"><section class="modal wide" role="alertdialog" aria-modal="true" aria-labelledby="codex-confirm-title"><header class="modal-head"><div class="modal-head-copy"><h2 id="codex-confirm-title">准备交给 Codex</h2><p>先由 Codex 在只读沙箱中生成草稿，之后还要单独确认文件 diff 才会写入。</p></div><button class="icon-button" data-action="cancel-confirm" aria-label="关闭">${icon("close")}</button></header><div class="modal-body codex-task-body"><div class="runner-status" role="status" aria-live="polite">${esc(runnerStatus)}</div><div class="codex-plan"><div><span>项目</span><strong>${esc(suggestion.projectName)}</strong><code>${esc(project.path)}</code></div><div><span>问题</span><strong>${esc(suggestion.finding)}</strong></div><div><span>计划</span><strong>只创建缺少的 ${esc(({ missing_readme: "README.md", missing_handoff: "HANDOFF.md", missing_todo: "TODO.md", missing_project_status: "PROJECT_STATUS.md" })[suggestion.issueType] || "文档")}。</strong></div><div><span>允许修改</span><strong>${esc(({ missing_readme: "README.md", missing_handoff: "HANDOFF.md", missing_todo: "TODO.md", missing_project_status: "PROJECT_STATUS.md" })[suggestion.issueType] || "文档")}</strong></div><div><span>明确禁止</span><strong>删除、业务源码、其他项目、任意命令、Git 写操作、commit、push、系统或网络设置。</strong></div></div><details class="codex-task-details"><summary>查看完整 Codex Task</summary><textarea id="codex-task-text" readonly rows="13">${esc(taskText)}</textarea></details></div><footer class="modal-foot"><button class="button" data-action="cancel-confirm">取消</button><button class="button quiet" data-action="copy-codex-task">复制 Task</button><button class="button primary" data-action="accept-confirm" ${checking ? "disabled" : ""}>${checking ? "正在检查…" : confirmLabel}</button></footer></section></div>`;
+  }
   if (ui.confirmation) {
     const { title, message, confirmLabel } = ui.confirmation;
     return `<div class="modal-backdrop confirm-backdrop" data-action="close-confirm-backdrop"><section class="modal confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message"><header class="modal-head"><div class="modal-head-copy"><h2 id="confirm-title">${esc(title)}</h2></div><button class="icon-button" data-action="cancel-confirm" aria-label="关闭">${icon("close")}</button></header><div class="modal-body"><p class="confirm-message" id="confirm-message">${esc(message)}</p></div><footer class="modal-foot"><button class="button" data-action="cancel-confirm">取消</button><button class="button danger" data-action="accept-confirm">${esc(confirmLabel || "确认")}</button></footer></section></div>`;
+  }
+  if (ui.codex?.dialog === "fallback") {
+    return `<div class="modal-backdrop" data-action="close-codex-dialog"><section class="modal wide" role="dialog" aria-modal="true" aria-labelledby="codex-fallback-title"><header class="modal-head"><div class="modal-head-copy"><h2 id="codex-fallback-title">Codex Task 已准备好</h2><p>已准备好，粘贴到 Codex 即可。Runner 没有修改项目文件。</p></div><button class="icon-button" data-action="close-codex-dialog" aria-label="关闭">${icon("close")}</button></header><div class="modal-body codex-task-body"><p class="runner-status">${esc(ui.codex.message || "本机 Action Runner 当前不可用。")}</p><textarea id="codex-task-text" readonly rows="16">${esc(ui.codex.taskText || "")}</textarea></div><footer class="modal-foot"><button class="button" data-action="close-codex-dialog">关闭</button><button class="button primary" data-action="copy-codex-task">复制完整 Task</button></footer></section></div>`;
+  }
+  if (ui.codex?.dialog === "preview" || ui.codex?.dialog === "complete") {
+    const complete = ui.codex.dialog === "complete";
+    const diff = ui.codex.diff || "";
+    return `<div class="modal-backdrop" data-action="close-codex-dialog"><section class="modal wide" role="dialog" aria-modal="true" aria-labelledby="codex-result-title"><header class="modal-head"><div class="modal-head-copy"><h2 id="codex-result-title">${complete ? "✅ Codex 已完成" : "Codex 已生成文档草稿"}</h2><p>${esc(ui.codex.projectName)} · ${esc(ui.codex.fileName || "文档")}${complete ? ` · +${Number(ui.codex.additions) || 0} / -${Number(ui.codex.deletions) || 0}` : " · 请检查 diff 后确认写入"}</p></div><button class="icon-button" data-action="close-codex-dialog" aria-label="关闭">${icon("close")}</button></header><div class="modal-body codex-task-body"><div class="codex-plan"><div><span>允许修改</span><strong>${esc(ui.codex.fileName || "单个文档")}</strong></div><div><span>执行边界</span><strong>没有删除、业务代码修改、其他项目操作、commit 或 push。</strong></div></div><pre class="codex-diff">${esc(diff)}</pre>${ui.codex.message && !complete ? `<p class="suggestion-error">${esc(ui.codex.message)}</p>` : ""}</div><footer class="modal-foot">${complete ? `<button class="button" data-action="close-codex-dialog">关闭</button><button class="button quiet" data-action="view-codex-project">查看项目</button><button class="button primary" data-action="rescan-after-codex">重新扫描</button>` : `<button class="button" data-action="close-codex-dialog">暂不写入</button><button class="button primary" data-action="apply-codex-document" ${ui.codex.status === "applying" ? "disabled" : ""}>${ui.codex.status === "applying" ? "正在创建…" : `确认创建 ${esc(ui.codex.fileName || "文档")}`}</button>`}</footer></section></div>`;
   }
   if (!ui.modal) return "";
   const { kind, id } = ui.modal;
@@ -913,7 +1252,7 @@ function renderModal() {
   } else if (kind === "task") {
     title = isEdit ? "编辑任务" : "新建任务"; subtitle = "任务自动保存到此账号的云端工作区。";
     const selectedProject = existing?.projectId || ui.modal.projectId || "";
-    form = `<div class="form-grid">${field("任务名称", "title", existing?.title || "", { full: true })}${field("关联项目", "projectId", "", { select: projectOptions(selectedProject), required: false })}${field("优先级", "priority", "", { select: ["高", "中", "低"].map((x) => `<option ${x === (existing?.priority || "中") ? "selected" : ""}>${x}</option>`).join("") })}${field("到期提示", "due", existing?.due || "", { optional: true, required: false, placeholder: "例如：周五" })}</div>`;
+    form = `<div class="form-grid">${field("任务名称", "title", existing?.title || "", { full: true })}${field("任务说明", "description", existing?.description || "", { full: true, textarea: true, short: true, required: false, placeholder: "补充任务背景或完成说明" })}${field("关联项目", "projectId", "", { select: projectOptions(selectedProject), required: false })}${field("优先级", "priority", "", { select: ["高", "中", "低"].map((x) => `<option ${x === (existing?.priority || "中") ? "selected" : ""}>${x}</option>`).join("") })}${field("到期提示", "due", existing?.due || "", { optional: true, required: false, placeholder: "例如：周五" })}</div>`;
   } else if (kind === "knowledge") {
     title = isEdit ? "编辑资料" : "添加资料"; subtitle = "内容自动保存到此账号的云端收件箱，不会解析网页内容。"; wide = "wide";
     const typeSelect = ["文本", "笔记", "链接"].map((x) => `<option ${x === (existing?.type || "笔记") ? "selected" : ""}>${x}</option>`).join("");
@@ -1186,11 +1525,47 @@ function handleAction(action, element, sourceEvent) {
   if (action === "close-confirm-backdrop" && element !== sourceEvent?.target) return;
   if (action === "cancel-confirm" || action === "close-confirm-backdrop") { ui.confirmation = null; render(); return; }
   if (action === "accept-confirm") {
-    const onConfirm = ui.confirmation?.onConfirm;
+    const confirmation = ui.confirmation;
+    const onConfirm = confirmation?.onConfirm;
     ui.confirmation = null;
     render();
-    onConfirm?.();
+    if (confirmation?.kind === "codex") {
+      if (confirmation.runnerStatus !== "ready") {
+        const reason = confirmation.runnerStatus === "cli_missing"
+          ? "本机 Action Runner 未找到 Codex CLI；已准备好复制 Task。"
+          : "本机 Action Runner 未连接；已准备好复制 Task。";
+        showCodexFallback(confirmation.suggestion, confirmation.taskText, reason);
+      } else void startCodexAction(confirmation.suggestion, confirmation.taskText);
+    } else onConfirm?.();
     return;
+  }
+  if (action === "copy-codex-task") { void copyCodexTask(); return; }
+  if (action === "close-codex-dialog") {
+    if (element.hasAttribute("data-action") && element.classList.contains("modal-backdrop") && element !== sourceEvent?.target) return;
+    if (ui.codex) ui.codex.dialog = "";
+    render();
+    return;
+  }
+  if (action === "send-to-codex") {
+    const suggestion = ui.dashboardSuggestion;
+    if (suggestion?.allowedActions?.includes("send_to_codex")) openCodexConfirmation(suggestion);
+  }
+  if (action === "create-suggestion-task") createSuggestionTask(ui.dashboardSuggestion);
+  if (action === "view-suggestion-project") goLocalProject(id);
+  if (action === "show-codex-result" && ui.codex) {
+    ui.codex.dialog = ui.codex.status === "fallback" ? "fallback" : ui.codex.status === "complete" ? "complete" : "preview";
+    render();
+  }
+  if (action === "apply-codex-document") void applyCodexDocument();
+  if (action === "view-codex-project" && ui.codex?.localProjectId) {
+    const localProjectId = ui.codex.localProjectId;
+    ui.codex.dialog = "";
+    goLocalProject(localProjectId);
+  }
+  if (action === "rescan-after-codex") {
+    if (ui.codex) ui.codex.dialog = "";
+    void refreshLocalProjects();
+    render();
   }
   if (action === "open-create-project") openModal("project");
   if (action === "retry-cloud-sync") void initializeCloudSync();
@@ -1346,6 +1721,7 @@ app.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     if (ui.confirmation) { ui.confirmation = null; render(); }
     else if (ui.modal) { ui.modal = null; render(); }
+    else if (ui.codex?.dialog) { ui.codex.dialog = ""; render(); }
     else if (ui.assistantOpen) { ui.assistantOpen = false; render(); }
     else if (ui.searchOpen) { ui.searchOpen = false; renderSearchResults(); }
   }

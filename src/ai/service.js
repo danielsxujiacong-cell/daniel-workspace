@@ -1,6 +1,6 @@
 import { mockProviderChat } from "./providers/mock-provider.js";
-import { httpProviderChat } from "./providers/http-provider.js?v=2.7.0";
-import { getAIConfig } from "./config.js?v=2.7.0";
+import { httpProviderChat } from "./providers/http-provider.js";
+import { getAIConfig } from "./config.js";
 
 let apiUnavailable = false;
 let lastModel = "glm-4-flash-250414";
