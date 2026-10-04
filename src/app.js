@@ -810,7 +810,7 @@ function renderKnowledge() {
 
 function decisionCard(decision) {
   const expanded = ui.expandedDecisionId === decision.id;
-  return `<article class="card decision-card" data-action="toggle-decision" data-id="${esc(decision.id)}" tabindex="0" role="button" aria-expanded="${expanded}"><div class="decision-card-top"><div><h3>${esc(decision.question)}</h3><p>${esc(decision.goal || "尚未描述目标")}</p></div><button class="icon-button" data-action="edit-decision" data-id="${esc(decision.id)}" aria-label="编辑决策">${icon("edit")}</button></div><div class="decision-result">${icon("target")} ${esc(decision.final || "尚未填写最终决定")}</div><div class="record-meta">${esc(projectTitle(decision.projectId))} · ${timeAgo(decision.createdAt)}</div>${expanded ? `<div class="decision-detail-grid"><div class="decision-detail-cell"><div class="meta-label">可选方案</div><div class="meta-value">${esc(decision.options.join("；") || "未记录")}</div></div><div class="decision-detail-cell"><div class="meta-label">Mock AI 建议</div><div class="meta-value">${esc(decision.recommendation || "未生成")}</div></div><div class="decision-detail-cell"><div class="meta-label">时间 · 成本</div><div class="meta-value">${esc(decision.time || "未记录")} · ${esc(decision.cost || "未记录")}</div></div><div class="decision-detail-cell"><div class="meta-label">风险</div><div class="meta-value">${esc(decision.risk || "未记录")}</div></div><div class="decision-detail-cell" style="grid-column:1/-1"><div class="meta-label">决定原因</div><div class="meta-value">${esc(decision.reason || "未记录")}</div></div></div>` : ""}</article>`;
+  return `<article class="card decision-card" data-action="toggle-decision" data-id="${esc(decision.id)}" tabindex="0" role="button" aria-expanded="${expanded}"><div class="decision-card-top"><div><h3>${esc(decision.question)}</h3><p>${esc(decision.goal || "尚未描述目标")}</p></div><div class="record-actions" style="opacity:1"><button class="icon-button" data-action="edit-decision" data-id="${esc(decision.id)}" aria-label="编辑决策">${icon("edit")}</button><button class="icon-button" data-action="delete-decision" data-id="${esc(decision.id)}" aria-label="删除决策">${icon("trash")}</button></div></div><div class="decision-result">${icon("target")} ${esc(decision.final || "尚未填写最终决定")}</div><div class="record-meta">${esc(projectTitle(decision.projectId))} · ${timeAgo(decision.createdAt)}</div>${expanded ? `<div class="decision-detail-grid"><div class="decision-detail-cell"><div class="meta-label">可选方案</div><div class="meta-value">${esc(decision.options.join("；") || "未记录")}</div></div><div class="decision-detail-cell"><div class="meta-label">Mock AI 建议</div><div class="meta-value">${esc(decision.recommendation || "未生成")}</div></div><div class="decision-detail-cell"><div class="meta-label">时间 · 成本</div><div class="meta-value">${esc(decision.time || "未记录")} · ${esc(decision.cost || "未记录")}</div></div><div class="decision-detail-cell"><div class="meta-label">风险</div><div class="meta-value">${esc(decision.risk || "未记录")}</div></div><div class="decision-detail-cell" style="grid-column:1/-1"><div class="meta-label">决定原因</div><div class="meta-value">${esc(decision.reason || "未记录")}</div></div></div>` : ""}</article>`;
 }
 
 function renderDecisions() {
@@ -1234,6 +1234,21 @@ function handleAction(action, element, sourceEvent) {
   }
   if (action === "edit-knowledge") openModal("knowledge", id);
   if (action === "edit-decision") openModal("decision", id);
+  if (action === "delete-decision") {
+    const decision = db.decisions.find((item) => item.id === id);
+    if (decision) {
+      const question = decision.question;
+      openConfirmation({
+        title: "删除决策",
+        message: `确定删除决策「${question}」吗？此操作无法撤销。`,
+        confirmLabel: "删除决策",
+        onConfirm: () => {
+          db.decisions = db.decisions.filter((item) => item.id !== id);
+          persist(); render(); toast("决策已删除");
+        },
+      });
+    }
+  }
   if (action === "view-project") go("project", id);
   if (action === "view-local-project") goLocalProject(id);
   if (action === "view-decision") { ui.expandedDecisionId = id; go("decisions"); }
