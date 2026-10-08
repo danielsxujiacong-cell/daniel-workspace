@@ -22,7 +22,7 @@ const { buildAssistantContext } = await import("./ai/context.js");
 const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = await import("./ai/service.js");
 const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = await import("./suggestions.js");
 const { fetchPublicGitHubRepository, parsePublicGitHubRepository } = await import("./github/public-api.js");
-const { buildLocalDashboardModel, compareLocalProjects } = await import("./dashboard.js");
+const { buildCloudDashboardModel, buildLocalDashboardModel, compareLocalProjects } = await import("./dashboard.js");
 const {
   countLocalMigrationCandidates,
   hasCloudRecords,
@@ -589,12 +589,41 @@ function localGitLabel(project) {
 }
 
 function localDashboardModel() {
-  if (!ui.localProjects || !Array.isArray(ui.localProjects.items)) return null;
+  const currentScan = ui.localProjectsStatus === "ready"
+    || (ui.localProjectsStatus === "loading" && ui.localProjects);
+  if (!currentScan || !Array.isArray(ui.localProjects?.items)) return null;
   return buildLocalDashboardModel({
     items: ui.localProjects.items,
     tasks: db.tasks,
     projectForLocal: workspaceProjectForLocal,
   });
+}
+
+function cloudDashboardModel() {
+  if (!cloudCacheActive && ui.cloud.status !== "synced") return { source: "cloud", todayContinue: null };
+  return buildCloudDashboardModel({ projects: db.projects, tasks: db.tasks });
+}
+
+function cloudSuggestionForDashboard(today) {
+  const task = today.priorityTask;
+  const sourceKey = `cloud-dashboard:${today.taskId || today.projectId || "unlinked-task"}`;
+  return {
+    source: "cloud",
+    projectId: today.projectId || null,
+    projectName: today.projectName,
+    issueType: task ? "cloud_priority_task" : "cloud_project_next_step",
+    severity: task?.priority === "高" ? "high" : task ? "medium" : "low",
+    title: today.projectName,
+    finding: task ? `云端待办：${task.title}` : "当前没有待办任务",
+    reason: task
+      ? `这是当前账号云端 Tasks 中优先级最高的待办${task.due ? `，期限为${task.due}` : ""}。`
+      : "当前账号没有待办任务，建议从云端项目资料继续推进。",
+    suggestedAction: today.nextStep,
+    allowedActions: ["open_project", "open_tasks"],
+    taskId: today.taskId || null,
+    sourceKey,
+    suggestionKey: `${sourceKey}|${today.updatedAt || ""}`,
+  };
 }
 
 function requestDashboardSuggestion(candidate, localProject) {
@@ -606,11 +635,35 @@ function requestDashboardSuggestion(candidate, localProject) {
     ui.dashboardSuggestionStatus = "mock";
     return;
   }
+  const isCloudSuggestion = candidate.source === "cloud";
+  const cloudContext = isCloudSuggestion ? buildAssistantContext({
+    data: db,
+    currentPage: "home",
+    projectId: candidate.projectId,
+    localProjects: [],
+    dashboardModel: cloudDashboardModel(),
+    companionStatus: ui.localProjectsStatus,
+  }).relevantContext : null;
   const request = {
-    message: `根据单个本地扫描问题，生成简短的 Workspace 建议。严格返回 JSON：{"issueType":"${candidate.issueType}","severity":"low|medium|high","title":"项目名","reason":"为什么发现此问题","suggestedAction":"下一步建议"}。issueType 必须保持 ${candidate.issueType}。不要提出写文件、执行命令、删除、commit 或 push；不要输出路径、URL、仓库地址或 Git hash。`,
+    message: isCloudSuggestion
+      ? `根据当前账号的云端 Projects、Tasks、Knowledge、Decisions，为首页推荐生成简短建议。严格返回 JSON：{"issueType":"${candidate.issueType}","severity":"low|medium|high","title":"项目或待办名称","reason":"依据云端资料的原因","suggestedAction":"下一步建议"}。issueType 必须保持 ${candidate.issueType}。只根据提供的云端资料判断；不要推断 Companion、本机文件、Git 分支、clean 状态、ahead/behind 或 commit。不要提出本机写文件或执行命令。`
+      : `根据单个本地扫描问题，生成简短的 Workspace 建议。严格返回 JSON：{"issueType":"${candidate.issueType}","severity":"low|medium|high","title":"项目名","reason":"为什么发现此问题","suggestedAction":"下一步建议"}。issueType 必须保持 ${candidate.issueType}。不要提出写文件、执行命令、删除、commit 或 push；不要输出路径、URL、仓库地址或 Git hash。`,
     currentPage: "home",
     currentProject: candidate.projectId ? { id: candidate.projectId, name: candidate.projectName } : null,
-    relevantContext: {
+    relevantContext: isCloudSuggestion ? {
+      ...cloudContext,
+      dashboardSuggestion: {
+        source: "cloud",
+        candidate: {
+          projectName: candidate.projectName,
+          issueType: candidate.issueType,
+          finding: candidate.finding,
+          reason: candidate.reason,
+          severity: candidate.severity,
+          suggestedAction: candidate.suggestedAction,
+        },
+      },
+    } : {
       source: "bounded_workspace_health_summary",
       candidate: {
         projectName: candidate.projectName,
@@ -860,10 +913,15 @@ async function copyCodexTask() {
 }
 
 function suggestionForDashboard(today) {
-  if (!today?.localProject) return null;
-  const candidate = buildActionSuggestion(today.localProject, today.projectId ? projectById(today.projectId) : null);
+  if (!today) return null;
+  const candidate = today.source === "cloud"
+    ? cloudSuggestionForDashboard(today)
+    : today.localProject
+      ? buildActionSuggestion(today.localProject, today.projectId ? projectById(today.projectId) : null)
+      : null;
+  if (!candidate) return null;
   if (ui.dashboardSuggestionKey !== candidate.suggestionKey) ui.dashboardSuggestion = candidate;
-  requestDashboardSuggestion(candidate, today.localProject);
+  requestDashboardSuggestion(candidate, today.localProject || null);
   return ui.dashboardSuggestionKey === candidate.suggestionKey && ui.dashboardSuggestion
     ? ui.dashboardSuggestion
     : candidate;
@@ -911,7 +969,16 @@ function localScanStatusMessage() {
 function renderDashboardHealth(model) {
   const statusClass = ui.localProjectsStatus === "ready" ? "online" : ui.localProjectsStatus === "loading" ? "checking" : "offline";
   if (!model) {
-    return `<section class="card dashboard-health grid-span-12"><div class="card-header"><h2>工作区健康状态</h2><button class="button quiet small" data-action="refresh-local-projects" ${ui.localProjectsStatus === "loading" ? "disabled" : ""}>${icon("reset")} 重新扫描</button></div><div class="companion-status ${statusClass}" role="status" aria-live="polite">${esc(localScanStatusMessage())}</div><div class="local-companion-notice"><strong>本机扫描数据暂不可用</strong><p>工作台仍可使用。确认 Companion 已启动后可重新扫描；GitHub Pages 会尝试访问本机 127.0.0.1:4174。</p></div></section>`;
+    const scanControl = ui.localProjectsStatus === "loading"
+      ? `<button class="button quiet small" data-action="refresh-local-projects" disabled>${icon("reset")} 正在检测</button>`
+      : ui.localProjectsStatus === "ready"
+        ? `<button class="button quiet small" data-action="refresh-local-projects">${icon("reset")} 重新扫描</button>`
+        : "";
+    const notice = ui.localProjectsStatus === "loading"
+      ? "正在检查本机 Companion；当前首页建议仍来自云端资料。"
+      : "本机扫描不可用 · 云端 Projects、Tasks 与 AI 建议仍可使用；Git 和文件健康指标暂不显示。";
+    const noticeTitle = ui.localProjectsStatus === "loading" ? "正在检测本机 Companion" : "本机扫描不可用";
+    return `<section class="card dashboard-health grid-span-12"><div class="card-header"><h2>工作区健康状态</h2>${scanControl}</div><div class="companion-status ${statusClass}" role="status" aria-live="polite">${esc(localScanStatusMessage())}</div><div class="local-companion-notice"><strong>${noticeTitle}</strong><p>${esc(notice)}</p></div></section>`;
   }
   const health = model.health;
   const metrics = [
@@ -929,7 +996,11 @@ function renderDashboardHealth(model) {
 }
 
 function renderDashboardAlerts(model) {
-  const status = ui.localProjectsStatus === "loading" ? "正在读取扫描提醒…" : ui.localProjectsStatus === "error" ? "扫描失败，提醒暂不可更新。" : "启动 Companion 后显示真实项目提醒。";
+  const status = ui.localProjectsStatus === "loading"
+    ? "正在读取扫描提醒…"
+    : ["error", "unavailable"].includes(ui.localProjectsStatus)
+      ? "本机扫描提醒不可用；云端 Tasks 和 Projects 仍可查看。"
+      : "启动 Companion 后显示真实项目提醒。";
   if (!model) return `<section class="card card-pad grid-span-6"><div class="card-header"><h2>今天需要处理</h2></div><div class="empty-state">${esc(status)}</div></section>`;
   const alerts = model.alerts;
   return `<section class="card card-pad grid-span-6"><div class="card-header"><h2>今天需要处理</h2><span class="minor">显示最多 5 条</span></div>${alerts.length ? `<div class="dashboard-alert-list">${alerts.map((item) => `<div class="dashboard-alert"><span class="alert-mark"></span><div class="dashboard-alert-copy"><strong>${esc(item.projectName)}</strong><span>${esc(item.text)}</span></div><button class="button quiet small" data-action="view-local-project" data-id="${esc(item.projectId)}">查看项目 ${icon("chevron")}</button></div>`).join("")}</div>` : `<div class="local-clear">暂无需要处理的扫描提醒。</div>`}</section>`;
@@ -937,7 +1008,7 @@ function renderDashboardAlerts(model) {
 
 function renderDashboardChanges() {
   const comparison = ui.localComparison;
-  if (!ui.localProjects) {
+  if (ui.localProjectsStatus !== "ready" || !ui.localProjects) {
     const message = ui.localProjectsStatus === "loading" ? "扫描完成后会与上次记录比较。" : "当前没有本机扫描数据。";
     return `<section class="card card-pad grid-span-6"><div class="card-header"><h2>自上次打开后</h2></div><div class="empty-state">${esc(message)}</div></section>`;
   }
@@ -957,12 +1028,14 @@ function renderDashboardRecent(model) {
 }
 
 function renderDashboard() {
-  const model = localDashboardModel();
+  const localModel = localDashboardModel();
+  const cloudModel = localModel ? null : cloudDashboardModel();
+  const model = localModel || cloudModel;
   const today = model?.todayContinue;
   const suggestion = suggestionForDashboard(today);
   const assistantStatus = getAIStatus();
   const localStatus = ui.localProjectsStatus === "ready" ? `Companion 在线 · ${ui.localProjects.items.length} 个本地项目` : ui.localProjectsStatus === "loading" ? (ui.localProjects ? `正在检测 · 缓存 ${ui.localProjects.items.length} 个项目` : "正在连接 Companion") : ui.localProjects ? `Companion 离线 · 缓存 ${ui.localProjects.items.length} 个项目` : "Companion 离线";
-  const taskExists = suggestion && suggestionTaskExists(suggestion);
+  const taskExists = suggestion?.source !== "cloud" && suggestion && suggestionTaskExists(suggestion);
   const codexForSuggestion = ui.codex?.sourceKey === suggestion?.sourceKey ? ui.codex : null;
   const codexLabel = codexForSuggestion?.status === "complete" ? "查看 Codex 结果"
     : codexForSuggestion && ["starting", "queued", "running", "applying"].includes(codexForSuggestion.status) ? "Codex 正在处理…"
@@ -972,18 +1045,25 @@ function renderDashboard() {
   const codexDisabled = codexForSuggestion && ["starting", "queued", "running", "applying"].includes(codexForSuggestion.status);
   const suggestionStatus = ui.dashboardSuggestionStatus === "generating" ? "GLM 正在整理建议…"
     : ui.dashboardSuggestionStatus === "ready" ? "GLM-4-Flash · 结构化建议"
-      : ui.dashboardSuggestionStatus === "error" ? "GLM 暂不可用 · 显示扫描建议"
-        : assistantStatus.mode === "real" ? "GLM 建议" : "本地建议";
+      : ui.dashboardSuggestionStatus === "error" ? `GLM 暂不可用 · 显示${suggestion?.source === "cloud" ? "云端" : "扫描"}建议`
+        : assistantStatus.mode === "real" ? "GLM 建议" : suggestion?.source === "cloud" ? "云端资料建议" : "本地建议";
   const taskLabel = taskExists ? (ui.createdSuggestionKeys.includes(suggestion?.sourceKey) ? "✅ 已创建任务" : "已在 Tasks 中") : "创建任务";
+  const sourceTag = today?.source === "cloud" ? `<span class="tag">基于云端资料</span>` : "";
+  const continuationActions = today?.source === "cloud"
+    ? `${today.projectId ? `<button class="button primary" data-page="projects">查看云端项目 ${icon("arrow")}</button>` : ""}${today.priorityTask ? `<button class="button ${today.projectId ? "quiet" : "primary"}" data-page="tasks">查看云端待办 ${icon("arrow")}</button>` : ""}`
+    : `<button class="button" data-action="view-suggestion-project" data-id="${esc(suggestion?.localProjectId)}">查看项目 ${icon("arrow")}</button><button class="button ${taskExists ? "quiet" : "primary"}" data-action="create-suggestion-task" ${taskExists ? "disabled" : ""}>${taskLabel}</button>${suggestion?.allowedActions.includes("send_to_codex") ? `<button class="button quiet small" data-action="${codexForSuggestion && ["complete", "awaiting_confirmation", "fallback"].includes(codexForSuggestion.status) ? "show-codex-result" : "send-to-codex"}" ${codexDisabled ? "disabled" : ""}>${esc(codexLabel)}</button>` : ""}`;
   const continueCard = today && suggestion
-    ? `<div class="today-continue-main"><div class="today-continue-copy"><div class="suggestion-kicker">${icon("sparkle", "icon spark")} AI 建议下一步 <span class="tag">${esc(suggestionStatus)}</span></div><h2>${esc(suggestion.projectName)}</h2><p class="today-last-work">${esc(today.lastWork)}</p><div class="today-status"><span>${esc(today.workspaceStatus)}</span><span>${esc(today.gitStatus)}</span><span>${esc(today.remoteStatus)}</span></div><div class="suggestion-detail"><span>发现</span><strong>${esc(suggestion.finding)}</strong></div><div class="suggestion-detail"><span>原因</span><p>${esc(suggestion.reason)}</p></div><div class="suggestion-detail suggestion-advice"><span>AI 建议</span><p>${esc(suggestion.suggestedAction)}</p></div>${suggestion.error ? `<p class="suggestion-error">${esc(suggestion.error)}</p>` : ""}${renderCodexStatus(suggestion)}</div><div class="today-continue-actions"><button class="button" data-action="view-suggestion-project" data-id="${esc(suggestion.localProjectId)}">查看项目 ${icon("arrow")}</button><button class="button ${taskExists ? "quiet" : "primary"}" data-action="create-suggestion-task" ${taskExists ? "disabled" : ""}>${taskLabel}</button>${suggestion.allowedActions.includes("send_to_codex") ? `<button class="button quiet small" data-action="${codexForSuggestion && ["complete", "awaiting_confirmation", "fallback"].includes(codexForSuggestion.status) ? "show-codex-result" : "send-to-codex"}" ${codexDisabled ? "disabled" : ""}>${esc(codexLabel)}</button>` : ""}</div></div>`
-    : `<div class="local-companion-notice"><strong>${ui.localProjectsStatus === "loading" ? "正在选取最值得继续的项目…" : "暂无可用的本机扫描数据"}</strong><p>工作台仍可使用；连接 Companion 后会用真实扫描生成建议，不会以演示状态代替。</p></div>`;
-  return `<div class="page-heading"><div><div class="eyebrow">${formattedDate()} · ${esc(localStatus)}</div><h1>今天继续什么</h1><p>先看最值得推进的项目，再处理真实的工作区提醒。</p></div><div class="heading-actions"><button class="button quiet small" data-action="refresh-local-projects" ${ui.localProjectsStatus === "loading" ? "disabled" : ""}>${icon("reset")} 重新扫描</button><button class="button primary" data-action="open-create-task">${icon("plus")} 新建任务</button></div></div>
+    ? `<div class="today-continue-main"><div class="today-continue-copy"><div class="suggestion-kicker">${icon("sparkle", "icon spark")} AI 建议下一步 ${sourceTag} <span class="tag">${esc(suggestionStatus)}</span></div><h2>${esc(suggestion.projectName)}</h2><p class="today-last-work">${esc(today.lastWork)}</p><div class="today-status"><span>${esc(today.workspaceStatus)}</span><span>${esc(today.gitStatus)}</span><span>${esc(today.remoteStatus)}</span></div><div class="suggestion-detail"><span>发现</span><strong>${esc(suggestion.finding)}</strong></div><div class="suggestion-detail"><span>原因</span><p>${esc(suggestion.reason)}</p></div><div class="suggestion-detail suggestion-advice"><span>AI 建议</span><p>${esc(suggestion.suggestedAction)}</p></div>${suggestion.error ? `<p class="suggestion-error">${esc(suggestion.error)}</p>` : ""}${today.source === "cloud" ? "" : renderCodexStatus(suggestion)}</div><div class="today-continue-actions">${continuationActions}</div></div>`
+    : `<div class="local-companion-notice"><strong>${localModel ? "扫描范围内暂无本机项目" : ui.cloud.status === "loading" ? "正在加载云端资料…" : "暂无云端 Projects 或 Tasks"}</strong><p>${localModel ? "工作区扫描成功，但没有可推荐的本地项目。" : "登录后的云端项目和待办会显示在这里；本机扫描不可用时，首页不会生成 Git 或文件状态。"}</p></div>`;
+  const scanControl = ["loading", "ready"].includes(ui.localProjectsStatus)
+    ? `<button class="button quiet small" data-action="refresh-local-projects" ${ui.localProjectsStatus === "loading" ? "disabled" : ""}>${icon("reset")} ${ui.localProjectsStatus === "loading" ? "正在检测" : "重新扫描"}</button>`
+    : "";
+  return `<div class="page-heading"><div><div class="eyebrow">${formattedDate()} · ${esc(localStatus)}</div><h1>今天继续什么</h1><p>先看最值得推进的项目，再处理真实的工作区提醒。</p></div><div class="heading-actions">${scanControl}<button class="button primary" data-action="open-create-task">${icon("plus")} 新建任务</button></div></div>
     <div class="dashboard-grid"><section class="today-continue-card grid-span-12">${continueCard}</section>
-      ${renderDashboardHealth(model)}
-      ${renderDashboardAlerts(model)}
+      ${renderDashboardHealth(localModel)}
+      ${renderDashboardAlerts(localModel)}
       ${renderDashboardChanges()}
-      ${renderDashboardRecent(model)}
+      ${renderDashboardRecent(localModel)}
     </div>`;
 }
 
@@ -1328,25 +1408,37 @@ function openConfirmation({ title, message, confirmLabel, onConfirm }) {
 async function sendChat(message) {
   const clean = message.trim();
   if (!clean || ui.chatBusy) return;
-  const localProject = ui.page === "local-project" ? localProjectById(ui.localProjectId) : ui.page === "project" ? localProjectForWorkspace(projectById(ui.projectId)) : null;
+  const companionContextAvailable = ui.localProjectsStatus === "ready"
+    || (ui.localProjectsStatus === "loading" && Boolean(ui.localProjects));
+  const assistantLocalProjects = companionContextAvailable ? ui.localProjects?.items || [] : [];
+  const localProject = !companionContextAvailable ? null
+    : ui.page === "local-project" ? localProjectById(ui.localProjectId)
+      : ui.page === "project" ? localProjectForWorkspace(projectById(ui.projectId))
+        : null;
   const assistantPage = ui.page === "local-project" ? "project" : ui.page;
+  const homeLocalModel = assistantPage === "home" ? localDashboardModel() : null;
+  const dashboardModel = assistantPage === "home"
+    ? homeLocalModel || cloudDashboardModel()
+    : null;
+  const cloudContextAvailable = cloudCacheActive || ui.cloud.status === "synced";
+  const assistantData = cloudContextAvailable ? db : { projects: [], tasks: [], knowledge: [], decisions: [], activities: [] };
   const selection = window.getSelection();
   const selectedContent = selection?.anchorNode && document.querySelector(".main-shell .content")?.contains(selection.anchorNode.parentElement)
     ? selection.toString().trim().slice(0, 1_200)
     : "";
   const context = buildAssistantContext({
-    data: db,
+    data: assistantData,
     currentPage: assistantPage,
     projectId: ui.projectId,
     taskFilter: ui.taskFilter,
     localProject,
-    localProjects: ui.localProjects?.items || [],
-    dashboardModel: assistantPage === "home" ? localDashboardModel() : null,
+    localProjects: assistantLocalProjects,
+    dashboardModel,
     localChanges: ui.localComparison?.changes || [],
     comparisonFirstScan: ui.localComparison?.firstScan || false,
     selectedContent,
     companionStatus: ui.localProjectsStatus,
-    companionScannedAt: ui.localProjects?.scannedAt || "",
+    companionScannedAt: companionContextAvailable ? ui.localProjects?.scannedAt || "" : "",
   });
   const requestId = uid("chat");
   const request = {

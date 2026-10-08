@@ -264,6 +264,7 @@ export function buildLocalDashboardModel({ items = [], tasks = [], projectForLoc
     alerts: alerts.slice(0, 5),
     recentProjects,
     todayContinue: today ? {
+      source: "local",
       projectId: project?.id || null,
       localProjectId: item.id,
       projectName: project?.name || item.name,
@@ -278,5 +279,63 @@ export function buildLocalDashboardModel({ items = [], tasks = [], projectForLoc
       missingDocuments: today.gaps,
       modifiedAt: item.modifiedAt || "",
     } : null,
+  };
+}
+
+function compareCloudTasks(left, right) {
+  const priority = taskPriority(right) - taskPriority(left);
+  if (priority) return priority;
+  const urgency = taskUrgency(right) - taskUrgency(left);
+  if (urgency) return urgency;
+  return latestTimestamp(right.updatedAt, right.createdAt) - latestTimestamp(left.updatedAt, left.createdAt);
+}
+
+export function buildCloudDashboardModel({ projects = [], tasks = [] } = {}) {
+  const projectById = new Map(projects.map((project) => [project.id, project]));
+  const openTasks = tasks.filter((task) => task.status !== "done");
+  const linkedTasks = openTasks.filter((task) => task.projectId && projectById.has(task.projectId));
+  const selectedTask = [...(linkedTasks.length ? linkedTasks : openTasks)].sort(compareCloudTasks)[0] || null;
+  const selectedProject = selectedTask
+    ? projectById.get(selectedTask.projectId) || null
+    : [...projects].sort((left, right) => {
+      const active = Number(right.status === "进行中") - Number(left.status === "进行中");
+      return active || latestTimestamp(right.updatedAt, right.createdAt) - latestTimestamp(left.updatedAt, left.createdAt);
+    })[0] || null;
+
+  if (!selectedTask && !selectedProject) return { source: "cloud", todayContinue: null };
+
+  const projectName = selectedProject?.name || (selectedTask ? "未关联项目待办" : "云端项目");
+  const priorityTask = selectedTask ? {
+    id: selectedTask.id,
+    title: selectedTask.title,
+    priority: selectedTask.priority || "中",
+    due: selectedTask.due || "",
+  } : null;
+  const lastWork = selectedTask
+    ? `云端待办：${selectedTask.title}`
+    : selectedProject.description || selectedProject.next || `云端项目状态：${selectedProject.status || "未设置"}`;
+  const nextStep = selectedTask
+    ? `优先处理${selectedTask.priority ? `「${selectedTask.priority}」` : ""}待办「${selectedTask.title}」${selectedTask.due === "今天" ? "（今天到期）" : ""}`
+    : selectedProject.next || "查看云端项目资料，确定一个可完成的小步骤";
+
+  return {
+    source: "cloud",
+    todayContinue: {
+      source: "cloud",
+      projectId: selectedProject?.id || null,
+      taskId: selectedTask?.id || null,
+      projectName,
+      workspaceStatus: selectedProject?.status || (selectedTask ? "云端待办" : "云端项目"),
+      gitStatus: "本机扫描不可用",
+      remoteStatus: "Git 状态未读取",
+      lastWork,
+      nextStep,
+      priorityTask,
+      localProject: null,
+      githubData: selectedProject?.githubData || null,
+      missingDocuments: [],
+      modifiedAt: "",
+      updatedAt: selectedTask?.updatedAt || selectedProject?.updatedAt || "",
+    },
   };
 }

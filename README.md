@@ -1,11 +1,11 @@
 # Daniel Workspace
 
-私人 AI 工作台 V2.8。GitHub Pages 对未登录访客只显示登录页；现有 Supabase email/password 用户登录后，Tasks、Knowledge、Decisions 和 Projects 基础资料通过同一 Supabase 账号同步。本机路径、Git 状态与 Companion 扫描仍由当前设备提供；Dashboard 的 GLM 建议可以创建云端任务，或在两次明确确认后交给本机 Codex Runner 处理单个缺失文档。
+私人 AI 工作台 V2.9。GitHub Pages 对未登录访客只显示登录页；现有 Supabase email/password 用户登录后，Tasks、Knowledge、Decisions 和 Projects 基础资料通过同一 Supabase 账号同步。本机路径、Git 状态与 Companion 扫描仍由当前设备提供；Companion 不可用时，首页改用云端 Projects 与 Tasks 推荐下一步，不展示或推断本机 Git 状态。
 
 ## Status
 
-- **Stage:** V2.8 complete. The user confirmed the migration and authenticated acceptance on 2026-10-04. Start the Action Runner manually when using local Codex execution.
-- **Last updated:** 2026-10-04
+- **Stage:** V2.9 mobile-home fallback complete. The user confirmed the V2.8 migration and authenticated acceptance on 2026-10-04. Start the Action Runner manually when using local Codex execution.
+- **Last updated:** 2026-10-08
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
 ## Quick start
@@ -62,7 +62,7 @@ node .\node_modules\wrangler\bin\wrangler.js secret put AI_API_KEY --config .\cl
 
 ## V1 功能
 
-- Dashboard：今日继续项目、工作区健康指标、真实扫描提醒、扫描变化和最近活跃项目；弱化演示数量卡片。
+- Dashboard：Companion 在线时保留本机扫描建议与健康指标；不可用时改用云端 Projects、Tasks，明确标注来源并隐藏本机 Git/文件健康数据。
 - Projects：项目列表与详情，可创建、编辑、删除项目、查看 TODO、关联资料及活动。删除项目会保留关联记录并解除关联。
 - GitHub 仓库只读摘要：可刷新公开仓库的名称、默认分支、仓库更新时间、最新 commit、Pages 地址、可见性和本地刷新时间；刷新失败时保留上次成功数据。
 - 本地项目只读扫描：Projects 显示 `D:\_Codex project` 下发现的项目、路径、Git 仓库/分支/clean 状态、HEAD、`origin/main`、领先/落后、最近本地 commit、常见文档文件是否存在和最后修改时间。

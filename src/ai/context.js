@@ -60,6 +60,7 @@ function projectRecord(project, localProject = null) {
 function taskRecord(task, projects) {
   return {
     title: shortText(task.title, 240),
+    description: shortText(task.description, 400),
     priority: shortText(task.priority || "中", 20),
     status: shortText(task.status, 20),
     due: shortText(task.due, 40),
@@ -169,10 +170,13 @@ export function buildAssistantContext({
         localHealth: dashboardModel?.health || null,
         localReminders: (dashboardModel?.alerts || []).slice(0, 5).map(({ projectName, kind, text }) => ({ projectName: shortText(projectName, 120), kind, text: shortText(text, 300) })),
         todayContinue: dashboardModel?.todayContinue ? {
+          source: dashboardModel.todayContinue.source || (dashboardModel.todayContinue.localProject ? "local" : "cloud"),
           projectName: shortText(dashboardModel.todayContinue.projectName, 120),
           workspaceStatus: shortText(dashboardModel.todayContinue.workspaceStatus, 120),
-          gitStatus: shortText(dashboardModel.todayContinue.gitStatus, 100),
-          remoteStatus: shortText(dashboardModel.todayContinue.remoteStatus, 100),
+          ...(dashboardModel.todayContinue.source === "cloud" ? {} : {
+            gitStatus: shortText(dashboardModel.todayContinue.gitStatus, 100),
+            remoteStatus: shortText(dashboardModel.todayContinue.remoteStatus, 100),
+          }),
           lastWork: shortText(dashboardModel.todayContinue.lastWork, 300),
           nextStep: shortText(dashboardModel.todayContinue.nextStep, 300),
           priorityTask: dashboardModel.todayContinue.priorityTask ? taskRecord(dashboardModel.todayContinue.priorityTask, projects) : null,

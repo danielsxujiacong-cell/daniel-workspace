@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-08 · V2.9 手机端云端首页降级
+
+- Companion 不可用时，首页按云端 Tasks 和 Projects 推荐下一步，并标注「基于云端资料」；不展示或推断本机 Git 状态。
+- 工作区健康区明确提示本机扫描不可用；云端 AI 建议与 Assistant 继续使用当前账号的 Projects、Tasks、Knowledge、Decisions。
+
 ## 2026-10-04 · V2.8 AI 建议动作
 
 - Dashboard 建议卡改为结构化的问题、原因、建议和受限操作；GLM 只能整理文本，动作权限由应用按扫描状态生成。
