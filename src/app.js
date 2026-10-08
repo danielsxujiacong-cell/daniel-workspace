@@ -599,8 +599,7 @@ function localGitLabel(project) {
 }
 
 function localDashboardModel() {
-  const currentScan = ui.localProjectsStatus === "ready"
-    || (ui.localProjectsStatus === "loading" && ui.localProjects);
+  const currentScan = ui.localProjectsStatus === "ready";
   if (!currentScan || !Array.isArray(ui.localProjects?.items)) return null;
   return buildLocalDashboardModel({
     items: ui.localProjects.items,
@@ -616,17 +615,18 @@ function cloudDashboardModel() {
 
 function cloudSuggestionForDashboard(today) {
   const task = today.priorityTask;
+  const priority = task?.priority || "中";
   const sourceKey = `cloud-dashboard:${today.taskId || today.projectId || "unlinked-task"}`;
   return {
     source: "cloud",
     projectId: today.projectId || null,
     projectName: today.projectName,
     issueType: task ? "cloud_priority_task" : "cloud_project_next_step",
-    severity: task?.priority === "高" ? "high" : task ? "medium" : "low",
+    severity: task ? ({ 高: "high", 中: "medium", 低: "low" })[priority] || "medium" : "low",
     title: today.projectName,
     finding: task ? `云端待办：${task.title}` : "当前没有待办任务",
     reason: task
-      ? `这是当前账号云端 Tasks 中优先级最高的待办${task.due ? `，期限为${task.due}` : ""}。`
+      ? `云端 Tasks 将此项标为「${priority}」优先级${task.due ? `，期限为${task.due}` : ""}；建议按当前任务优先级顺序处理。`
       : "当前账号没有待办任务，建议从云端项目资料继续推进。",
     suggestedAction: today.nextStep,
     allowedActions: ["open_project", "open_tasks"],
@@ -656,7 +656,7 @@ function requestDashboardSuggestion(candidate, localProject) {
   }).relevantContext : null;
   const request = {
     message: isCloudSuggestion
-      ? `根据当前账号的云端 Projects、Tasks、Knowledge、Decisions，为首页推荐生成简短建议。严格返回 JSON：{"issueType":"${candidate.issueType}","severity":"low|medium|high","title":"项目或待办名称","reason":"依据云端资料的原因","suggestedAction":"下一步建议"}。issueType 必须保持 ${candidate.issueType}。只根据提供的云端资料判断；不要推断 Companion、本机文件、Git 分支、clean 状态、ahead/behind 或 commit。不要提出本机写文件或执行命令。`
+      ? `根据当前账号的云端 Projects、Tasks、Knowledge、Decisions，为首页推荐生成简短建议。严格返回 JSON：{"issueType":"${candidate.issueType}","severity":"low|medium|high","title":"项目或待办名称","reason":"依据云端资料的原因","suggestedAction":"下一步建议"}。issueType 必须保持 ${candidate.issueType}。只根据提供的云端资料判断；尊重任务优先级和期限，不得把低优先级任务描述为最高优先级。不要推断 Companion、本机文件、Git 分支、clean 状态、ahead/behind 或 commit。不要提出本机写文件或执行命令。`
       : `根据单个本地扫描问题，生成简短的 Workspace 建议。严格返回 JSON：{"issueType":"${candidate.issueType}","severity":"low|medium|high","title":"项目名","reason":"为什么发现此问题","suggestedAction":"下一步建议"}。issueType 必须保持 ${candidate.issueType}。不要提出写文件、执行命令、删除、commit 或 push；不要输出路径、URL、仓库地址或 Git hash。`,
     currentPage: "home",
     currentProject: candidate.projectId ? { id: candidate.projectId, name: candidate.projectName } : null,
@@ -702,7 +702,14 @@ function requestDashboardSuggestion(candidate, localProject) {
     }
     const structured = parseStructuredSuggestion(result.message.content, candidate);
     if (structured) {
-      ui.dashboardSuggestion = { ...structured, provider: "real" };
+      ui.dashboardSuggestion = {
+        ...structured,
+        severity: candidate.severity,
+        finding: candidate.finding,
+        reason: candidate.reason,
+        suggestedAction: candidate.suggestedAction,
+        provider: "real",
+      };
       ui.dashboardSuggestionStatus = "ready";
     } else {
       ui.dashboardSuggestion = { ...candidate, error: "GLM 建议格式无效；保留本机扫描结论。" };
@@ -1059,11 +1066,17 @@ function renderDashboard() {
         : assistantStatus.mode === "real" ? "GLM 建议" : suggestion?.source === "cloud" ? "云端资料建议" : "本地建议";
   const taskLabel = taskExists ? (ui.createdSuggestionKeys.includes(suggestion?.sourceKey) ? "✅ 已创建任务" : "已在 Tasks 中") : "创建任务";
   const sourceTag = today?.source === "cloud" ? `<span class="tag">基于云端资料</span>` : "";
+  const resolvedTaskReminder = today?.source === "local" && today.resolvedTasks?.length
+    ? `<div class="runner-status" role="status">本机扫描核对到以下任务对应的文件已存在：${today.resolvedTasks.map((task) => `「${esc(task.title)}」对应 ${esc(task.projectName)} 的 ${esc(task.documentLabel)}.md`).join("；")}。请在 Tasks 中确认这些云端任务是否已完成；工作台不会自动修改或删除任务。</div>`
+    : "";
+  const localTaskPriority = today?.source === "local" && today.priorityTask
+    ? `<div class="suggestion-detail"><span>云端任务顺序</span><p>${esc(today.nextStep)}</p></div>`
+    : "";
   const continuationActions = today?.source === "cloud"
     ? `${today.projectId ? `<button class="button primary" data-page="projects">查看云端项目 ${icon("arrow")}</button>` : ""}${today.priorityTask ? `<button class="button ${today.projectId ? "quiet" : "primary"}" data-page="tasks">查看云端待办 ${icon("arrow")}</button>` : ""}`
     : `<button class="button" data-action="view-suggestion-project" data-id="${esc(suggestion?.localProjectId)}">查看项目 ${icon("arrow")}</button><button class="button ${taskExists ? "quiet" : "primary"}" data-action="create-suggestion-task" ${taskExists ? "disabled" : ""}>${taskLabel}</button>${suggestion?.allowedActions.includes("send_to_codex") ? `<button class="button quiet small" data-action="${codexForSuggestion && ["complete", "awaiting_confirmation", "fallback"].includes(codexForSuggestion.status) ? "show-codex-result" : "send-to-codex"}" ${codexDisabled ? "disabled" : ""}>${esc(codexLabel)}</button>` : ""}`;
   const continueCard = today && suggestion
-    ? `<div class="today-continue-main"><div class="today-continue-copy"><div class="suggestion-kicker">${icon("sparkle", "icon spark")} AI 建议下一步 ${sourceTag} <span class="tag">${esc(suggestionStatus)}</span></div><h2>${esc(suggestion.projectName)}</h2><p class="today-last-work">${esc(today.lastWork)}</p><div class="today-status"><span>${esc(today.workspaceStatus)}</span><span>${esc(today.gitStatus)}</span><span>${esc(today.remoteStatus)}</span></div><div class="suggestion-detail"><span>发现</span><strong>${esc(suggestion.finding)}</strong></div><div class="suggestion-detail"><span>原因</span><p>${esc(suggestion.reason)}</p></div><div class="suggestion-detail suggestion-advice"><span>AI 建议</span><p>${esc(suggestion.suggestedAction)}</p></div>${suggestion.error ? `<p class="suggestion-error">${esc(suggestion.error)}</p>` : ""}${today.source === "cloud" ? "" : renderCodexStatus(suggestion)}</div><div class="today-continue-actions">${continuationActions}</div></div>`
+    ? `<div class="today-continue-main"><div class="today-continue-copy"><div class="suggestion-kicker">${icon("sparkle", "icon spark")} AI 建议下一步 ${sourceTag} <span class="tag">${esc(suggestionStatus)}</span></div><h2>${esc(suggestion.projectName)}</h2><p class="today-last-work">${esc(today.lastWork)}</p><div class="today-status"><span>${esc(today.workspaceStatus)}</span><span>${esc(today.gitStatus)}</span><span>${esc(today.remoteStatus)}</span></div><div class="suggestion-detail"><span>发现</span><strong>${esc(suggestion.finding)}</strong></div><div class="suggestion-detail"><span>原因</span><p>${esc(suggestion.reason)}</p></div><div class="suggestion-detail suggestion-advice"><span>AI 建议</span><p>${esc(suggestion.suggestedAction)}</p></div>${localTaskPriority}${resolvedTaskReminder}${suggestion.error ? `<p class="suggestion-error">${esc(suggestion.error)}</p>` : ""}${today.source === "cloud" ? "" : renderCodexStatus(suggestion)}</div><div class="today-continue-actions">${continuationActions}</div></div>`
     : `<div class="local-companion-notice"><strong>${localModel ? "扫描范围内暂无本机项目" : ui.cloud.status === "loading" ? "正在加载云端资料…" : "暂无云端 Projects 或 Tasks"}</strong><p>${localModel ? "工作区扫描成功，但没有可推荐的本地项目。" : "登录后的云端项目和待办会显示在这里；本机扫描不可用时，首页不会生成 Git 或文件状态。"}</p></div>`;
   const scanControl = ["loading", "ready"].includes(ui.localProjectsStatus)
     ? `<button class="button quiet small" data-action="refresh-local-projects" ${ui.localProjectsStatus === "loading" ? "disabled" : ""}>${icon("reset")} ${ui.localProjectsStatus === "loading" ? "正在检测" : "重新扫描"}</button>`

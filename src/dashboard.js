@@ -131,7 +131,11 @@ function daysOld(value, now) {
 }
 
 function taskPriority(task) {
-  return ({ 高: 3, 中: 2, 低: 1 })[task?.priority] || 1;
+  return ({ 高: 3, 中: 2, 低: 1 })[task?.priority] ?? 2;
+}
+
+function taskPriorityLabel(task) {
+  return ["高", "中", "低"].includes(task?.priority) ? task.priority : "中";
 }
 
 function taskUrgency(task) {
@@ -146,6 +150,37 @@ function documentGaps(project) {
     !documents.handoff && "HANDOFF",
     !documents.todo && "TODO",
   ].filter(Boolean);
+}
+
+const documentTaskIssues = [
+  { key: "readme", issueType: "missing_readme", label: "README" },
+  { key: "handoff", issueType: "missing_handoff", label: "HANDOFF" },
+  { key: "todo", issueType: "missing_todo", label: "TODO" },
+  { key: "projectStatus", issueType: "missing_project_status", label: "PROJECT_STATUS" },
+];
+
+function documentIssueForTask(task, localProject) {
+  const name = String(localProject?.name || "").trim();
+  if (!name) return null;
+  return documentTaskIssues.find((issue) => {
+    const sourceKey = `ai-suggestion:${identityHash(`${name}|${issue.issueType}`)}`;
+    return task.sourceKey === sourceKey
+      || task.id === sourceKey
+      || task.title === `补齐 ${name} 的 ${issue.label}`;
+  }) || null;
+}
+
+function resolvedDocumentTaskIssue(task, localProject) {
+  const issue = documentIssueForTask(task, localProject);
+  return issue && filePresent(localProject?.documents, issue.key) ? issue : null;
+}
+
+function compareTasks(left, right) {
+  const priority = taskPriority(right) - taskPriority(left);
+  if (priority) return priority;
+  const urgency = taskUrgency(right) - taskUrgency(left);
+  if (urgency) return urgency;
+  return latestTimestamp(right.updatedAt, right.createdAt) - latestTimestamp(left.updatedAt, left.createdAt);
 }
 
 export function buildLocalDashboardModel({ items = [], tasks = [], projectForLocal = () => null, now = Date.now() } = {}) {
@@ -171,8 +206,15 @@ export function buildLocalDashboardModel({ items = [], tasks = [], projectForLoc
 
   const scored = items.map((item) => {
     const project = workspaceFor.get(item.id) || null;
-    const projectTasks = project ? (tasksFor.get(projectKey(project)) || []) : [];
-    const firstTask = [...projectTasks].sort((left, right) => taskUrgency(right) - taskUrgency(left) || taskPriority(right) - taskPriority(left))[0] || null;
+    const linkedTasks = project ? (tasksFor.get(projectKey(project)) || []) : [];
+    const documentSuggestionTasks = tasks.filter((task) => task.status !== "done" && documentIssueForTask(task, item));
+    const projectTasks = [...new Map([...linkedTasks, ...documentSuggestionTasks].map((task) => [task.id, task])).values()];
+    const resolvedTasks = projectTasks.flatMap((task) => {
+      const issue = resolvedDocumentTaskIssue(task, item);
+      return issue ? [{ id: task.id, title: task.title, documentLabel: issue.label }] : [];
+    });
+    const actionableTasks = projectTasks.filter((task) => !resolvedDocumentTaskIssue(task, item));
+    const firstTask = [...actionableTasks].sort(compareTasks)[0] || null;
     const gaps = documentGaps(item);
     const activityAt = linkedActivity(item);
     const age = activityAt ? (now - activityAt) / dayMs : 90;
@@ -184,10 +226,13 @@ export function buildLocalDashboardModel({ items = [], tasks = [], projectForLoc
       + (Number(item.ahead) > 0 ? 6 : 0)
       + Math.min(gaps.length, 3)
       + freshness;
-    return { item, project, projectTasks, firstTask, gaps, activityAt, score };
+    return { item, project, projectTasks, firstTask, gaps, activityAt, score, resolvedTasks };
   }).sort((left, right) => right.score - left.score || right.activityAt - left.activityAt);
 
   const today = scored[0] || null;
+  const resolvedTasks = scored.flatMap(({ item: scannedProject, resolvedTasks: projectResolvedTasks }) =>
+    projectResolvedTasks.map((task) => ({ ...task, projectName: scannedProject.name })),
+  );
   const item = today?.item;
   const project = today?.project;
   const workText = item?.lastLocalCommit?.message
@@ -207,7 +252,7 @@ export function buildLocalDashboardModel({ items = [], tasks = [], projectForLoc
   const workspaceStatus = project ? `${project.status}${project.stage ? ` · ${project.stage}` : ""}` : "尚未关联工作台项目";
   const priorityTask = today?.firstTask || null;
   let nextStep = priorityTask
-    ? `先处理待办「${priorityTask.title}」${priorityTask.due === "今天" ? "（今天到期）" : ""}`
+    ? `处理「${taskPriorityLabel(priorityTask)}」优先级待办「${priorityTask.title}」${priorityTask.due === "今天" ? "（今天到期）" : ""}`
     : Number(item?.behind) > 0
       ? "先查看与 origin/main 的差异，再手动决定同步方式"
       : item?.clean === false
@@ -273,7 +318,8 @@ export function buildLocalDashboardModel({ items = [], tasks = [], projectForLoc
       remoteStatus,
       lastWork: workText,
       nextStep,
-      priorityTask: priorityTask ? { title: priorityTask.title, priority: priorityTask.priority, due: priorityTask.due || "" } : null,
+      priorityTask: priorityTask ? { title: priorityTask.title, priority: taskPriorityLabel(priorityTask), due: priorityTask.due || "" } : null,
+      resolvedTasks,
       localProject: item,
       githubData: project?.githubData || null,
       missingDocuments: today.gaps,
@@ -282,19 +328,10 @@ export function buildLocalDashboardModel({ items = [], tasks = [], projectForLoc
   };
 }
 
-function compareCloudTasks(left, right) {
-  const priority = taskPriority(right) - taskPriority(left);
-  if (priority) return priority;
-  const urgency = taskUrgency(right) - taskUrgency(left);
-  if (urgency) return urgency;
-  return latestTimestamp(right.updatedAt, right.createdAt) - latestTimestamp(left.updatedAt, left.createdAt);
-}
-
 export function buildCloudDashboardModel({ projects = [], tasks = [] } = {}) {
   const projectById = new Map(projects.map((project) => [project.id, project]));
   const openTasks = tasks.filter((task) => task.status !== "done");
-  const linkedTasks = openTasks.filter((task) => task.projectId && projectById.has(task.projectId));
-  const selectedTask = [...(linkedTasks.length ? linkedTasks : openTasks)].sort(compareCloudTasks)[0] || null;
+  const selectedTask = [...openTasks].sort(compareTasks)[0] || null;
   const selectedProject = selectedTask
     ? projectById.get(selectedTask.projectId) || null
     : [...projects].sort((left, right) => {
@@ -308,14 +345,14 @@ export function buildCloudDashboardModel({ projects = [], tasks = [] } = {}) {
   const priorityTask = selectedTask ? {
     id: selectedTask.id,
     title: selectedTask.title,
-    priority: selectedTask.priority || "中",
+    priority: taskPriorityLabel(selectedTask),
     due: selectedTask.due || "",
   } : null;
   const lastWork = selectedTask
     ? `云端待办：${selectedTask.title}`
     : selectedProject.description || selectedProject.next || `云端项目状态：${selectedProject.status || "未设置"}`;
   const nextStep = selectedTask
-    ? `优先处理${selectedTask.priority ? `「${selectedTask.priority}」` : ""}待办「${selectedTask.title}」${selectedTask.due === "今天" ? "（今天到期）" : ""}`
+    ? `处理「${taskPriorityLabel(selectedTask)}」优先级待办「${selectedTask.title}」${selectedTask.due === "今天" ? "（今天到期）" : ""}`
     : selectedProject.next || "查看云端项目资料，确定一个可完成的小步骤";
 
   return {
