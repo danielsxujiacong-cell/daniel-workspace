@@ -2,21 +2,19 @@
 
 ## Current state
 
-- **Updated:** 2026-10-04
-- **Stage:** V2.8 final acceptance is complete per the user's confirmation on 2026-10-04. The Supabase migration succeeded, and the listed manual acceptance flows passed. Do not start V2.9.
-- **Version:** The sidebar reads `APP_VERSION` from `src/version.js`, currently `V2.8`.
-- **Dashboard:** Local Companion findings are converted into structured suggestions. GLM may refine the title/reason/action text; only the application selects the issue and allowed actions. The card exposes project, task, and (for missing documentation) Codex actions.
-- **Tasks:** AI Tasks include a deterministic source key and description, use the current authenticated user's existing sync path, and are deduplicated locally and by the new per-user partial unique index. Existing V2.6 tasks with empty new fields omit the new DB columns until the migration is applied.
-- **Codex:** `action_runner.py` is separate from read-only `local_companion.py`, binds to `127.0.0.1:4175`, and only accepts exact Workspace origins and scanned projects under `D:\_Codex project`. Fixed missing-document actions include README, HANDOFF, TODO, and PROJECT_STATUS. Codex CLI runs with `--sandbox read-only`; the Runner returns a one-file diff and writes only after a second explicit confirmation. The file is created without overwriting. No arbitrary command, delete, commit, or push endpoint exists.
-- **Runner use:** Ensure `codex.exe` is on `PATH`, start Companion as usual, then run `python action_runner.py` in a separate terminal. The Runner is intentionally not auto-started. If it or Codex CLI is unavailable, the UI offers a precise copyable Codex Task.
-- **Delivery:** V2.8 implementation commit `0309c9b` is on `main`. During the 2026-10-04 closeout, the GitHub Pages entry, version, suggestions, app, and stylesheet all returned HTTP 200; Git fetch confirmed the pre-closeout `HEAD` matched `origin/main`. The closeout documentation is synchronized in the latest `main` commit.
-- **Database migration and acceptance:** The user confirmed `supabase/v2.8-task-suggestions.sql` completed successfully in the existing Supabase project. The user also confirmed manual acceptance of Task creation, duplicate prevention, opening a project, handing off to Codex, the confirmation dialog, Action Runner execution, and rescan. Acceptance was reported by the user; a second account/device check is not confirmed here.
-- **Verification:** JS and Python syntax, `git diff --check`, structured action allowlists, model action-field rejection, path-independent Task keys, Task serialization/user scope, V2.6 Task compatibility, Runner CORS, outside-root rejection, existing-document rejection, absent arbitrary-command endpoint, and a real Codex CLI read-only draft plus create-only apply against an ignored synthetic fixture passed during implementation. Manual UI and post-Runner rescan acceptance are user-confirmed.
-- **Safety test fixture:** Runner test artifacts were kept in ignored `cache/` and removed after validation; no synthetic files are staged.
-- **V2.6 data:** Preserve Supabase records and the legacy `daniel-workspace-v1` browser data. Do not rerun the old localStorage migration.
+- **Updated:** 2026-10-08
+- **Stage:** V2.9 mobile-home fallback is complete and deployed.
+- **Version:** `src/version.js` reports `V2.9`.
+- **Dashboard:** A ready Companion keeps the existing local-scan model. When unavailable, the home card chooses a cloud-linked todo first, then the highest-priority unlinked todo, then a cloud Project. The card says「基于云端资料」; health metrics and scan controls are unavailable in this state.
+- **Assistant:** Home context continues to include the current account's Projects, Tasks (including bounded descriptions), Knowledge, and Decisions. With Companion unavailable, stale local scan records and Git fields are excluded. GLM remains behind the existing Cloudflare Worker; the Worker and database schema were not changed.
+- **Boundaries:** No Supabase schema/RLS, Local Companion, or Action Runner changes. No new dependencies.
+- **Tasks:** AI Tasks keep their deterministic source key and description, use the current authenticated user's existing sync path, and are deduplicated locally and by the V2.8 per-user partial unique index.
+- **Codex Runner:** `action_runner.py` remains separate from read-only `local_companion.py`, binds to `127.0.0.1:4175`, and only accepts the fixed missing-document actions under `D:\_Codex project`. It creates a reviewed one-file draft only after a second confirmation; no arbitrary command, delete, commit, or push endpoint exists. Run `python action_runner.py` separately when needed.
+- **V2.8 acceptance:** The user confirmed `supabase/v2.8-task-suggestions.sql` completed and manually accepted Task creation/deduplication, project navigation, Codex confirmation, Runner execution, and rescan. A second Auth user/device check was not confirmed.
+- **Delivery:** Commit `c27efe3ea6b4fe5132ef002f628cd0524c7be926` is on `main`. GitHub Pages reports `built` for that commit; the entry page, version, app, dashboard, and stylesheet returned HTTP 200.
+- **Verification:** Focused dashboard/context assertions and browser checks covered Companion online, cloud fallback, empty cloud data, AI flow with synthetic cloud records, and a 390px viewport without horizontal overflow. Browser AI responses used a local fixture; a real authenticated session and live GLM conversation were not re-tested. This static app has no build step.
+- **Existing data:** Preserve Supabase records and legacy `daniel-workspace-v1` browser data. Do not rerun the migration.
 
 ## Next action
 
-No remaining V2.8 action is recorded. Do not start V2.9 without a new user request.
-
-V2.8 is the requested scope. Do not start V2.9.
+V2.9 is the requested scope. Stop here and wait for a new user request before further development.
