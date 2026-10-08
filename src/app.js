@@ -27,6 +27,7 @@ const {
   countLocalMigrationCandidates,
   hasCloudRecords,
   hasLocalMigrationCandidates,
+  insertCloudProjects,
   loadCloudWorkspace,
   mergePendingCloudChanges,
   migrateLocalWorkspace,
@@ -63,6 +64,8 @@ const ui = {
   localProjectsStatus: localScanEndpoint ? "loading" : "unavailable",
   localScanAttemptAt: "",
   localScanCacheSaved: true,
+  localProjectSyncStatus: "idle",
+  localProjectSyncError: "",
   localComparison: null,
   taskFilter: "all",
   query: "",
@@ -188,6 +191,13 @@ function workspaceProjectForLocal(localProject) {
   const localName = normalizedName(localProject?.name);
   if (localName) return db.projects.find((project) => normalizedName(project.name) === localName) || null;
   return null;
+}
+
+function cloudProjectMatchesLocal(project, cloudProjects) {
+  const repository = githubKey(project?.githubRepository || project?.github);
+  const name = normalizedName(project?.name);
+  return (cloudProjects || []).some((item) => (repository && githubKey(item.github) === repository)
+    || (name && normalizedName(item.name) === name));
 }
 
 function localProjectForWorkspace(project) {
@@ -1075,7 +1085,10 @@ function renderProjects() {
   const connectionLabel = hasRequestFailure ? "GitHub 请求失败" : !configured.length ? "GitHub 未配置" : connectedCount ? "GitHub 已连接" : "GitHub 待刷新";
   const localProjects = ui.localProjects?.items || [];
   const scanLabel = ui.localProjectsStatus === "ready" ? `${localProjects.length} 个项目 · 在线` : ui.localProjectsStatus === "loading" ? (ui.localProjects ? `检测中 · 缓存 ${localProjects.length} 个` : "正在连接") : ui.localProjects ? `${localProjects.length} 个项目 · 可能过期` : "Companion 离线";
-  const localSection = `<section class="local-project-section"><div class="section-title"><div><h2>本地项目</h2><p class="local-section-note">只读扫描指定的本地项目根目录；不会修改项目文件或联网刷新 Git。</p></div><div class="heading-actions"><span class="github-overview-status">${esc(scanLabel)}</span><button class="button small" data-action="refresh-local-projects" ${ui.localProjectsStatus === "loading" ? "disabled aria-busy=\"true\"" : ""}>${icon("reset")} 重新扫描</button></div></div>${localProjects.length ? `<div class="local-project-list">${localProjects.map((item) => {
+  const canSyncLocalProjects = ui.localProjectsStatus === "ready" && ui.localProjectsSource === "live" && ui.cloud.status === "synced" && !cloudSyncRunning && !cloudSyncTimer;
+  const syncDisabled = !canSyncLocalProjects || ui.localProjectSyncStatus === "syncing";
+  const syncLabel = ui.localProjectSyncStatus === "syncing" ? "正在同步…" : "同步本地项目";
+  const localSection = `<section class="local-project-section"><div class="section-title"><div><h2>本地项目</h2><p class="local-section-note">只读扫描指定的本地项目根目录；不会修改项目文件或联网刷新 Git。</p></div><div class="heading-actions"><span class="github-overview-status">${esc(scanLabel)}</span><button class="button primary small" data-action="preview-local-project-sync" ${syncDisabled ? "disabled" : ""} title="${canSyncLocalProjects ? "" : "需等待本机实时扫描和云端同步完成"}">${icon("arrow")} ${syncLabel}</button><button class="button small" data-action="refresh-local-projects" ${ui.localProjectsStatus === "loading" ? "disabled aria-busy=\"true\"" : ""}>${icon("reset")} 重新扫描</button></div></div>${ui.localProjectSyncError ? `<p class="cloud-notice-error" role="status">同步失败：${esc(ui.localProjectSyncError)}。恢复云端连接后可重试。</p>` : ""}${localProjects.length ? `<div class="local-project-list">${localProjects.map((item) => {
     const linked = workspaceProjectForLocal(item);
     const repository = safeExternal(item.githubRepository || "");
     const gitLabel = localGitLabel(item);
@@ -1308,6 +1321,13 @@ function renderModal() {
     return `<div class="modal-backdrop" data-action="close-confirm-backdrop"><section class="modal wide" role="alertdialog" aria-modal="true" aria-labelledby="codex-confirm-title"><header class="modal-head"><div class="modal-head-copy"><h2 id="codex-confirm-title">准备交给 Codex</h2><p>先由 Codex 在只读沙箱中生成草稿，之后还要单独确认文件 diff 才会写入。</p></div><button class="icon-button" data-action="cancel-confirm" aria-label="关闭">${icon("close")}</button></header><div class="modal-body codex-task-body"><div class="runner-status" role="status" aria-live="polite">${esc(runnerStatus)}</div><div class="codex-plan"><div><span>项目</span><strong>${esc(suggestion.projectName)}</strong><code>${esc(project.path)}</code></div><div><span>问题</span><strong>${esc(suggestion.finding)}</strong></div><div><span>计划</span><strong>只创建缺少的 ${esc(({ missing_readme: "README.md", missing_handoff: "HANDOFF.md", missing_todo: "TODO.md", missing_project_status: "PROJECT_STATUS.md" })[suggestion.issueType] || "文档")}。</strong></div><div><span>允许修改</span><strong>${esc(({ missing_readme: "README.md", missing_handoff: "HANDOFF.md", missing_todo: "TODO.md", missing_project_status: "PROJECT_STATUS.md" })[suggestion.issueType] || "文档")}</strong></div><div><span>明确禁止</span><strong>删除、业务源码、其他项目、任意命令、Git 写操作、commit、push、系统或网络设置。</strong></div></div><details class="codex-task-details"><summary>查看完整 Codex Task</summary><textarea id="codex-task-text" readonly rows="13">${esc(taskText)}</textarea></details></div><footer class="modal-foot"><button class="button" data-action="cancel-confirm">取消</button><button class="button quiet" data-action="copy-codex-task">复制 Task</button><button class="button primary" data-action="accept-confirm" ${checking ? "disabled" : ""}>${checking ? "正在检查…" : confirmLabel}</button></footer></section></div>`;
   }
   if (ui.confirmation) {
+    if (ui.confirmation.kind === "local-project-sync") {
+      const { projects, skipped } = ui.confirmation;
+      const preview = projects.length
+        ? `<div class="codex-plan">${projects.map((project) => `<div><span>项目</span><strong>${esc(project.name)}</strong><code>${esc(project.github || "未发现 GitHub 地址")}</code><small>描述：${esc(project.description || "未提供，将留空")}</small></div>`).join("")}</div>`
+        : `<div class="empty-state">扫描到的项目都已关联云端资料，无需新增。</div>`;
+      return `<div class="modal-backdrop confirm-backdrop" data-action="close-confirm-backdrop"><section class="modal wide" role="alertdialog" aria-modal="true" aria-labelledby="local-project-sync-title"><header class="modal-head"><div class="modal-head-copy"><h2 id="local-project-sync-title">同步本地项目 · 预览</h2><p>待新增 ${projects.length} 个 · 已关联并跳过 ${skipped} 个</p></div><button class="icon-button" data-action="cancel-confirm" aria-label="关闭">${icon("close")}</button></header><div class="modal-body"><p class="confirm-message">确认后只新增名称、描述和 GitHub URL；现有云端项目不会被覆盖。Companion 不提供描述时会留空，可在同步后手动补充。本机路径、Git 状态和扫描数据不会上传。</p>${preview}</div><footer class="modal-foot"><button class="button" data-action="cancel-confirm">取消</button>${projects.length ? `<button class="button primary" data-action="accept-confirm">确认同步 ${projects.length} 个项目</button>` : ""}</footer></section></div>`;
+    }
     const { title, message, confirmLabel } = ui.confirmation;
     return `<div class="modal-backdrop confirm-backdrop" data-action="close-confirm-backdrop"><section class="modal confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message"><header class="modal-head"><div class="modal-head-copy"><h2 id="confirm-title">${esc(title)}</h2></div><button class="icon-button" data-action="cancel-confirm" aria-label="关闭">${icon("close")}</button></header><div class="modal-body"><p class="confirm-message" id="confirm-message">${esc(message)}</p></div><footer class="modal-foot"><button class="button" data-action="cancel-confirm">取消</button><button class="button danger" data-action="accept-confirm">${esc(confirmLabel || "确认")}</button></footer></section></div>`;
   }
@@ -1344,6 +1364,88 @@ function renderModal() {
   }
 
   return `<div class="modal-backdrop" data-action="close-modal-backdrop"><section class="modal ${wide}" role="dialog" aria-modal="true" aria-labelledby="modal-title"><header class="modal-head"><div class="modal-head-copy"><h2 id="modal-title">${title}</h2><p>${subtitle}</p></div><button class="icon-button" data-action="close-modal" aria-label="关闭">${icon("close")}</button></header><form id="record-form" data-kind="${kind}" data-id="${esc(id || "")}"><div class="modal-body">${form}</div><footer class="modal-foot"><button class="button" type="button" data-action="close-modal">取消</button><button class="button primary" type="submit">${isEdit ? "保存修改" : kind === "decision" ? "保存决策" : "保存"}</button></footer></form></section></div>`;
+}
+
+function openLocalProjectSyncPreview() {
+  if (!workspaceActive || ui.localProjectsStatus !== "ready" || ui.localProjectsSource !== "live" || ui.cloud.status !== "synced" || cloudSyncRunning || cloudSyncTimer) {
+    toast("请等待本机实时扫描和云端同步完成后再试");
+    return;
+  }
+  const items = ui.localProjects?.items || [];
+  const projects = [];
+  const knownProjects = [...db.projects];
+  for (const item of items) {
+    const project = {
+      name: String(item.name || "").trim(),
+      description: String(item.description || ""),
+      github: parsePublicGitHubRepository(item.githubRepository)?.url || "",
+      path: typeof item.path === "string" ? item.path : "",
+    };
+    if (!project.name || workspaceProjectForLocal(item) || cloudProjectMatchesLocal(project, knownProjects)) continue;
+    projects.push(project);
+    knownProjects.push(project);
+  }
+  ui.confirmation = {
+    kind: "local-project-sync",
+    projects,
+    skipped: Math.max(0, items.length - projects.length),
+    onConfirm: () => { void syncLocalProjectsToCloud(projects); },
+  };
+  render();
+}
+
+async function syncLocalProjectsToCloud(previewProjects) {
+  if (!workspaceActive || !Array.isArray(previewProjects)) return;
+  if (!cloudSyncEnabled || cloudSyncRunning || cloudSyncTimer || cloudSyncRequested) {
+    toast("云端同步状态已变化，请稍后重新打开预览");
+    return;
+  }
+  ui.localProjectSyncStatus = "syncing";
+  ui.localProjectSyncError = "";
+  cloudSyncRunning = true;
+  render();
+  try {
+    const latest = await loadCloudWorkspace(workspaceAuth.client, workspaceAuth.userId, () => workspaceActive);
+    if (!workspaceActive) return;
+    const knownProjects = [...latest.data.projects];
+    const additions = [];
+    for (const project of previewProjects) {
+      if (cloudProjectMatchesLocal(project, knownProjects)) continue;
+      const now = new Date().toISOString();
+      const addition = {
+        id: uid("project"),
+        name: project.name,
+        description: project.description,
+        status: "计划中",
+        stage: "",
+        next: "",
+        github: project.github,
+        url: "",
+        notes: "",
+        path: project.path,
+        createdAt: now,
+        updatedAt: now,
+      };
+      additions.push(addition);
+      knownProjects.push(addition);
+    }
+    await insertCloudProjects(workspaceAuth.client, workspaceAuth.userId, additions);
+    if (!workspaceActive) return;
+    const refreshed = await loadCloudWorkspace(workspaceAuth.client, workspaceAuth.userId, () => workspaceActive);
+    if (!workspaceActive) return;
+    activateCloudWorkspace(refreshed, { ...db, projects: [...db.projects, ...additions] });
+    ui.localProjectSyncStatus = "idle";
+    ui.localProjectSyncError = "";
+    toast(additions.length ? `已新增 ${additions.length} 个本地项目到云端` : "所有扫描项目都已存在于云端");
+  } catch (error) {
+    if (!workspaceActive) return;
+    ui.localProjectSyncStatus = "error";
+    ui.localProjectSyncError = typeof error?.message === "string" ? error.message : "云端写入失败";
+  } finally {
+    cloudSyncRunning = false;
+    if (workspaceActive) render();
+    if (cloudSyncRequested && workspaceActive) void syncCloudNow();
+  }
 }
 
 function cloudStatusLabel() {
@@ -1660,6 +1762,7 @@ function handleAction(action, element, sourceEvent) {
     render();
   }
   if (action === "open-create-project") openModal("project");
+  if (action === "preview-local-project-sync") openLocalProjectSyncPreview();
   if (action === "retry-cloud-sync") void initializeCloudSync();
   if (action === "migrate-legacy-data") void migrateLegacyData();
   if (action === "defer-cloud-migration") deferLegacyMigration();

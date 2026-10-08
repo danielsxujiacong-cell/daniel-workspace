@@ -213,6 +213,32 @@ export async function saveCloudChanges(client, userId, workspace, baseline, shou
   return nextBaseline;
 }
 
+export async function insertCloudProjects(client, userId, projects) {
+  const items = (Array.isArray(projects) ? projects : []).filter((item) => item?.id && String(item.name || "").trim());
+  if (!items.length) return 0;
+  const now = new Date().toISOString();
+  const rows = items.map((item) => ({
+    id: String(item.id),
+    user_id: userId,
+    created_at: item.createdAt || now,
+    updated_at: item.updatedAt || now,
+    name: String(item.name || "").trim(),
+    description: String(item.description || ""),
+    status: item.status || "计划中",
+    stage: item.stage || "",
+    next_step: item.next || "",
+    github_url: item.github || "",
+    website_url: item.url || "",
+    notes: item.notes || "",
+  }));
+  const { error } = await client.from("workspace_projects").upsert(rows, {
+    onConflict: "user_id,id",
+    ignoreDuplicates: true,
+  });
+  if (error) throw error;
+  return rows.length;
+}
+
 export async function migrateLocalWorkspace(client, userId, workspace, shouldContinue = () => true) {
   const candidates = getLocalMigrationCandidates(workspace);
   const counts = Object.fromEntries(Object.entries(candidates).map(([kind, items]) => [kind, items.length]));
