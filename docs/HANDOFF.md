@@ -3,7 +3,7 @@
 ## Current state
 
 - **Updated:** 2026-10-09
-- **Stage:** V2.9 cloud-first home refinement implemented, verified, and ready for the requested `main` push.
+- **Stage:** V2.9 cloud-first home refinement pushed to `main` in commit `dda3526e53f718138e2069d835b803f9f2094737`.
 - **Version:** `src/version.js` reports `V2.9`.
 - **Dashboard:** A ready Companion uses its current document scan to suppress matching document-completion Tasks when the file exists and asks the user to confirm completion in Tasks; it never changes those records. Without a successful live scan, the home card uses only cloud Projects and Tasks, sorted globally by priority before due date. App-derived findings and task copy remain authoritative over AI text.
 - **Cloud-first home:** Without a live Companion scan, Dashboard shows current-account Supabase project/task counts, recent projects, prioritized open Tasks, and the existing AI suggestion. Local health, alerts, and scan comparison are hidden; Companion status is secondary. Sync failure keeps cached cloud records and offers an explicit retry.
@@ -19,4 +19,4 @@
 
 ## Next action
 
-Finish the requested `main` push and stop; no new-version work is in scope.
+If needed, check that EdgeOne has propagated the connected `main` update. No new-version work is in scope.
