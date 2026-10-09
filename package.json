@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "node --test",
     "ai:worker:dev": "wrangler dev --config cloudflare/wrangler.jsonc --ip 127.0.0.1 --port 8787",
     "ai:worker:deploy": "wrangler deploy --config cloudflare/wrangler.jsonc"
   },

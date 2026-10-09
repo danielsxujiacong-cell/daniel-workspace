@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-09 · V3.0-A 访客企业运营演示
+
+- 登录页新增访客演示入口，使用独立的只读模拟企业数据浏览 Home、Projects、Tasks、Knowledge 和 Decisions。
+- 增加可跳过的两分钟导航、任务状态筛选、重置和退出；演示状态仅保存在当前页面内存。
+- 访客路由跳过 Supabase 配置和会话恢复，不加载私人 Workspace、Companion、Codex Runner 或 AI 模块；私人登录与云同步流程保留。
+- EdgeOne 从 GitHub `main` 自动部署；隔离与登录回归测试通过后推送。
+
 ## 2026-10-09 · V2.9 云端优先首页
 
 - Companion 不可用时首页以 Supabase 当前账号资料展示真实项目数、任务统计、最近项目、优先待办和现有 AI 建议；本机专属健康/扫描模块收起，Companion 状态移到次要位置。

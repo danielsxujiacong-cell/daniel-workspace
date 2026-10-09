@@ -1,9 +1,12 @@
-import { SUPABASE_ALLOWED_USER, SUPABASE_ANON_KEY, SUPABASE_URL } from "./config.js";
+import { resolveEntryMode } from "./entry-mode.js";
 
 const app = document.querySelector("#app");
+const entryMode = resolveEntryMode(window.location.search);
 const colorScheme = window.matchMedia("(prefers-color-scheme: light)");
 const AUTH_STORAGE_KEY = "daniel-workspace-auth-v1";
 let authClient = null;
+let supabaseConfigPromise = null;
+let authConfig = { SUPABASE_ALLOWED_USER: "" };
 let workspaceModule = null;
 let workspaceVisible = false;
 let signInBusy = false;
@@ -13,7 +16,7 @@ let authInitializationError = "";
 document.documentElement.dataset.theme = colorScheme.matches ? "light" : "dark";
 
 function loginMarkup() {
-  return `<main class="login-screen"><section class="login-card" aria-labelledby="login-title"><div class="login-mark" aria-hidden="true">D</div><h1 id="login-title">Daniel Workspace</h1><p class="login-subtitle">私人 AI 工作台</p><form id="login-form" class="login-form"><label for="login-email">邮箱</label><input id="login-email" name="email" type="email" autocomplete="username" inputmode="email" required /><label for="login-password">密码</label><input id="login-password" name="password" type="password" autocomplete="current-password" required /><button class="login-submit" type="submit">登录</button><p id="login-status" class="login-status" role="status" aria-live="polite"></p></form></section></main>`;
+  return `<main class="login-screen"><section class="login-card" aria-labelledby="login-title"><div class="login-mark" aria-hidden="true">D</div><h1 id="login-title">Daniel Workspace</h1><p class="login-subtitle">私人 AI 工作台</p><form id="login-form" class="login-form"><label for="login-email">邮箱</label><input id="login-email" name="email" type="email" autocomplete="username" inputmode="email" required /><label for="login-password">密码</label><input id="login-password" name="password" type="password" autocomplete="current-password" required /><button class="login-submit" type="submit">登录</button><p id="login-status" class="login-status" role="status" aria-live="polite"></p></form><div class="login-divider"><span>或</span></div><a class="guest-entry" href="?mode=guest">访客演示 <span>浏览模拟企业运营工作区</span></a></section></main>`;
 }
 
 function showLogin(message = "") {
@@ -29,7 +32,15 @@ function setLoginStatus(message, isError = true) {
   status.classList.toggle("error", isError);
 }
 
-function isConfigured() {
+function getSupabaseConfig() {
+  if (!supabaseConfigPromise) supabaseConfigPromise = import("./config.js");
+  return supabaseConfigPromise;
+}
+
+async function isConfigured() {
+  const config = await getSupabaseConfig();
+  authConfig = config;
+  const { SUPABASE_URL, SUPABASE_ANON_KEY } = config;
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return false;
   try {
     const url = new URL(SUPABASE_URL);
@@ -41,6 +52,7 @@ function isConfigured() {
 
 async function initializeAuthClient() {
   if (authClient) return authClient;
+  const { SUPABASE_ANON_KEY, SUPABASE_URL } = await getSupabaseConfig();
   const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2?target=es2022");
   const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: {
@@ -59,7 +71,7 @@ async function initializeAuthClient() {
 }
 
 function isAllowedUser(user) {
-  const allowedUser = SUPABASE_ALLOWED_USER.trim();
+  const allowedUser = authConfig.SUPABASE_ALLOWED_USER.trim();
   if (!allowedUser || !user) return false;
   if (allowedUser.includes("@")) {
     return typeof user.email === "string" && user.email.toLowerCase() === allowedUser.toLowerCase();
@@ -68,7 +80,7 @@ function isAllowedUser(user) {
 }
 
 function unauthorizedMessage() {
-  return SUPABASE_ALLOWED_USER.trim()
+  return authConfig.SUPABASE_ALLOWED_USER.trim()
     ? "此 Supabase 账号没有进入工作台的权限。"
     : "登录配置尚未指定唯一允许账号，工作台保持锁定。";
 }
@@ -145,7 +157,7 @@ async function handleLogin(form) {
     setLoginStatus("登录表单未正确加载，请刷新页面后重试。");
     return;
   }
-  if (!isConfigured()) {
+  if (!(await isConfigured())) {
     setLoginStatus("Supabase 登录配置不完整，暂时无法登录。");
     return;
   }
@@ -215,7 +227,7 @@ app.addEventListener("click", (event) => {
 
 async function boot() {
   showLogin();
-  if (!isConfigured()) return;
+  if (!(await isConfigured())) return;
 
   try {
     await initializeAuthClient();
@@ -237,4 +249,19 @@ async function boot() {
   }
 }
 
-void boot();
+async function startGuestDemo() {
+  app.innerHTML = `<main class="login-screen"><section class="login-card guest-loading"><div class="login-mark" aria-hidden="true">D</div><h1>正在打开访客演示…</h1></section></main>`;
+  const { mountGuestDemo } = await import("../guest-demo.js");
+  mountGuestDemo({
+    root: app,
+    onExit: () => window.location.replace(`${window.location.pathname}?mode=login`),
+  });
+}
+
+if (entryMode === "guest") {
+  void startGuestDemo();
+} else if (entryMode === "login") {
+  showLogin();
+} else {
+  void boot();
+}

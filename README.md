@@ -1,11 +1,11 @@
 # Daniel Workspace
 
-私人 AI 工作台 V2.9。GitHub Pages 对未登录访客只显示登录页；现有 Supabase email/password 用户登录后，Tasks、Knowledge、Decisions 和 Projects 基础资料通过同一 Supabase 账号同步。本机路径、Git 状态与 Companion 扫描仍由当前设备提供；Companion 不可用时，首页改用云端 Projects 与 Tasks 推荐下一步，不展示或推断本机 Git 状态。
+私人 AI 工作台 V3.0-A。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI；访客可从登录页进入完全隔离的企业运营演示，浏览 Home、Projects、Tasks、Knowledge 与 Decisions。访客数据均为只读模拟内容，不读取 Supabase 配置或会话，不连接 Companion、Codex 或 AI。
 
 ## Status
 
-- **Stage:** V2.9 mobile-home fallback complete. The user confirmed the V2.8 migration and authenticated acceptance on 2026-10-04. Start the Action Runner manually when using local Codex execution.
-- **Last updated:** 2026-10-08
+- **Stage:** V3.0-A visitor demo complete; EdgeOne deploys from `main`. V2.9 cloud-first home and the previously confirmed V2.8 sync remain in place.
+- **Last updated:** 2026-10-09
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
 ## Quick start
@@ -16,7 +16,7 @@
 python local_companion.py
 ```
 
-在浏览器打开 [http://127.0.0.1:4174](http://127.0.0.1:4174) 并登录。登录前页面不会读取 Workspace/扫描缓存，也不会请求 Companion。登录后按 `Ctrl+K` 或 `⌘K` 聚焦全局搜索；GitHub Pages 会在登录后尝试从本机 `127.0.0.1:4174` 读取扫描，浏览器可能要求允许页面访问本地网络。
+在浏览器打开 [http://127.0.0.1:4174](http://127.0.0.1:4174)，可登录私人工作区，也可选「访客演示」浏览模拟企业运营数据。访客演示含可跳过的两分钟导航、重置和退出；数据只保存在当前页面内存中。登录前页面不会读取 Workspace/扫描缓存或请求 Companion；访客模式也不会读取 Supabase 配置或会话。登录后按 `Ctrl+K` 或 `⌘K` 聚焦全局搜索；部署站点会在登录后尝试从本机 `127.0.0.1:4174` 读取扫描，浏览器可能要求允许页面访问本地网络。
 
 手动控制 Companion：前台运行 `python local_companion.py` 时按 `Ctrl+C` 停止；开机任务启动的后台实例可在 PowerShell 执行 `Stop-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion"` 停止。取消后续登录自动启动，执行 `Unregister-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion" -Confirm:$false`。重新登录 Windows 会再次启动仍注册的任务。
 
@@ -28,7 +28,13 @@ python local_companion.py
 
 `src/auth/config.js` 的 `SUPABASE_ALLOWED_USER` 设为唯一允许账号的 User UUID；留空时默认拒绝所有账号。只允许已存在的 Email + Password 账号登录，不能从应用注册。项目 URL 和 publishable key 属于公开前端配置；绝不填 `service_role` key、数据库密码、用户密码或私密 Token。
 
-登录门在 `getUser()` 成功验证会话前不会导入 `src/app.js`，读取 Workspace localStorage 或扫描缓存，也不会请求 Local Companion。若启动时会话检查暂时失败，登录按钮会重新初始化 Auth 客户端并重试；成功验证前仍不会进入 Workspace。退出会立即清空页面和应用内存并停止扫描请求；原有 `daniel-workspace-v1` 浏览器数据会保留，供此设备下一次成功登录继续使用。
+登录门在 `getUser()` 成功验证会话前不会导入 `src/app.js`，读取 Workspace localStorage 或扫描缓存，也不会请求 Local Companion。`?mode=guest` 路由只加载独立的 `src/guest-demo.js`；它不加载 `src/auth/config.js`、Supabase SDK 或任何私人服务模块。访客退出到 `?mode=login` 时停留在登录表单，不自动恢复会话；手动登录仍按原有 allowlist 验证。若启动时会话检查暂时失败，登录按钮会重新初始化 Auth 客户端并重试；成功验证前仍不会进入 Workspace。私人工作区退出会立即清空页面和应用内存并停止扫描请求；原有 `daniel-workspace-v1` 浏览器数据会保留，供此设备下一次成功登录继续使用。
+
+访客隔离和登录门禁回归测试使用 Node 内置测试运行：
+
+```powershell
+npm test
+```
 
 ## V2.6 云同步配置
 
