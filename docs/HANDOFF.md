@@ -3,15 +3,15 @@
 ## Current state
 
 - **Updated:** 2026-10-09
-- **Stage:** V3.0-A visitor demo is implemented, regression-tested, and pushed to `main`.
-- **Version:** `src/version.js` reports `V3.0-A`.
-- **Visitor route:** `?mode=guest` loads the standalone read-only demo. It contains simulated Home, Projects, Tasks, Knowledge, and Decisions data; a skippable two-minute tour; task filters; reset; and exit. State exists only in page memory.
+- **Stage:** V3.0-B visitor ticket workflow is implemented and locally verified; push to `main` triggers the configured EdgeOne deployment.
+- **Version:** `src/version.js` reports `V3.0-B`.
+- **Visitor route:** `?mode=guest` loads the standalone demo. It contains Home, Projects, Tasks, Knowledge, and Decisions; a skippable two-minute tour; task filters; reset; and exit. TK-1001 supports deterministic P1 guidance, a linked supplier exception SOP, solution selection, a simulated Decision, and completion with live Home/Tasks updates. Changes exist only in the mounted page's memory.
 - **Isolation:** Guest and post-exit `?mode=login` routes skip Supabase config loading and session restoration. The browser request log for guest mode showed only the HTML, stylesheet, gate, route helper, visitor module, and favicon request; no Auth SDK, workspace storage, Companion, Codex Runner, or AI module was requested.
 - **Private flow:** The normal route still restores a session through Supabase Auth; email/password login still verifies the user with `getUser()`, checks the configured allowlist, and only then imports `src/app.js`. Cloud sync, Companion, Codex Runner, and AI code were not changed.
-- **Verification:** `npm test` passes 4/4 isolation/login regression checks; JavaScript syntax checks and `git diff --check` pass. Browser checks covered the visitor link, all five pages, guided tour next/complete/skip, completed-task filter, reset, exit, and the post-exit login form. No real credentials were entered, so a credentialed successful sign-in was not retested.
-- **Delivery:** Release source is on `main`. EdgeOne is configured to deploy from `main`; public propagation was not independently checked because this repository does not document the EdgeOne URL.
+- **Verification:** `npm test` passes 7/7 checks; guest module/test syntax checks and `git diff --check` pass. Browser checks completed TK-1001, verified Home changing from 5 open/8 completed to 4/9, reset, and the independent second visitor session. The guest route requested only local static app files; `?mode=login` displayed the private login form without session restoration. No real credentials were entered or submitted.
+- **Delivery:** After commit and push to `main`, the configured EdgeOne integration should deploy automatically. Live propagation is not independently checked because the deployment URL is not recorded in the repository.
 - **Existing data:** No Supabase records, legacy `daniel-workspace-v1` data, schemas, or Companion services were modified.
 
 ## Next action
 
-If a public EdgeOne propagation check is needed, use the site's configured URL from EdgeOne. V3.0-B work is out of scope.
+If a public EdgeOne propagation check is needed, use the site's configured URL from EdgeOne.

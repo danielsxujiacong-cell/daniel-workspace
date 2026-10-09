@@ -795,6 +795,32 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 .guest-decision-detail > div { padding-top: 9px; border-top: 1px solid var(--line-soft); }
 .guest-decision-detail small { color: var(--muted); font-size: 8px; }
 .guest-decision-detail p { margin: 5px 0 0; color: var(--muted); font-size: 9px; line-height: 1.55; }
+.guest-ticket-panel { margin-bottom: 14px; padding: 17px; }
+.guest-ticket-heading, .guest-rule-top, .guest-ticket-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.guest-ticket-heading h2, .guest-ticket-section-head h3 { margin: 5px 0 0; font-size: 13px; font-weight: 600; }
+.guest-ticket-meta { display: flex; flex-wrap: wrap; gap: 6px 15px; margin: 12px 0; color: var(--muted); font-size: 9px; }
+.guest-rule-card, .guest-ticket-workflow, .guest-ticket-result { padding: 12px; border: 1px solid var(--line-soft); border-radius: 9px; background: var(--panel-hover); }
+.guest-rule-top strong, .guest-ticket-options legend, .guest-ticket-result strong { color: var(--text); font-size: 10px; }
+.guest-rule-card p, .guest-ticket-workflow > p, .guest-ticket-result p { margin: 7px 0 4px; color: var(--muted); font-size: 9px; line-height: 1.6; }
+.guest-rule-card small, .guest-ticket-result small { color: var(--faint); font-size: 8px; line-height: 1.5; }
+.guest-ticket-workflow { margin-top: 10px; }
+.guest-ticket-workflow > p { margin-bottom: 0; }
+.guest-ticket-options { display: grid; gap: 7px; margin: 12px 0; padding: 0; border: 0; }
+.guest-ticket-options legend { margin-bottom: 7px; }
+.guest-solution-option { display: flex; align-items: flex-start; gap: 9px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.guest-solution-option:has(input:checked) { border-color: var(--accent); background: var(--accent-wash); }
+.guest-solution-option input { margin: 2px 0 0; accent-color: var(--accent); }
+.guest-solution-option span { display: grid; gap: 4px; }
+.guest-solution-option strong { color: var(--text); font-size: 9px; font-weight: 600; }
+.guest-solution-option small, .guest-selection-note { color: var(--muted); font-size: 8px; line-height: 1.55; }
+.guest-selection-note { margin: 7px 0 0; }
+.guest-ticket-result { margin: 12px 0; border-color: color-mix(in srgb, var(--accent) 32%, var(--line)); }
+.guest-ticket-result.complete { border-color: color-mix(in srgb, var(--green) 34%, var(--line)); }
+.guest-knowledge-card.is-linked { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent); }
+.guest-sop-steps { margin: 10px 0; padding-left: 18px; color: var(--muted); font-size: 9px; line-height: 1.7; }
+.guest-demo-note .text-button { margin-left: 5px; }
+.guest-compact-row { align-items: center; }
+.guest-compact-row > .text-button { flex: 0 0 auto; }
 .guest-tour { position: fixed; z-index: 50; right: 26px; bottom: 24px; width: min(420px, calc(100vw - 32px)); padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: 0 16px 56px rgb(0 0 0 / 35%); }
 .guest-tour-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .guest-tour-top .eyebrow { margin-bottom: 6px; }
@@ -815,6 +841,7 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
   .guest-home-grid, .guest-card-grid { grid-template-columns: minmax(0, 1fr); }
   .guest-top-badge { display: none; }
   .guest-content .page-heading { align-items: flex-start; }
+  .guest-ticket-heading, .guest-ticket-section-head { align-items: flex-start; }
   .guest-tour { right: 12px; bottom: 12px; }
 }
 @media (max-width: 430px) {
@@ -826,5 +853,7 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
   .guest-top-badge { display: none; }
   .guest-app-shell .topbar-actions .button { padding: 0 7px; }
   .guest-decision-detail { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .guest-compact-row { align-items: flex-start; }
+  .guest-compact-row > .text-button { white-space: nowrap; }
   .guest-tour { right: 8px; bottom: 8px; width: calc(100vw - 16px); padding: 15px; }
 }

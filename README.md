@@ -1,10 +1,10 @@
 # Daniel Workspace
 
-私人 AI 工作台 V3.0-A。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI；访客可从登录页进入完全隔离的企业运营演示，浏览 Home、Projects、Tasks、Knowledge 与 Decisions。访客数据均为只读模拟内容，不读取 Supabase 配置或会话，不连接 Companion、Codex 或 AI。
+私人 AI 工作台 V3.0-B。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI；访客可从登录页进入完全隔离的企业运营演示，浏览 Home、Projects、Tasks、Knowledge 与 Decisions。访客可在 TK-1001 上走完规则优先级建议、关联 Knowledge SOP、选择方案、生成模拟 Decision 和完成工单；所有操作只保存在当前访客页面内存，不读取 Supabase 配置或会话，也不连接 Companion、Codex 或 AI。
 
 ## Status
 
-- **Stage:** V3.0-A visitor demo complete; EdgeOne deploys from `main`. V2.9 cloud-first home and the previously confirmed V2.8 sync remain in place.
+- **Stage:** V3.0-B visitor ticket workflow complete; EdgeOne deploys from `main`. V2.9 cloud-first home and the previously confirmed V2.8 sync remain in place.
 - **Last updated:** 2026-10-09
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -16,7 +16,7 @@
 python local_companion.py
 ```
 
-在浏览器打开 [http://127.0.0.1:4174](http://127.0.0.1:4174)，可登录私人工作区，也可选「访客演示」浏览模拟企业运营数据。访客演示含可跳过的两分钟导航、重置和退出；数据只保存在当前页面内存中。登录前页面不会读取 Workspace/扫描缓存或请求 Companion；访客模式也不会读取 Supabase 配置或会话。登录后按 `Ctrl+K` 或 `⌘K` 聚焦全局搜索；部署站点会在登录后尝试从本机 `127.0.0.1:4174` 读取扫描，浏览器可能要求允许页面访问本地网络。
+在浏览器打开 [http://127.0.0.1:4174](http://127.0.0.1:4174)，可登录私人工作区，也可选「访客演示」浏览模拟企业运营数据。打开 TK-1001 后可查看规则判定与关联 SOP、选择处置方案、生成模拟 Decision 并完成工单；Home 统计和 Tasks 状态会随之更新。访客演示含可跳过的两分钟导航、重置和退出；模拟状态仅保存在当前页面内存中。登录前页面不会读取 Workspace/扫描缓存或请求 Companion；访客模式也不会读取 Supabase 配置或会话。登录后按 `Ctrl+K` 或 `⌘K` 聚焦全局搜索；部署站点会在登录后尝试从本机 `127.0.0.1:4174` 读取扫描，浏览器可能要求允许页面访问本地网络。
 
 手动控制 Companion：前台运行 `python local_companion.py` 时按 `Ctrl+C` 停止；开机任务启动的后台实例可在 PowerShell 执行 `Stop-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion"` 停止。取消后续登录自动启动，执行 `Unregister-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion" -Confirm:$false`。重新登录 Windows 会再次启动仍注册的任务。
 

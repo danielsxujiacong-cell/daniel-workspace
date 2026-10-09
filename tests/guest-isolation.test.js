@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { resolveEntryMode } from "../src/auth/entry-mode.js";
+import { mountGuestDemo } from "../src/guest-demo.js";
 
 const gate = await readFile(new URL("../src/auth/gate.js", import.meta.url), "utf8");
 const guest = await readFile(new URL("../src/guest-demo.js", import.meta.url), "utf8");
@@ -47,4 +48,74 @@ test("private login still signs in, verifies the user, and checks the allowlist 
   const restoreAllowlistAt = sessionRestore.indexOf("isAllowedUser(user)");
   const restoreWorkspaceAt = sessionRestore.indexOf("enterWorkspace(user)");
   assert.ok(getSessionAt >= 0 && getSessionAt < restoreUserAt && restoreUserAt < restoreAllowlistAt && restoreAllowlistAt < restoreWorkspaceAt);
+});
+
+function createGuestRoot() {
+  const listeners = {};
+  return {
+    innerHTML: "",
+    addEventListener(type, listener) { listeners[type] = listener; },
+    replaceChildren() { this.innerHTML = ""; },
+    clickAction(action, extra = {}) {
+      listeners.click({ target: { closest: (selector) => selector === "[data-guest-action]" ? { dataset: { guestAction: action } } : selector === "[data-filter]" && extra.filter ? { dataset: { filter: extra.filter } } : null } });
+    },
+    clickPage(page) {
+      listeners.click({ target: { closest: (selector) => selector === "[data-guest-page]" ? { dataset: { guestPage: page } } : null } });
+    },
+    chooseSolution(value) {
+      listeners.change({ target: { name: "guest-ticket-solution", value } });
+    },
+  };
+}
+
+test("TK-1001 flow links rule, SOP, simulated Decision, completion, live stats, and reset in session memory", () => {
+  const root = createGuestRoot();
+  const secondSession = createGuestRoot();
+  let exited = false;
+  mountGuestDemo({ root, onExit: () => { exited = true; } });
+  mountGuestDemo({ root: secondSession, onExit() {} });
+
+  root.clickAction("skip-tour");
+  root.clickAction("view-ticket");
+  assert.match(root.innerHTML, /TK-1001/);
+  assert.match(root.innerHTML, /规则优先级建议[\s\S]*P1 · 高优先级/);
+  assert.match(root.innerHTML, /<fieldset class="guest-ticket-options" disabled>/);
+
+  root.clickAction("open-sop");
+  assert.match(root.innerHTML, /SOP：供应商交期异常升级处置/);
+  assert.match(root.innerHTML, /TK-1001 关联 SOP/);
+  root.clickAction("return-ticket");
+  assert.match(root.innerHTML, /<fieldset class="guest-ticket-options">/);
+
+  root.chooseSolution("alternate-supplier");
+  assert.match(root.innerHTML, /启用已认证备选供应商/);
+  root.clickAction("generate-decision");
+  assert.match(root.innerHTML, /已生成模拟 Decision/);
+  assert.match(root.innerHTML, /启用已认证备选供应商/);
+  root.clickPage("decisions");
+  assert.match(root.innerHTML, /TK-1001：供应商交期异常处置/);
+  assert.match(root.innerHTML, /访客模拟 · TK-1001/);
+
+  root.clickPage("tasks");
+  root.clickAction("view-ticket");
+  assert.match(root.innerHTML, /data-guest-action="complete-ticket"/);
+  root.clickAction("complete-ticket");
+  assert.match(root.innerHTML, /工单已完成/);
+  root.clickAction("filter-tasks", { filter: "done" });
+  assert.match(root.innerHTML, /TK-1001 · 供应商交期异常升级处理[\s\S]*已完成/);
+
+  root.clickPage("home");
+  assert.match(root.innerHTML, /data-guest-stat="open-tasks">4<\/strong>/);
+  assert.match(root.innerHTML, /data-guest-stat="completed-tasks">9<\/strong>/);
+  assert.match(secondSession.innerHTML, /data-guest-stat="open-tasks">5<\/strong>/);
+  assert.match(secondSession.innerHTML, /data-guest-stat="completed-tasks">8<\/strong>/);
+
+  root.clickAction("reset");
+  assert.match(root.innerHTML, /data-guest-stat="open-tasks">5<\/strong>/);
+  assert.match(root.innerHTML, /data-guest-stat="completed-tasks">8<\/strong>/);
+  root.clickPage("decisions");
+  assert.doesNotMatch(root.innerHTML, /TK-1001：供应商交期异常处置/);
+  root.clickAction("exit");
+  assert.equal(exited, true);
+  assert.equal(root.innerHTML, "");
 });
