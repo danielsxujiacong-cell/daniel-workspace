@@ -609,7 +609,7 @@ function localDashboardModel() {
 }
 
 function cloudDashboardModel() {
-  if (!cloudCacheActive && ui.cloud.status !== "synced") return { source: "cloud", todayContinue: null };
+  if (!cloudCacheActive && ui.cloud.status !== "synced") return buildCloudDashboardModel({});
   return buildCloudDashboardModel({ projects: db.projects, tasks: db.tasks });
 }
 
@@ -1044,6 +1044,19 @@ function renderDashboardRecent(model) {
   return `<section class="card card-pad grid-span-12">${sectionTitle("最近活跃项目", `<span class="minor">按本地修改、Git commit、GitHub 更新时间综合排序</span>`)}${projects.length ? `<div class="dashboard-recent-grid">${projects.map(({ item, project, activityAt }) => `<button class="dashboard-recent-project" data-action="view-local-project" data-id="${esc(item.id)}"><span class="project-glyph">${esc(initials(item.name))}</span><span class="dashboard-recent-copy"><strong>${esc(item.name)}</strong><span>${esc(item.lastLocalCommit?.message || project?.githubData?.latestCommit?.message || "暂无 commit 摘要")}</span></span><span class="dashboard-recent-time">${activityAt ? timeAgo(new Date(activityAt).toISOString()) : "时间未知"}</span>${icon("chevron")}</button>`).join("")}</div>` : `<div class="empty-state">扫描中没有项目记录。</div>`}</section>`;
 }
 
+function renderCloudDashboardSections(model) {
+  const counts = model.counts;
+  const taskRows = model.priorityTasks.length
+    ? model.priorityTasks.map((task) => `<button class="dashboard-alert cloud-task-row" data-page="tasks"><span class="alert-mark"></span><span class="dashboard-alert-copy"><strong>${esc(task.title)}</strong><span>${esc(projectTitle(task.projectId))} · ${esc(taskPriorityLabel(task))}${task.due ? ` · ${esc(task.due)}` : ""}</span></span>${icon("chevron")}</button>`).join("")
+    : `<div class="empty-state">当前没有待办任务。</div>`;
+  const projectRows = model.recentProjects.length
+    ? model.recentProjects.map((project) => `<button class="dashboard-recent-project" data-action="view-project" data-id="${esc(project.id)}"><span class="project-glyph">${esc(initials(project.name))}</span><span class="dashboard-recent-copy"><strong>${esc(project.name)}</strong><span>${esc(project.description || project.next || project.status || "云端项目")}</span></span><span class="dashboard-recent-time">${timeAgo(project.updatedAt || project.createdAt)}</span>${icon("chevron")}</button>`).join("")
+    : `<div class="empty-state">Supabase 中暂无项目。</div>`;
+  return `<section class="card dashboard-health grid-span-12"><div class="card-header"><div><h2>云端工作区</h2><p>Supabase · 当前账号真实资料</p></div></div><div class="dashboard-health-grid cloud-dashboard-metrics"><div class="health-metric"><strong>${counts.projects}</strong><span>项目</span></div><div class="health-metric"><strong>${counts.activeProjects}</strong><span>进行中</span></div><div class="health-metric"><strong>${counts.openTasks}</strong><span>待办</span></div><div class="health-metric"><strong>${counts.doneTasks}</strong><span>已完成</span></div></div></section>
+    <section class="card card-pad grid-span-6"><div class="card-header"><h2>优先待办</h2><button class="button quiet small" data-page="tasks">全部任务 ${icon("arrow")}</button></div><div class="dashboard-alert-list">${taskRows}</div></section>
+    <section class="card card-pad grid-span-6"><div class="card-header"><h2>最近项目</h2><button class="button quiet small" data-page="projects">全部项目 ${icon("arrow")}</button></div><div class="dashboard-recent-grid">${projectRows}</div></section>`;
+}
+
 function renderDashboard() {
   const localModel = localDashboardModel();
   const cloudModel = localModel ? null : cloudDashboardModel();
@@ -1081,13 +1094,11 @@ function renderDashboard() {
   const scanControl = ["loading", "ready"].includes(ui.localProjectsStatus)
     ? `<button class="button quiet small" data-action="refresh-local-projects" ${ui.localProjectsStatus === "loading" ? "disabled" : ""}>${icon("reset")} ${ui.localProjectsStatus === "loading" ? "正在检测" : "重新扫描"}</button>`
     : "";
-  return `<div class="page-heading"><div><div class="eyebrow">${formattedDate()} · ${esc(localStatus)}</div><h1>今天继续什么</h1><p>先看最值得推进的项目，再处理真实的工作区提醒。</p></div><div class="heading-actions">${scanControl}<button class="button primary" data-action="open-create-task">${icon("plus")} 新建任务</button></div></div>
+  const cloudMode = !localModel;
+  return `<div class="page-heading"><div><div class="eyebrow">${formattedDate()} · ${cloudMode ? "Supabase 云端工作区" : esc(localStatus)}</div><h1>今天继续什么</h1><p>${cloudMode ? "项目、任务和建议来自当前账号的 Supabase 资料。" : "先看最值得推进的项目，再处理真实的工作区提醒。"}</p></div><div class="heading-actions">${scanControl}<button class="button primary" data-action="open-create-task">${icon("plus")} 新建任务</button></div></div>
     <div class="dashboard-grid"><section class="today-continue-card grid-span-12">${continueCard}</section>
-      ${renderDashboardHealth(localModel)}
-      ${renderDashboardAlerts(localModel)}
-      ${renderDashboardChanges()}
-      ${renderDashboardRecent(localModel)}
-    </div>`;
+      ${cloudMode ? renderCloudDashboardSections(cloudModel) : `${renderDashboardHealth(localModel)}${renderDashboardAlerts(localModel)}${renderDashboardChanges()}${renderDashboardRecent(localModel)}`}
+    </div>${cloudMode ? `<div class="companion-secondary-status" role="status">本机 Companion：${esc(localStatus)}${ui.localProjectsStatus === "ready" ? ` · <button class="text-button" data-action="refresh-local-projects">重新扫描</button>` : ""} · 仅影响本机 Git 与文件状态显示。</div>` : ""}`;
 }
 
 function renderProjects() {
@@ -1485,7 +1496,7 @@ function renderCloudNotice() {
     return `<section class="cloud-notice" role="status"><div><strong>云端已有工作区资料</strong><p>为保护云端内容，本机旧资料没有自动合并；它仍保存在这台设备原有的 localStorage 中。当前显示云端资料。</p></div></section>`;
   }
   if (ui.cloud.status === "error" || ui.cloud.status === "offline") {
-    return `<section class="cloud-notice cloud-notice-subtle" role="status"><div><strong>${ui.cloud.status === "offline" ? "当前离线" : "云端同步暂不可用"}</strong><p>页面保留最近的本机资料缓存；网络恢复或完成数据库初始化后，可点上方同步状态重试。</p></div></section>`;
+    return `<section class="cloud-notice cloud-notice-subtle" role="status"><div><strong>${ui.cloud.status === "offline" ? "云端连接中断" : "云端同步失败"}</strong><p>${ui.cloud.error ? `${esc(ui.cloud.error)} · ` : ""}页面保留最近一次成功读取的 Supabase 资料；恢复网络或服务后可重新同步。</p></div><div class="cloud-notice-actions"><button class="button quiet small" data-action="retry-cloud-sync" ${["loading", "syncing", "migrating"].includes(ui.cloud.status) ? "disabled" : ""}>${icon("reset")} 重试云同步</button></div></section>`;
   }
   return "";
 }

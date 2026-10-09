@@ -117,6 +117,11 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 .card-header h3 { margin: 0; font-size: 11px; font-weight: 600; color: #dedee3; }
 .card-header .minor { color: var(--muted); font-size: 10px; }
 .dashboard-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 13px; }
+.cloud-dashboard-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.cloud-task-row { width: 100%; color: inherit; text-align: left; cursor: pointer; }
+.cloud-task-row > svg { flex: 0 0 auto; color: var(--muted); }
+.companion-secondary-status { margin-top: 12px; color: var(--muted); font-size: 9px; text-align: right; }
+.text-button { border: 0; padding: 0; color: var(--accent-strong); background: transparent; font: inherit; cursor: pointer; }
 .grid-span-8 { grid-column: span 8; }
 .grid-span-7 { grid-column: span 7; }
 .grid-span-6 { grid-column: span 6; }
@@ -385,6 +390,8 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
   .grid-span-5, .grid-span-4 { grid-column: span 6; }
 }
 @media (max-width: 760px) {
+  .cloud-dashboard-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .companion-secondary-status { text-align: left; }
   .sidebar { position: sticky; inset: auto; width: 100%; height: auto; display: block; padding: 10px 12px 0; border-right: 0; border-bottom: 1px solid var(--line); }
   .brand { display: none; }
   .nav-label, .sidebar-spacer, .workspace-mini, .sidebar-footer { display: none; }

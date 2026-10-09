@@ -331,6 +331,10 @@ export function buildLocalDashboardModel({ items = [], tasks = [], projectForLoc
 export function buildCloudDashboardModel({ projects = [], tasks = [] } = {}) {
   const projectById = new Map(projects.map((project) => [project.id, project]));
   const openTasks = tasks.filter((task) => task.status !== "done");
+  const priorityTasks = [...openTasks].sort(compareTasks);
+  const recentProjects = [...projects]
+    .sort((left, right) => latestTimestamp(right.updatedAt, right.createdAt) - latestTimestamp(left.updatedAt, left.createdAt))
+    .slice(0, 4);
   const selectedTask = [...openTasks].sort(compareTasks)[0] || null;
   const selectedProject = selectedTask
     ? projectById.get(selectedTask.projectId) || null
@@ -339,7 +343,20 @@ export function buildCloudDashboardModel({ projects = [], tasks = [] } = {}) {
       return active || latestTimestamp(right.updatedAt, right.createdAt) - latestTimestamp(left.updatedAt, left.createdAt);
     })[0] || null;
 
-  if (!selectedTask && !selectedProject) return { source: "cloud", todayContinue: null };
+  const model = {
+    source: "cloud",
+    counts: {
+      projects: projects.length,
+      activeProjects: projects.filter((project) => project.status === "进行中").length,
+      openTasks: openTasks.length,
+      doneTasks: tasks.length - openTasks.length,
+    },
+    recentProjects,
+    priorityTasks: priorityTasks.slice(0, 5),
+    todayContinue: null,
+  };
+
+  if (!selectedTask && !selectedProject) return model;
 
   const projectName = selectedProject?.name || (selectedTask ? "未关联项目待办" : "云端项目");
   const priorityTask = selectedTask ? {
@@ -356,7 +373,7 @@ export function buildCloudDashboardModel({ projects = [], tasks = [] } = {}) {
     : selectedProject.next || "查看云端项目资料，确定一个可完成的小步骤";
 
   return {
-    source: "cloud",
+    ...model,
     todayContinue: {
       source: "cloud",
       projectId: selectedProject?.id || null,

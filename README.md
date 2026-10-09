@@ -62,7 +62,7 @@ node .\node_modules\wrangler\bin\wrangler.js secret put AI_API_KEY --config .\cl
 
 ## V1 功能
 
-- Dashboard：云端待办按优先级排序；Companion 在线时用实时文件扫描核对文档类云端任务，已存在的文件不再作为待处理首选，并提示用户在 Tasks 确认完成，不自动改动任务。Companion 离线时只按云端 Projects、Tasks 推荐，并标注来源、隐藏本机 Git/文件状态。
+- Dashboard：云端优先展示当前 Supabase 账号的项目/任务统计、最近项目、优先待办和现有 AI 建议；Companion 在线时仍可查看实时扫描健康、提醒和变化。Companion 离线时收起本机专属模块并将状态置于次要位置；云同步失败保留明确说明及重试入口。
 - Projects：项目列表与详情，可创建、编辑、删除项目、查看 TODO、关联资料及活动。删除项目会保留关联记录并解除关联。
 - GitHub 仓库只读摘要：可刷新公开仓库的名称、默认分支、仓库更新时间、最新 commit、Pages 地址、可见性和本地刷新时间；刷新失败时保留上次成功数据。
 - 本地项目只读扫描：Projects 显示 `D:\_Codex project` 下发现的项目、路径、Git 仓库/分支/clean 状态、HEAD、`origin/main`、领先/落后、最近本地 commit、常见文档文件是否存在和最后修改时间。
