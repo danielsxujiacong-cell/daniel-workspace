@@ -134,7 +134,7 @@ function taskPriority(task) {
   return ({ 高: 3, 中: 2, 低: 1 })[task?.priority] ?? 2;
 }
 
-function taskPriorityLabel(task) {
+export function taskPriorityLabel(task) {
   return ["高", "中", "低"].includes(task?.priority) ? task.priority : "中";
 }
 
