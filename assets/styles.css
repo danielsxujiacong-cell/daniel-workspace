@@ -118,7 +118,8 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 .card-header .minor { color: var(--muted); font-size: 10px; }
 .dashboard-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 13px; }
 .cloud-dashboard-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.cloud-task-row { width: 100%; color: inherit; text-align: left; cursor: pointer; }
+.cloud-task-row { appearance: none; width: 100%; border: 0; border-radius: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; transition: background .16s ease; }
+.cloud-task-row:hover { background: var(--panel-hover); }
 .cloud-task-row > svg { flex: 0 0 auto; color: var(--muted); }
 .companion-secondary-status { margin-top: 12px; color: var(--muted); font-size: 9px; text-align: right; }
 .text-button { border: 0; padding: 0; color: var(--accent-strong); background: transparent; font: inherit; cursor: pointer; }

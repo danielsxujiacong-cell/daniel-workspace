@@ -1534,52 +1534,52 @@ function openConfirmation({ title, message, confirmLabel, onConfirm }) {
 async function sendChat(message) {
   const clean = message.trim();
   if (!clean || ui.chatBusy) return;
-  const companionContextAvailable = ui.localProjectsStatus === "ready"
-    || (ui.localProjectsStatus === "loading" && Boolean(ui.localProjects));
-  const assistantLocalProjects = companionContextAvailable ? ui.localProjects?.items || [] : [];
-  const localProject = !companionContextAvailable ? null
-    : ui.page === "local-project" ? localProjectById(ui.localProjectId)
-      : ui.page === "project" ? localProjectForWorkspace(projectById(ui.projectId))
-        : null;
-  const assistantPage = ui.page === "local-project" ? "project" : ui.page;
-  const homeLocalModel = assistantPage === "home" ? localDashboardModel() : null;
-  const dashboardModel = assistantPage === "home"
-    ? homeLocalModel || cloudDashboardModel()
-    : null;
-  const cloudContextAvailable = cloudCacheActive || ui.cloud.status === "synced";
-  const assistantData = cloudContextAvailable ? db : { projects: [], tasks: [], knowledge: [], decisions: [], activities: [] };
-  const selection = window.getSelection();
-  const selectedContent = selection?.anchorNode && document.querySelector(".main-shell .content")?.contains(selection.anchorNode.parentElement)
-    ? selection.toString().trim().slice(0, 1_200)
-    : "";
-  const context = buildAssistantContext({
-    data: assistantData,
-    currentPage: assistantPage,
-    projectId: ui.projectId,
-    taskFilter: ui.taskFilter,
-    localProject,
-    localProjects: assistantLocalProjects,
-    dashboardModel,
-    localChanges: ui.localComparison?.changes || [],
-    comparisonFirstScan: ui.localComparison?.firstScan || false,
-    selectedContent,
-    companionStatus: ui.localProjectsStatus,
-    companionScannedAt: companionContextAvailable ? ui.localProjects?.scannedAt || "" : "",
-  });
   const requestId = uid("chat");
-  const request = {
-    message: clean,
-    currentPage: assistantPage,
-    currentProject: context.currentProject,
-    relevantContext: context.relevantContext,
-    history: ui.chat.filter((item) => !item.pending && !item.isError && ["user", "assistant"].includes(item.role)).slice(-20).map((item) => ({ role: item.role, content: item.text.slice(0, 1_200) })),
-  };
   const pendingMessage = { role: "assistant", text: "GLM-4-Flash 正在思考…", pending: true, requestId };
   ui.chat.push({ role: "user", text: clean, requestId }, pendingMessage);
   ui.chatBusy = true;
   ui.assistantOpen = true;
-  render();
   try {
+    render();
+    const companionContextAvailable = ui.localProjectsStatus === "ready"
+      || (ui.localProjectsStatus === "loading" && Boolean(ui.localProjects));
+    const assistantLocalProjects = companionContextAvailable ? ui.localProjects?.items || [] : [];
+    const localProject = !companionContextAvailable ? null
+      : ui.page === "local-project" ? localProjectById(ui.localProjectId)
+        : ui.page === "project" ? localProjectForWorkspace(projectById(ui.projectId))
+          : null;
+    const assistantPage = ui.page === "local-project" ? "project" : ui.page;
+    const homeLocalModel = assistantPage === "home" ? localDashboardModel() : null;
+    const dashboardModel = assistantPage === "home"
+      ? homeLocalModel || cloudDashboardModel()
+      : null;
+    const cloudContextAvailable = cloudCacheActive || ui.cloud.status === "synced";
+    const assistantData = cloudContextAvailable ? db : { projects: [], tasks: [], knowledge: [], decisions: [], activities: [] };
+    const selection = window.getSelection();
+    const selectedContent = selection?.anchorNode && document.querySelector(".main-shell .content")?.contains(selection.anchorNode.parentElement)
+      ? selection.toString().trim().slice(0, 1_200)
+      : "";
+    const context = buildAssistantContext({
+      data: assistantData,
+      currentPage: assistantPage,
+      projectId: ui.projectId,
+      taskFilter: ui.taskFilter,
+      localProject,
+      localProjects: assistantLocalProjects,
+      dashboardModel,
+      localChanges: ui.localComparison?.changes || [],
+      comparisonFirstScan: ui.localComparison?.firstScan || false,
+      selectedContent,
+      companionStatus: ui.localProjectsStatus,
+      companionScannedAt: companionContextAvailable ? ui.localProjects?.scannedAt || "" : "",
+    });
+    const request = {
+      message: clean,
+      currentPage: assistantPage,
+      currentProject: context.currentProject,
+      relevantContext: context.relevantContext,
+      history: ui.chat.filter((item) => !item.pending && !item.isError && ["user", "assistant"].includes(item.role)).slice(-20).map((item) => ({ role: item.role, content: item.text.slice(0, 1_200) })),
+    };
     const result = await chatWithAI(request);
     pendingMessage.text = result.message.content;
     pendingMessage.provider = result.provider;
