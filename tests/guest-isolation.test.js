@@ -75,6 +75,15 @@ test("TK-1001 flow links rule, SOP, simulated Decision, completion, live stats, 
   mountGuestDemo({ root, onExit: () => { exited = true; } });
   mountGuestDemo({ root: secondSession, onExit() {} });
 
+  assert.match(root.innerHTML, /企业 AI 自动化工作台/);
+  assert.match(root.innerHTML, /异常处理，从发现到闭环/);
+  assert.match(root.innerHTML, /固定规则驱动，不调用真实 AI；内容为模拟数据，不代表真实企业案例/);
+  assert.match(root.innerHTML, /异常发现[\s\S]*规则判断[\s\S]*SOP[\s\S]*决策[\s\S]*完成/);
+  assert.match(root.innerHTML, /data-guest-action="view-ticket"[\s\S]*立即体验 TK-1001/);
+  assert.doesNotMatch(root.innerHTML, /class="guest-tour"/);
+  assert.match(root.innerHTML, /data-guest-action="start-tour">开始导航/);
+  root.clickAction("start-tour");
+  assert.match(root.innerHTML, /class="guest-tour"/);
   root.clickAction("skip-tour");
   root.clickAction("view-ticket");
   assert.match(root.innerHTML, /TK-1001/);
@@ -113,6 +122,7 @@ test("TK-1001 flow links rule, SOP, simulated Decision, completion, live stats, 
   root.clickAction("reset");
   assert.match(root.innerHTML, /data-guest-stat="open-tasks">5<\/strong>/);
   assert.match(root.innerHTML, /data-guest-stat="completed-tasks">8<\/strong>/);
+  assert.doesNotMatch(root.innerHTML, /class="guest-tour"/);
   root.clickPage("decisions");
   assert.doesNotMatch(root.innerHTML, /TK-1001：供应商交期异常处置/);
   root.clickAction("exit");

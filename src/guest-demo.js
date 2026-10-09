@@ -54,8 +54,34 @@ function renderHome(taskList) {
   const highPriorityTasks = taskList.filter((task) => task.priority === "高" && task.status !== "已完成").length;
   const completedThisWeek = 8 + (taskList.some((task) => task.id === "TK-1001" && task.status === "已完成") ? 1 : 0);
   const watchProjects = projects.filter((project) => project.health === "需关注").length;
-  return `<div class="page-heading"><div><div class="eyebrow">访客沙盒 · 模拟企业运营</div><h1>运营总览</h1><p>远岚科技集团 · 2026 年第四季度</p></div><button class="button primary" data-guest-action="start-tour">开始 2 分钟导航</button></div>
-    <div class="guest-demo-note" role="note">全部为虚构演示数据。TK-1001 的建议、Decision 和完成状态只在当前访客会话内模拟，不会写入私人账号、云端资料或本机服务。</div>
+  return `<section class="card guest-home-hero" aria-labelledby="guest-home-title">
+      <div class="guest-home-message">
+        <div class="guest-home-kicker"><span class="guest-demo-dot"></span><span>企业 AI 自动化工作台</span><span class="guest-home-kicker-label">访客演示</span></div>
+        <h1 id="guest-home-title">异常处理，从发现到闭环</h1>
+        <p>异常分散、规则不清、处置难追踪？把异常、规则、SOP 与决策连成一条流程，减少交接断点。</p>
+        <div class="guest-home-values"><span>减少跨团队交接</span><span>复用处置规范</span><span>保留决策依据</span></div>
+        <div class="guest-home-disclaimer"><strong>演示说明</strong> 固定规则驱动，不调用真实 AI；内容为模拟数据，不代表真实企业案例。</div>
+      </div>
+      <aside class="guest-home-ticket" aria-label="TK-1001 模拟工单">
+        <div class="guest-home-ticket-top"><span class="eyebrow">工单演示</span><span>TK-1001</span></div>
+        <h2>供应商交期异常</h2>
+        <p>关键物料预计延误 <strong>6 个工作日</strong>，可能影响试点排产。</p>
+        <div class="guest-home-rule"><span>固定规则判定</span><strong>P1 · 高优先级</strong></div>
+        <button class="button primary" data-guest-action="view-ticket"><span>立即体验 TK-1001</span><span aria-hidden="true">→</span></button>
+        <small>查看 SOP、选择方案并完成工单</small>
+      </aside>
+    </section>
+    <section class="card guest-process-card" aria-labelledby="guest-process-title">
+      <div class="guest-process-heading"><div><h2 id="guest-process-title">一张工单，走完五步闭环</h2><p>从异常信号到有记录的处理结果</p></div><span>模拟数据 · 规则驱动</span></div>
+      <ol class="guest-process-flow" aria-label="异常发现、规则判断、SOP、决策、完成">
+        <li><span class="guest-process-index">01</span><strong>异常发现</strong><small>关键物料延误</small></li>
+        <li><span class="guest-process-index">02</span><strong>规则判断</strong><small>固定条件判为 P1</small></li>
+        <li><span class="guest-process-index">03</span><strong>SOP</strong><small>按流程核实与升级</small></li>
+        <li><span class="guest-process-index">04</span><strong>决策</strong><small>选择处置方案</small></li>
+        <li><span class="guest-process-index">05</span><strong>完成</strong><small>更新工单状态</small></li>
+      </ol>
+    </section>
+    <div class="guest-demo-note" role="note">全部为虚构模拟数据。TK-1001 的建议、Decision 和完成状态仅保存在当前访客页面内存，不会写入私人账号、云端资料或本机服务。</div>
     <section class="guest-stat-grid"><article class="card guest-stat"><span>进行中项目</span><strong>${projects.filter((project) => project.status === "执行中").length}</strong><small>覆盖 4 个业务方向</small></article><article class="card guest-stat"><span>待完成任务</span><strong data-guest-stat="open-tasks">${openTasks}</strong><small>${highPriorityTasks} 项高优先级</small></article><article class="card guest-stat"><span>需关注项目</span><strong>${watchProjects}</strong><small>交期协同需要跟进</small></article><article class="card guest-stat"><span>本周已完成</span><strong data-guest-stat="completed-tasks">${completedThisWeek}</strong><small>团队模拟周报数据</small></article></section>
     <section class="guest-home-grid"><article class="card card-pad"><div class="card-header"><h2>项目进展</h2><span class="minor">按近期关注排序</span></div><div class="guest-project-list">${projects.slice(0, 3).map(renderProjectRow).join("")}</div><button class="text-button" data-guest-page="projects">浏览全部项目 →</button></article><article class="card card-pad"><div class="card-header"><h2>近期任务</h2><span class="minor">${openTasks} 项待完成</span></div><div class="guest-compact-list">${taskList.filter((task) => task.status !== "已完成").slice(0, 4).map((task) => `<div class="guest-compact-row"><span class="guest-priority priority-${priorityKey(task.priority)}">${escapeHtml(task.priority)}</span><div><strong>${escapeHtml(task.title)}</strong><small>${escapeHtml(task.owner)} · ${escapeHtml(task.due)}</small></div>${task.id === "TK-1001" ? '<button class="text-button" data-guest-action="view-ticket">打开工单 →</button>' : ""}</div>`).join("")}</div><button class="text-button" data-guest-page="tasks">查看任务清单 →</button></article></section>
     <article class="card guest-spotlight"><div class="guest-spotlight-mark">i</div><div><strong>本周运营提示</strong><p>供应链协同项目进入异常流程评审阶段；建议同步采购与计划团队，确保升级角色和反馈时限清晰。</p></div><span class="guest-pill watch">需关注</span></article>`;
@@ -126,7 +152,7 @@ function renderTour(tourIndex) {
 function mountGuestDemo({ root, onExit }) {
   let currentPage = "home";
   let taskFilter = "all";
-  let tourIndex = 0;
+  let tourIndex = null;
   let taskList = initialTasks.map((task) => ({ ...task }));
   let decisionList = initialDecisions.map((decision) => ({ ...decision }));
   let selectedTaskId = null;
@@ -151,7 +177,7 @@ function mountGuestDemo({ root, onExit }) {
       : currentPage === "projects" ? renderProjects()
         : currentPage === "tasks" ? renderTasks(taskFilter, taskList, selectedTaskId, selectedSolution, ticketDecision, sopViewed)
           : currentPage === "knowledge" ? renderKnowledge(highlightedKnowledgeId, showSopReturn) : renderDecisions(decisionList);
-    root.innerHTML = `<div class="app-shell guest-app-shell"><aside class="sidebar"><div class="brand"><div class="brand-mark">D</div><div><div class="brand-name">Daniel Workspace</div><div class="brand-caption">企业运营演示</div></div></div><div class="nav-label">演示工作区</div><nav class="nav-list" aria-label="访客演示导航">${pages.map(([id, label, glyph]) => `<button class="nav-item ${currentPage === id ? "active" : ""}" data-guest-page="${id}"${currentPage === id ? ' aria-current="page"' : ""}><span class="guest-nav-glyph" aria-hidden="true">${glyph}</span><span>${label}</span>${id === "tasks" ? `<span class="nav-count">${taskList.filter((task) => task.status !== "已完成").length}</span>` : ""}</button>`).join("")}</nav><div class="sidebar-spacer"></div><div class="workspace-mini"><div class="avatar">远</div><div><div class="workspace-title">远岚科技集团</div><div class="workspace-sub">模拟企业 · 访客沙盒</div></div></div><div class="guest-sidebar-actions"><button class="button small" data-guest-action="reset">重置演示</button><button class="button small quiet" data-guest-action="exit">退出</button></div><div class="sidebar-footer"><span class="local-label"><span class="guest-demo-dot"></span>独立访客演示</span></div></aside><div class="main-shell"><header class="topbar"><div class="breadcrumbs"><strong>${escapeHtml(pageLabels[currentPage])}</strong><span>·</span><span>模拟企业运营数据</span></div><div class="topbar-actions"><span class="guest-top-badge">访客演示</span><button class="button small" data-guest-action="start-tour">${tourIndex === null ? "重看导航" : "导航进度"}</button><button class="button small quiet" data-guest-action="reset">重置</button><button class="button small quiet" data-guest-action="exit">退出</button></div></header><main class="content guest-content">${pageContent}</main></div>${renderTour(tourIndex)}</div>`;
+    root.innerHTML = `<div class="app-shell guest-app-shell"><aside class="sidebar"><div class="brand"><div class="brand-mark">D</div><div><div class="brand-name">Daniel Workspace</div><div class="brand-caption">企业运营演示</div></div></div><div class="nav-label">演示工作区</div><nav class="nav-list" aria-label="访客演示导航">${pages.map(([id, label, glyph]) => `<button class="nav-item ${currentPage === id ? "active" : ""}" data-guest-page="${id}"${currentPage === id ? ' aria-current="page"' : ""}><span class="guest-nav-glyph" aria-hidden="true">${glyph}</span><span>${label}</span>${id === "tasks" ? `<span class="nav-count">${taskList.filter((task) => task.status !== "已完成").length}</span>` : ""}</button>`).join("")}</nav><div class="sidebar-spacer"></div><div class="workspace-mini"><div class="avatar">远</div><div><div class="workspace-title">远岚科技集团</div><div class="workspace-sub">模拟企业 · 访客沙盒</div></div></div><div class="guest-sidebar-actions"><button class="button small" data-guest-action="reset">重置演示</button><button class="button small quiet" data-guest-action="exit">退出</button></div><div class="sidebar-footer"><span class="local-label"><span class="guest-demo-dot"></span>独立访客演示</span></div></aside><div class="main-shell"><header class="topbar"><div class="breadcrumbs"><strong>${escapeHtml(pageLabels[currentPage])}</strong><span>·</span><span>模拟企业运营数据</span></div><div class="topbar-actions"><span class="guest-top-badge">访客演示</span><button class="button small" data-guest-action="start-tour">${tourIndex === null ? "开始导航" : "导航进度"}</button><button class="button small quiet" data-guest-action="reset">重置</button><button class="button small quiet" data-guest-action="exit">退出</button></div></header><main class="content guest-content">${pageContent}</main></div>${renderTour(tourIndex)}</div>`;
   }
 
   root.addEventListener("click", (event) => {
@@ -174,7 +200,7 @@ function mountGuestDemo({ root, onExit }) {
       restoreDemoData();
       currentPage = "home";
       taskFilter = "all";
-      tourIndex = 0;
+      tourIndex = null;
       render();
     } else if (action === "view-ticket") {
       selectedTaskId = "TK-1001";
