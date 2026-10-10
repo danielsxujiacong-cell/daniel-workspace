@@ -1168,7 +1168,7 @@ function renderProjects() {
       const done = tasks.filter((item) => item.status === "done").length;
       const recentUpdate = project.githubData?.updatedAt ? `最近更新 ${timeAgo(project.githubData.updatedAt)}` : "";
       const pending = ui.projectPinUpdatingId === project.id;
-      const pinDisabled = ui.projectPinningAvailable !== true || ui.cloud.status !== "synced" || cloudSyncRunning || Boolean(cloudSyncTimer) || Boolean(ui.projectPinUpdatingId) || (!project.isPinned && pinnedProjectCount >= MAX_HOME_PROJECT_PINS);
+      const pinDisabled = ui.projectPinningAvailable !== true || !["synced", "error", "offline"].includes(ui.cloud.status) || cloudSyncRunning || Boolean(cloudSyncTimer) || Boolean(ui.projectPinUpdatingId) || (!project.isPinned && pinnedProjectCount >= MAX_HOME_PROJECT_PINS);
       const pinTitle = ui.projectPinningAvailable === false ? "先执行置顶字段增量 SQL" : pinnedProjectCount >= MAX_HOME_PROJECT_PINS && !project.isPinned ? "最多置顶 5 个项目" : "置顶状态会同步到当前账号的其他设备";
       const taskProgress = tasks.length ? `关联任务完成 ${done}/${tasks.length}` : "进度未填写";
       return `<article class="card project-card"><div class="project-card-top"><div class="project-glyph">${esc(initials(project.name))}</div><div class="project-main"><button class="project-card-title" data-action="view-project" data-id="${esc(project.id)}">${esc(project.name)}</button><div class="project-meta">当前阶段：${esc(project.stage || "未填写")}</div></div>${statusPill(project.status)}</div><p>${esc(project.description || "还没有项目简介。")}</p><div class="project-card-bottom"><span>下一步：${esc(project.next || "未填写")}</span><span>${esc(taskProgress)}</span></div><div class="project-card-github"><span>${esc(githubStatus(project))}</span>${recentUpdate ? `<span>${esc(recentUpdate)}</span>` : ""}</div><div class="project-card-actions"><button class="button quiet small" data-action="view-project" data-id="${esc(project.id)}">打开项目</button><button class="button quiet small project-pin-toggle" data-action="toggle-project-pin" data-id="${esc(project.id)}" aria-pressed="${project.isPinned === true}" title="${esc(pinTitle)}" ${pinDisabled ? "disabled" : ""}>${pending ? "保存中…" : project.isPinned === true ? "取消置顶" : "置顶到首页"}</button></div></article>`;
@@ -1797,7 +1797,7 @@ async function toggleProjectPinInCloud(projectId) {
     toast(ui.projectPinningAvailable === false ? "请先执行置顶字段增量 SQL" : "连接云端并完成同步后才能置顶");
     return;
   }
-  if (ui.cloud.status !== "synced" || cloudSyncRunning || cloudSyncTimer || ui.projectPinUpdatingId) {
+  if (!["synced", "error", "offline"].includes(ui.cloud.status) || cloudSyncRunning || cloudSyncTimer || ui.projectPinUpdatingId) {
     toast("请等待云端同步完成后再修改置顶状态");
     return;
   }
@@ -1817,9 +1817,10 @@ async function toggleProjectPinInCloud(projectId) {
     const baselineProject = cloudBaseline?.projects?.find((item) => item.id === projectId);
     if (baselineProject) baselineProject.isPinned = result.isPinned;
     workspaceDataRevision += 1;
-    ui.cloud.status = "synced";
-    ui.cloud.error = "";
-    ui.cloud.lastSyncedAt = new Date().toISOString();
+    // A successful isolated pin update does not mean the rest of a cached workspace synced.
+    const syncTimestamp = ui.cloud.status === "synced" ? new Date().toISOString() : ui.cloud.lastSyncedAt;
+    if (ui.cloud.status === "synced") ui.cloud.error = "";
+    ui.cloud.lastSyncedAt = syncTimestamp;
     if (!saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt, ui.projectPinningAvailable)) {
       ui.cloud.error = "置顶已保存到云端，但浏览器未能更新离线缓存";
     }
