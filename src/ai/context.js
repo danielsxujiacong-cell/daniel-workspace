@@ -191,7 +191,13 @@ export function buildAssistantContext({
           missingDocuments: (dashboardModel.todayContinue.missingDocuments || []).slice(0, 5),
           localProject: localProjectRecord(dashboardModel.todayContinue.localProject),
         } : null,
-        recentlyActiveProjects: (dashboardModel?.recentProjects || []).slice(0, 4).map(({ item, project }) => projectRecord(project || { name: item.name, status: "本地项目" }, item)),
+        recentlyActiveProjects: (dashboardModel?.recentProjects || []).slice(0, 4).flatMap((entry) => {
+          if (!entry || typeof entry !== "object") return [];
+          if (dashboardModel?.source === "cloud") return [projectRecord(entry, localMatch(entry, localProjects))];
+          const { item, project } = entry;
+          if (!item) return [];
+          return [projectRecord(project || { name: item.name, status: "本地项目" }, item)];
+        }),
         changesSinceLastScan: localChanges.slice(0, 8).map(({ projectName, text, kind }) => ({ projectName: shortText(projectName, 120), text: shortText(text, 240), kind })),
         comparisonFirstScan,
       },
