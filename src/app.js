@@ -11,7 +11,6 @@ const {
   loadData,
   loadLocalScanBaseline,
   loadLocalScanCache,
-  resetData,
   saveCloudCache,
   saveCloudMigrationState,
   saveData,
@@ -1296,7 +1295,7 @@ function pageTitle() {
 
 function renderNav() {
   const items = [["home", "grid", "Home"], ["projects", "folder", "Projects"], ["knowledge", "inbox", "Knowledge"], ["decisions", "bulb", "Decisions"], ["tasks", "checkSquare", "Tasks"]];
-  return `<aside class="sidebar"><div class="brand"><div class="brand-mark">D</div><div><div class="brand-name">Daniel Workspace · ${APP_VERSION}</div><div class="brand-caption">个人 AI 工作台</div></div></div><div class="nav-label">Workspace</div><nav class="nav-list" aria-label="主导航">${items.map(([page, iconName, label]) => `<button class="nav-item ${(ui.page === page || (ui.page === "project" && page === "projects")) ? "active" : ""}" data-page="${page}">${icon(iconName)}<span>${label}</span>${page === "tasks" ? `<span class="nav-count">${cloudWorkspaceAvailable() ? openTasks().length : "—"}</span>` : ""}</button>`).join("")}</nav><div class="sidebar-spacer"></div><div class="workspace-mini"><div class="avatar">D</div><div><div class="workspace-title">Daniel 的工作区</div><div class="workspace-sub">云端资料 · 本机状态</div></div><button class="icon-button" data-action="reset-demo" title="重置演示数据" aria-label="重置演示数据">${icon("more")}</button></div><div class="sidebar-footer"><span class="local-label"><span class="local-dot"></span> Companion 只读扫描</span><button class="icon-button" data-action="reset-demo" title="重置演示数据" aria-label="重置演示数据">${icon("reset")}</button></div></aside>`;
+  return `<aside class="sidebar"><div class="brand"><div class="brand-mark">D</div><div><div class="brand-name">Daniel Workspace · ${APP_VERSION}</div><div class="brand-caption">个人 AI 工作台</div></div></div><div class="nav-label">Workspace</div><nav class="nav-list" aria-label="主导航">${items.map(([page, iconName, label]) => `<button class="nav-item ${(ui.page === page || (ui.page === "project" && page === "projects")) ? "active" : ""}" data-page="${page}">${icon(iconName)}<span>${label}</span>${page === "tasks" ? `<span class="nav-count">${cloudWorkspaceAvailable() ? openTasks().length : "—"}</span>` : ""}</button>`).join("")}</nav><div class="sidebar-spacer"></div><div class="workspace-mini"><div class="avatar">D</div><div><div class="workspace-title">Daniel 的工作区</div><div class="workspace-sub">云端资料 · 本机状态</div></div></div><div class="sidebar-footer"><span class="local-label"><span class="local-dot"></span> Companion 只读扫描</span></div></aside>`;
 }
 
 function searchItems(query) {
@@ -1946,20 +1945,6 @@ function handleAction(action, element, sourceEvent) {
   }
   if (action === "refresh-github") refreshGitHubData(id || null);
   if (action === "refresh-local-projects") refreshLocalProjects();
-  if (action === "reset-demo" && cloudSyncEnabled) {
-    toast("云端工作区不会通过演示重置删除；请逐条管理云端记录");
-    return;
-  }
-  if (action === "reset-demo") {
-    openConfirmation({
-      title: "重置演示数据",
-      message: "此操作会清除本浏览器中保存的自定义内容，并恢复内置演示数据；主题选择会保留。",
-      confirmLabel: "重置演示数据",
-      onConfirm: () => {
-        db = resetData({ theme: db.settings?.theme || "system" }); applyTheme(); ui.page = "home"; ui.projectId = null; ui.projectFilter = "all"; ui.taskFilter = "all"; ui.query = ""; ui.githubRefreshStatus = {}; ui.chat = [{ role: "assistant", text: "演示数据已恢复。你可以从当前页面开始提问。" }]; ui.modal = null; persist(); render(); toast("演示数据已恢复");
-      },
-    });
-  }
 }
 
 app.addEventListener("click", (event) => {

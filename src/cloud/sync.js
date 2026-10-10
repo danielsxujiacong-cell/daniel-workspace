@@ -134,12 +134,6 @@ function normalizedRecord(kind, item) {
   return Object.fromEntries(["id", ...spec.fields, "createdAt"].map((key) => [key, item[key] ?? (key === "createdAt" ? "" : Array.isArray(item[key]) ? [] : "")]));
 }
 
-function contentSignature(kind, item) {
-  const normalized = normalizedRecord(kind, item);
-  delete normalized.createdAt;
-  return JSON.stringify(normalized);
-}
-
 function snapshot(workspace) {
   return Object.fromEntries(Object.keys(collections).map((kind) => [
     kind,
@@ -157,8 +151,14 @@ function demoRecords() {
 }
 
 function isDemoRecord(kind, item, demos) {
-  const sample = demos[kind].get(item.id);
-  return Boolean(sample && contentSignature(kind, item) === contentSignature(kind, sample));
+  return demos[kind].has(String(item?.id || ""));
+}
+
+function assertNoDemoRecords(kind, items) {
+  const demos = demoRecords()[kind];
+  if ((items || []).some((item) => demos.has(String(item?.id || "")))) {
+    throw new Error("Mock demo records cannot be written to Supabase.");
+  }
 }
 
 export function getLocalMigrationCandidates(workspace) {
@@ -194,6 +194,7 @@ export async function loadCloudWorkspace(client, userId, shouldContinue = () => 
 
 export async function saveCloudChanges(client, userId, workspace, baseline, shouldContinue = () => true) {
   const nextBaseline = snapshot(workspace);
+  for (const [kind, items] of Object.entries(nextBaseline)) assertNoDemoRecords(kind, items);
   for (const [kind, spec] of Object.entries(collections)) {
     if (!shouldContinue()) throw new Error("Workspace is no longer active");
     const before = new Map((baseline?.[kind] || []).map((item) => [item.id, item]));
@@ -215,6 +216,7 @@ export async function saveCloudChanges(client, userId, workspace, baseline, shou
 
 export async function insertCloudProjects(client, userId, projects) {
   const items = (Array.isArray(projects) ? projects : []).filter((item) => item?.id && String(item.name || "").trim());
+  assertNoDemoRecords("projects", items);
   if (!items.length) return 0;
   const now = new Date().toISOString();
   const rows = items.map((item) => ({

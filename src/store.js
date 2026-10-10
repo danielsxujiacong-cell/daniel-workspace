@@ -124,9 +124,6 @@ export function saveLocalScanCache(inventory) {
   }
 }
 
-export function resetData(settings = {}) {
-  const data = createDemoData();
-  data.settings = { ...data.settings, ...settings };
-  saveData(data);
-  return data;
+export function resetData() {
+  throw new Error("The shared Workspace store cannot reset demo data.");
 }
