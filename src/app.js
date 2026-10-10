@@ -23,6 +23,13 @@ const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = aw
 const { fetchPublicGitHubRepository, parsePublicGitHubRepository } = await import("./github/public-api.js");
 const { buildCloudDashboardModel, buildLocalDashboardModel, compareLocalProjects, taskPriorityLabel } = await import("./dashboard.js");
 const {
+  countPinnedProjects,
+  getHomePinnedProjects,
+  MAX_HOME_PROJECT_PINS,
+  MIN_HOME_PROJECT_PINS,
+  toggleProjectPin: nextProjectPinState,
+} = await import("./project-pinning.js");
+const {
   countLocalMigrationCandidates,
   hasCloudRecords,
   hasLocalMigrationCandidates,
@@ -32,6 +39,7 @@ const {
   migrateLocalWorkspace,
   preserveDeviceOnlyData,
   saveCloudChanges,
+  setCloudProjectPinned,
 } = await import("./cloud/sync.js");
 const { APP_VERSION } = await import("./version.js");
 
@@ -58,6 +66,8 @@ const ui = {
   page: "home",
   projectId: null,
   projectFilter: "all",
+  projectPinningAvailable: typeof cloudCache?.projectPinningAvailable === "boolean" ? cloudCache.projectPinningAvailable : null,
+  projectPinUpdatingId: null,
   localProjectId: null,
   localProjects: scanCache.inventory,
   localProjectsSource: scanCache.inventory ? "cache" : null,
@@ -255,7 +265,7 @@ function persist() {
   if (!workspaceActive) return;
   workspaceDataRevision += 1;
   if (cloudCacheActive) {
-    const saved = saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt);
+    const saved = saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt, ui.projectPinningAvailable);
     if (!saved) ui.cloud.error = "浏览器未能保存云端缓存";
   } else {
     saveData(db);
@@ -273,13 +283,14 @@ function activateCloudWorkspace(remote, localState, mergePending = false) {
     : remote.data;
   db = preserveDeviceOnlyData(records, localState);
   cloudBaseline = remote.baseline;
+  ui.projectPinningAvailable = remote.projectPinningAvailable === true;
   cloudCacheActive = true;
   cloudSyncEnabled = true;
   ui.cloud.lastSyncedAt = new Date().toISOString();
   ui.cloud.status = "synced";
   ui.cloud.error = "";
   ui.cloud.migrationAvailable = false;
-  const saved = saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt);
+  const saved = saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt, ui.projectPinningAvailable);
   if (!saved) ui.cloud.error = "云端可用，但浏览器未能保存离线缓存";
 }
 
@@ -336,7 +347,7 @@ async function initializeCloudSync() {
     activateCloudWorkspace(remote, db);
     ui.cloud.localDataUnmerged = unmergedCount;
     if (unmergedCount) {
-      saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt);
+      saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt, ui.projectPinningAvailable);
     }
   } catch (error) {
     if (!workspaceActive) return;
@@ -386,7 +397,7 @@ async function syncCloudNow() {
       ui.cloud.lastSyncedAt = new Date().toISOString();
       ui.cloud.status = "synced";
       ui.cloud.error = "";
-      saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt);
+      saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt, ui.projectPinningAvailable);
       if (workspaceDataRevision !== revision) cloudSyncRequested = true;
     } while (cloudSyncRequested && workspaceActive);
   } catch (error) {
@@ -394,7 +405,7 @@ async function syncCloudNow() {
     cloudSyncRequested = false;
     ui.cloud.status = navigator.onLine === false ? "offline" : "error";
     ui.cloud.error = typeof error?.message === "string" ? error.message : "云端保存失败";
-    saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt);
+    saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt, ui.projectPinningAvailable);
   } finally {
     cloudSyncRunning = false;
     if (workspaceActive) render();
@@ -1065,43 +1076,42 @@ function dashboardStatCard(label, value, page, filter, description) {
   return `<button class="dashboard-stat-card" data-action="dashboard-stat" data-target-page="${page}" data-filter="${filter}" aria-label="${esc(`${label}：${value}，${description}`)}"><span class="dashboard-stat-label">${esc(label)}</span><strong>${value}</strong><span class="dashboard-stat-link">${esc(description)} ${icon("chevron")}</span></button>`;
 }
 
-function nextTaskForProject(project, tasks) {
-  return tasks.filter((task) => task.projectId === project.id && task.status !== "done")
-    .sort((left, right) => ({ 高: 0, 中: 1, 低: 2 }[left.priority] ?? 1) - ({ 高: 0, 中: 1, 低: 2 }[right.priority] ?? 1)
-      || new Date(right.updatedAt || right.createdAt || 0) - new Date(left.updatedAt || left.createdAt || 0))[0] || null;
-}
-
 function renderDashboardFocusProjects(projects, tasks, dataAvailable) {
-  const active = projects.filter((project) => project.status === "进行中")
-    .sort((left, right) => new Date(right.updatedAt || right.createdAt || 0) - new Date(left.updatedAt || left.createdAt || 0));
-  const cards = active.map((project) => {
+  const pinnedCount = countPinnedProjects(projects);
+  const pinned = dataAvailable && ui.projectPinningAvailable === true ? getHomePinnedProjects(projects) : [];
+  const cards = pinned.map((project) => {
     const projectTasks = tasks.filter((task) => task.projectId === project.id);
     const done = projectTasks.filter((task) => task.status === "done").length;
-    const nextTask = nextTaskForProject(project, tasks);
-    const progress = projectTasks.length ? Math.round(done / projectTasks.length * 100) : null;
-    const updatedAt = project.updatedAt || project.createdAt;
-    return `<button class="dashboard-focus-card" data-action="view-project" data-id="${esc(project.id)}"><span class="dashboard-focus-top"><span class="project-glyph">${esc(initials(project.name))}</span>${statusPill(project.status)}</span><strong class="dashboard-focus-name">${esc(project.name)}</strong><span class="dashboard-focus-next"><small>下一步</small>${esc(nextTask?.title || project.next || "尚未记录下一步任务")}</span><span class="dashboard-progress-meta">${projectTasks.length ? `任务进度 ${done}/${projectTasks.length}` : "暂无关联任务"}<span>${esc(timeAgoIfKnown(updatedAt))}</span></span>${progress === null ? "" : `<span class="dashboard-progress-track"><span style="width:${progress}%"></span></span>`}<span class="dashboard-focus-footer">打开项目详情 ${icon("chevron")}</span></button>`;
+    const github = safeExternal(project.github);
+    const website = safeExternal(project.url);
+    const pending = ui.projectPinUpdatingId === project.id;
+    const links = (url, label) => url
+      ? `<a class="dashboard-project-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)} ${icon("external")}</a>`
+      : `<span class="dashboard-project-link unavailable">${esc(label)} 未填写</span>`;
+    return `<article class="dashboard-focus-card"><div class="dashboard-focus-top"><span class="project-glyph">${esc(initials(project.name))}</span>${statusPill(project.status)}</div><button class="dashboard-focus-name" data-action="view-project" data-id="${esc(project.id)}">${esc(project.name)}</button><div class="dashboard-project-detail"><small>当前阶段</small><span>${esc(project.stage || "未填写")}</span></div><div class="dashboard-project-detail"><small>下一步</small><span>${esc(project.next || "未填写")}</span></div><div class="dashboard-progress-meta">${projectTasks.length ? `关联任务完成 ${done}/${projectTasks.length}` : "进度未填写"}</div><div class="dashboard-project-links">${links(github, "GitHub")}${links(website, "线上网站")}</div><div class="dashboard-focus-actions"><button class="button quiet small" data-action="view-project" data-id="${esc(project.id)}">打开项目</button><button class="button quiet small" data-action="toggle-project-pin" data-id="${esc(project.id)}" ${pending ? "disabled aria-busy=\"true\"" : ""}>${pending ? "保存中…" : "取消置顶"}</button></div></article>`;
   }).join("");
   const empty = !dataAvailable
     ? dashboardUnavailableMessage()
-    : "目前没有进行中的项目。可以在 Projects 中查看其他项目或开始一个项目。";
-  const focusGridClass = active.length === 1 ? "dashboard-focus-grid dashboard-focus-grid-single" : "dashboard-focus-grid";
-  return `<section class="card card-pad dashboard-focus-section grid-span-12"><div class="section-title"><h2>我的重点项目</h2><button class="button quiet small" data-action="dashboard-stat" data-target-page="projects" data-filter="active">查看全部进行中 ${icon("arrow")}</button></div>${cards ? `<div class="${focusGridClass}">${cards}</div>` : `<div class="empty-state">${esc(empty)}${dataAvailable ? `<button class="button quiet small" data-action="dashboard-stat" data-target-page="projects" data-filter="all">查看全部项目</button>` : ""}</div>`}</section>`;
+    : ui.projectPinningAvailable === false
+      ? "首页置顶尚未启用。执行 supabase/v3.1-b-project-pinning.sql 后即可选择项目。"
+      : ui.projectPinningAvailable !== true
+        ? "连接云端后才能检查置顶状态。"
+        : pinnedCount < MIN_HOME_PROJECT_PINS
+          ? pinnedCount ? `已置顶 ${pinnedCount} 个项目；再置顶 ${MIN_HOME_PROJECT_PINS - pinnedCount} 个后，首页会显示项目卡片。` : "还没有置顶项目。请在 Projects 中手动选择 3–5 个项目。"
+          : "当前没有可显示的置顶项目。";
+  return `<section class="card card-pad dashboard-focus-section grid-span-12"><div class="section-title"><div><h2>首页置顶项目</h2><p class="minor">仅显示手动置顶项目 · ${pinnedCount}/${MAX_HOME_PROJECT_PINS}</p></div><button class="button quiet small" data-action="dashboard-stat" data-target-page="projects" data-filter="all">在 Projects 管理 ${icon("arrow")}</button></div>${cards ? `<div class="dashboard-focus-grid">${cards}</div>` : `<div class="empty-state">${esc(empty)}${dataAvailable ? `<br><br><button class="button quiet small" data-action="dashboard-stat" data-target-page="projects" data-filter="all">查看 Projects ${icon("arrow")}</button>` : ""}</div>`}</section>`;
 }
 
 function renderDashboardSections(model, dataAvailable) {
   const taskRows = model.priorityTasks.length
     ? model.priorityTasks.map((task) => `<button class="dashboard-alert cloud-task-row" data-action="dashboard-stat" data-target-page="tasks" data-filter="todo"><span class="alert-mark"></span><span class="dashboard-alert-copy"><strong>${esc(task.title)}</strong><span>${esc(projectTitle(task.projectId))} · ${esc(taskPriorityLabel(task))}${task.due ? ` · ${esc(task.due)}` : ""}</span></span>${icon("chevron")}</button>`).join("")
     : `<div class="empty-state">${dataAvailable ? "当前没有未完成任务。" : esc(dashboardUnavailableMessage())}</div>`;
-  const projectRows = model.recentProjects.length
-    ? model.recentProjects.map((project) => `<button class="dashboard-recent-project" data-action="view-project" data-id="${esc(project.id)}"><span class="project-glyph">${esc(initials(project.name))}</span><span class="dashboard-recent-copy"><strong>${esc(project.name)}</strong><span>${esc(project.next || project.description || "尚未记录下一步")}</span></span><span class="dashboard-recent-status">${statusPill(project.status || "未设置")}</span><span class="dashboard-recent-time">${esc(timeAgoIfKnown(project.updatedAt || project.createdAt))}</span>${icon("chevron")}</button>`).join("")
-    : `<div class="empty-state">${dataAvailable ? "Supabase 中暂无项目。" : esc(dashboardUnavailableMessage())}</div>`;
-  return `<section class="card card-pad grid-span-6"><div class="card-header"><h2>优先待办</h2><button class="button quiet small" data-action="dashboard-stat" data-target-page="tasks" data-filter="todo">全部未完成任务 ${icon("arrow")}</button></div><div class="dashboard-alert-list">${taskRows}</div></section>
-    <section class="card card-pad grid-span-6"><div class="card-header"><h2>最近项目</h2><button class="button quiet small" data-action="dashboard-stat" data-target-page="projects" data-filter="all">全部项目 ${icon("arrow")}</button></div><div class="dashboard-recent-grid">${projectRows}</div></section>`;
+  return `<section class="card card-pad grid-span-12"><div class="card-header"><h2>优先待办</h2><button class="button quiet small" data-action="dashboard-stat" data-target-page="tasks" data-filter="todo">全部未完成任务 ${icon("arrow")}</button></div><div class="dashboard-alert-list">${taskRows}</div></section>`;
 }
 
 function renderDashboardSuggestion(today, suggestion) {
   if (!today || !suggestion) return "";
+  if (today.projectId && !db.projects.some((project) => project.id === today.projectId && project.isPinned === true)) return "";
   const status = ui.dashboardSuggestionStatus === "generating" ? "GLM 正在整理"
     : ui.dashboardSuggestionStatus === "ready" ? "GLM-4-Flash"
       : ui.dashboardSuggestionStatus === "error" ? "暂用云端记录"
@@ -1132,6 +1142,7 @@ function renderProjects() {
   const cloudProjects = cloudWorkspaceAvailable() ? [...db.projects] : [];
   const projects = cloudProjects.filter((project) => ui.projectFilter !== "active" || project.status === "进行中")
     .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
+  const pinnedProjectCount = countPinnedProjects(cloudProjects);
   const configured = cloudProjects.filter((project) => parsePublicGitHubRepository(project.github));
   const hasRequestFailure = configured.some((project) => ui.githubRefreshStatus[project.id] === "error");
   const connectedCount = configured.filter((project) => project.githubData?.refreshedAt).length;
@@ -1149,13 +1160,18 @@ function renderProjects() {
     return `<article class="card local-project-row"><div class="local-project-main"><h3>${esc(item.name)}</h3><code>${esc(item.path)}</code><span class="local-project-link">${linked ? `工作台项目：${esc(linked.name)}` : repository ? `<a href="${esc(repository)}" target="_blank" rel="noreferrer">${esc(repository.replace("https://github.com/", ""))}</a>` : "未关联工作台项目"}</span></div><div class="local-project-meta"><span class="local-state ${gitClass}">${esc(gitLabel)}</span><span>分支 ${esc(item.branch || (item.hasGit ? "未知" : "—"))}</span><span>${esc(localAheadBehind(item))}</span></div><button class="button small" data-action="view-local-project" data-id="${esc(item.id)}">查看状态 ${icon("chevron")}</button></article>`;
   }).join("")}</div>` : ui.localProjects ? `<div class="card empty-state">扫描目录中没有发现本地项目。</div>` : `<div class="card local-companion-notice"><strong>${ui.localProjectsStatus === "loading" ? "正在读取本地项目" : "尚未连接本地 Companion"}</strong><p>请确认开机 Companion 已启动，或在本机项目目录运行 <code>python local_companion.py</code>，然后重新扫描。GitHub Pages 通过允许的跨源请求尝试访问本机 127.0.0.1:4174。</p></div>`}</section>`;
   return `<div class="page-heading"><div><div class="eyebrow">工作空间</div><h1>Projects</h1><p>云端保存项目基础资料；本机 Git 状态由当前设备的 Companion 提供。</p></div><div class="heading-actions"><span class="github-overview-status">${esc(connectionLabel)}</span><button class="button" data-action="refresh-github" ${ui.githubRefreshing ? "disabled aria-busy=\"true\"" : ""}>${icon("reset")} 刷新 GitHub 数据</button><button class="button primary" data-action="open-create-project">${icon("plus")} 新建项目</button></div></div>
-    <div class="section-title cloud-project-heading"><div><h2>云端项目资料</h2><p>名称、描述、状态、GitHub URL 和手工备注随账号同步。</p></div></div>
+    <div class="section-title cloud-project-heading"><div><h2>云端项目资料</h2><p>项目资料随账号同步；首页建议置顶 3–5 个项目，最多 5 个。</p></div><span class="project-pin-count">首页置顶 ${pinnedProjectCount}/${MAX_HOME_PROJECT_PINS}</span></div>
+    ${ui.projectPinningAvailable === false ? `<p class="cloud-notice-error project-pin-notice" role="status">跨设备置顶尚未启用。请先在 Supabase 执行 <code>supabase/v3.1-b-project-pinning.sql</code>。</p>` : ""}
     <div class="toolbar"><div class="filter-list">${[["all", "全部项目"], ["active", "进行中"]].map(([filter, label]) => `<button class="filter-button ${ui.projectFilter === filter ? "active" : ""}" data-action="filter-projects" data-filter="${filter}">${label}${filter === "active" && cloudWorkspaceAvailable() ? ` · ${cloudProjects.filter((project) => project.status === "进行中").length}` : ""}</button>`).join("")}</div><span class="muted">${cloudWorkspaceAvailable() ? `${projects.length} 个项目` : esc(dashboardUnavailableMessage())}</span></div>
     ${projects.length ? `<div class="project-cards">${projects.map((project) => {
       const tasks = db.tasks.filter((item) => item.projectId === project.id);
       const done = tasks.filter((item) => item.status === "done").length;
       const recentUpdate = project.githubData?.updatedAt ? `最近更新 ${timeAgo(project.githubData.updatedAt)}` : "";
-      return `<article class="card project-card" data-action="view-project" data-id="${esc(project.id)}" tabindex="0" role="button"><div class="project-card-top"><div class="project-glyph">${esc(initials(project.name))}</div><div class="project-main"><h3>${esc(project.name)}</h3><div class="project-meta">${esc(project.stage || "尚未设置阶段")}</div></div>${statusPill(project.status)}</div><p>${esc(project.description || "还没有项目简介。")}</p><div class="project-card-bottom"><span>${esc(project.next || "下一步待定")}</span><span>${done}/${tasks.length} 完成</span></div><div class="project-card-github"><span>${esc(githubStatus(project))}</span>${recentUpdate ? `<span>${esc(recentUpdate)}</span>` : ""}</div></article>`;
+      const pending = ui.projectPinUpdatingId === project.id;
+      const pinDisabled = ui.projectPinningAvailable !== true || ui.cloud.status !== "synced" || cloudSyncRunning || Boolean(cloudSyncTimer) || Boolean(ui.projectPinUpdatingId) || (!project.isPinned && pinnedProjectCount >= MAX_HOME_PROJECT_PINS);
+      const pinTitle = ui.projectPinningAvailable === false ? "先执行置顶字段增量 SQL" : pinnedProjectCount >= MAX_HOME_PROJECT_PINS && !project.isPinned ? "最多置顶 5 个项目" : "置顶状态会同步到当前账号的其他设备";
+      const taskProgress = tasks.length ? `关联任务完成 ${done}/${tasks.length}` : "进度未填写";
+      return `<article class="card project-card"><div class="project-card-top"><div class="project-glyph">${esc(initials(project.name))}</div><div class="project-main"><button class="project-card-title" data-action="view-project" data-id="${esc(project.id)}">${esc(project.name)}</button><div class="project-meta">当前阶段：${esc(project.stage || "未填写")}</div></div>${statusPill(project.status)}</div><p>${esc(project.description || "还没有项目简介。")}</p><div class="project-card-bottom"><span>下一步：${esc(project.next || "未填写")}</span><span>${esc(taskProgress)}</span></div><div class="project-card-github"><span>${esc(githubStatus(project))}</span>${recentUpdate ? `<span>${esc(recentUpdate)}</span>` : ""}</div><div class="project-card-actions"><button class="button quiet small" data-action="view-project" data-id="${esc(project.id)}">打开项目</button><button class="button quiet small project-pin-toggle" data-action="toggle-project-pin" data-id="${esc(project.id)}" aria-pressed="${project.isPinned === true}" title="${esc(pinTitle)}" ${pinDisabled ? "disabled" : ""}>${pending ? "保存中…" : project.isPinned === true ? "取消置顶" : "置顶到首页"}</button></div></article>`;
     }).join("")}</div>` : `<div class="card empty-state"><strong>${cloudWorkspaceAvailable() ? ui.projectFilter === "active" ? "没有进行中的项目" : "还没有项目" : "Supabase 资料不可用"}</strong>${cloudWorkspaceAvailable() ? "创建第一个项目来整理任务与资料。" : esc(dashboardUnavailableMessage())}${ui.projectFilter === "all" ? `<br><br><button class="button primary" data-action="open-create-project">${icon("plus")} 新建项目</button>` : ""}</div>`}${ui.projectFilter === "all" ? localSection : ""}`;
 }
 
@@ -1641,7 +1657,7 @@ function submitRecord(form) {
   const now = new Date().toISOString();
 
   if (kind === "project") {
-    const item = { ...values, id: existing?.id || uid("project"), createdAt: existing?.createdAt || now, updatedAt: now, status: values.status || "计划中" };
+    const item = { ...values, ...(typeof existing?.isPinned === "boolean" ? { isPinned: existing.isPinned } : {}), id: existing?.id || uid("project"), createdAt: existing?.createdAt || now, updatedAt: now, status: values.status || "计划中" };
     if (existing) {
       const repositoryChanged = existing.github !== item.github;
       Object.assign(existing, item);
@@ -1774,6 +1790,51 @@ function handleSearchResult(kind, id) {
   if (kind === "task") go("tasks");
 }
 
+async function toggleProjectPinInCloud(projectId) {
+  const project = projectById(projectId);
+  if (!project || !workspaceActive) return;
+  if (ui.projectPinningAvailable !== true) {
+    toast(ui.projectPinningAvailable === false ? "请先执行置顶字段增量 SQL" : "连接云端并完成同步后才能置顶");
+    return;
+  }
+  if (ui.cloud.status !== "synced" || cloudSyncRunning || cloudSyncTimer || ui.projectPinUpdatingId) {
+    toast("请等待云端同步完成后再修改置顶状态");
+    return;
+  }
+
+  const result = nextProjectPinState(db.projects, projectId);
+  if (!result.changed) {
+    if (result.reason === "limit") toast("首页最多置顶 5 个项目");
+    return;
+  }
+
+  ui.projectPinUpdatingId = projectId;
+  render();
+  try {
+    await setCloudProjectPinned(workspaceAuth.client, workspaceAuth.userId, projectId, result.isPinned);
+    if (!workspaceActive) return;
+    project.isPinned = result.isPinned;
+    const baselineProject = cloudBaseline?.projects?.find((item) => item.id === projectId);
+    if (baselineProject) baselineProject.isPinned = result.isPinned;
+    workspaceDataRevision += 1;
+    ui.cloud.status = "synced";
+    ui.cloud.error = "";
+    ui.cloud.lastSyncedAt = new Date().toISOString();
+    if (!saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt, ui.projectPinningAvailable)) {
+      ui.cloud.error = "置顶已保存到云端，但浏览器未能更新离线缓存";
+    }
+    toast(result.isPinned ? "已置顶到首页，并同步到其他设备" : "已取消置顶，并同步到其他设备");
+  } catch (error) {
+    if (!workspaceActive) return;
+    ui.cloud.status = navigator.onLine === false ? "offline" : "error";
+    ui.cloud.error = typeof error?.message === "string" ? error.message : "置顶状态保存失败";
+    toast("置顶状态保存失败；云端项目资料未更改");
+  } finally {
+    ui.projectPinUpdatingId = null;
+    if (workspaceActive) render();
+  }
+}
+
 function handleAction(action, element, sourceEvent) {
   const id = element.dataset.id;
   if (action === "close-confirm-backdrop" && element !== sourceEvent?.target) return;
@@ -1804,6 +1865,7 @@ function handleAction(action, element, sourceEvent) {
     const suggestion = ui.dashboardSuggestion;
     if (suggestion?.allowedActions?.includes("send_to_codex")) openCodexConfirmation(suggestion);
   }
+  if (action === "toggle-project-pin") { void toggleProjectPinInCloud(id); return; }
   if (action === "create-suggestion-task") createSuggestionTask(ui.dashboardSuggestion);
   if (action === "view-suggestion-project") goLocalProject(id);
   if (action === "show-codex-result" && ui.codex) {

@@ -1,10 +1,10 @@
 # Daniel Workspace
 
-私人 AI 工作台 V3.1-A。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI；私人 Home 以当前账号的项目和任务为主，访客首页仍以「企业 AI 自动化工作台」定位展示异常处理价值，并通过 TK-1001 说明异常发现、固定规则、SOP、决策与完成的闭环。私人模式不提供演示数据重置；共享数据层拒绝重置，云端写入路径拒绝内置 Mock 记录。访客内容明确标注为规则驱动的模拟数据，不调用真实 AI 或代表真实企业案例；访客重置仍只影响当前页面内存，不读取 Supabase 配置或会话，也不连接 Companion、Codex 或 AI。
+私人 AI 工作台 V3.1-B。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI；私人 Home 只展示 3–5 个手动置顶项目，其他项目保留在 Projects。项目卡展示已填写的阶段和下一步、真实关联任务计数，以及经过 HTTP/HTTPS 校验的 GitHub 和线上网站入口；缺少信息时显示“未填写”。访客首页仍以「企业 AI 自动化工作台」定位展示异常处理价值，并通过 TK-1001 说明异常发现、固定规则、SOP、决策与完成的闭环。私人模式不提供演示数据重置；共享数据层拒绝重置，云端写入路径拒绝内置 Mock 记录。访客内容明确标注为规则驱动的模拟数据，不调用真实 AI 或代表真实企业案例；访客重置仍只影响当前页面内存，不读取 Supabase 配置或会话，也不连接 Companion、Codex 或 AI。
 
 ## Status
 
-- **Stage:** V3.1-A private Home implementation is committed to `main`; the public Pages URL serves `V3.1-A`. Authenticated interaction and Companion-offline browser acceptance remain pending because the production tab stopped responding after reload. V3.0-C visitor showcase and the previously confirmed V2.8 sync remain in place.
+- **Stage:** V3.1-B Home pinning is on `main`. Per-project cross-device pinning requires the additive SQL in `supabase/v3.1-b-project-pinning.sql`; until that field exists, pin controls stay disabled and existing sync remains available. The user confirmed Step 2-A imported 26 real projects alongside 3 Mock projects (29 total) and verified cross-device sync. Production pin interaction remains pending SQL application and authenticated browser acceptance.
 - **Last updated:** 2026-10-10
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -68,7 +68,7 @@ node .\node_modules\wrangler\bin\wrangler.js secret put AI_API_KEY --config .\cl
 
 ## V1 功能
 
-- Dashboard：以当前 Supabase 账号的真实项目/任务为主，提供可点击的项目/任务统计、进行中重点项目、优先待办、最近项目和低权重 AI 建议；Companion 仅作可选增强并显示在次要位置。云同步失败时标明缓存状态、错误和重试入口，不将本机草稿当作云端资料。
+- Dashboard：以当前 Supabase 账号的真实项目/任务为主，提供可点击的项目/任务统计、3–5 个手动置顶项目、优先待办和既有低权重建议；未置顶项目只在 Projects 显示。项目阶段、下一步和任务完成计数只用已保存数据，缺失内容显示“未填写”；外部链接仅接受 HTTP/HTTPS。Companion 仅作可选增强并显示在次要位置。云同步失败时标明缓存状态、错误和重试入口，不将本机草稿当作云端资料。
 - Projects：项目列表与详情，可创建、编辑、删除项目、查看 TODO、关联资料及活动。删除项目会保留关联记录并解除关联。
 - GitHub 仓库只读摘要：可刷新公开仓库的名称、默认分支、仓库更新时间、最新 commit、Pages 地址、可见性和本地刷新时间；刷新失败时保留上次成功数据。
 - 本地项目只读扫描：Projects 显示 `D:\_Codex project` 下发现的项目、路径、Git 仓库/分支/clean 状态、HEAD、`origin/main`、领先/落后、最近本地 commit、常见文档文件是否存在和最后修改时间。
@@ -114,7 +114,7 @@ node .\node_modules\wrangler\bin\wrangler.js secret put AI_API_KEY --config .\cl
 | `index.html` | 应用入口 |
 | `src/auth/gate.js` | Login-first session validation and private app boot |
 | `src/auth/config.js` | Public Supabase URL and anon/publishable-key configuration |
-| `src/cloud/sync.js` | RLS-bound workspace queries, safe local migration, cloud diff and offline rebase |
+| `src/cloud/sync.js` | RLS-bound workspace queries, safe local migration, cloud diff and project pin updates |
 | `src/app.js` | 页面、交互、Assistant 面板和记录表单 |
 | `src/version.js` | 单一页面版本来源 |
 | `src/suggestions.js` | Dashboard 建议结构、安全动作列表和 Codex Task 模板 |
@@ -129,6 +129,7 @@ node .\node_modules\wrangler\bin\wrangler.js secret put AI_API_KEY --config .\cl
 | `local_companion.py` | loopback 静态服务和 `D:\_Codex project` 只读扫描 API |
 | `src/store.js` | localStorage 读写与演示数据恢复 |
 | `supabase/v2.6-cloud-sync.sql` | V2.6 tables, per-user RLS, grants, and updated_at triggers |
+| `supabase/v3.1-b-project-pinning.sql` | Additive `workspace_projects.is_pinned` field for cross-device Home pinning |
 | `supabase/v2.8-task-suggestions.sql` | Task description/source-key columns and idempotency index |
 | `src/mock-data.js` | 初始演示数据 |
 | `assets/styles.css` | 浅色/深色响应式界面 |

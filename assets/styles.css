@@ -131,28 +131,22 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 .dashboard-stat-link { display: flex; align-items: center; gap: 4px; margin-top: auto; color: #a9a3db; font-size: 9px; }
 .dashboard-stat-link .icon { width: 12px; height: 12px; }
 .dashboard-focus-section { padding: 17px; }
-.dashboard-focus-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.dashboard-focus-grid-single { grid-template-columns: minmax(0, 1fr); }
-.dashboard-focus-card { appearance: none; display: grid; align-content: start; gap: 11px; min-width: 0; padding: 14px; border: 1px solid var(--line-soft); border-radius: 9px; color: inherit; background: var(--panel-raised); text-align: left; cursor: pointer; transition: border-color .16s ease, transform .16s ease; }
-.dashboard-focus-grid-single .dashboard-focus-card { grid-template-areas: "top name next" "progress track next" "footer footer footer"; grid-template-columns: minmax(180px, .8fr) minmax(260px, 1.3fr) minmax(240px, .9fr); align-items: center; column-gap: 20px; row-gap: 12px; }
-.dashboard-focus-grid-single .dashboard-focus-top { grid-area: top; }
-.dashboard-focus-grid-single .dashboard-focus-name { grid-area: name; }
-.dashboard-focus-grid-single .dashboard-focus-next { grid-area: next; min-height: 0; }
-.dashboard-focus-grid-single .dashboard-progress-meta { grid-area: progress; }
-.dashboard-focus-grid-single .dashboard-progress-track { grid-area: track; }
-.dashboard-focus-grid-single .dashboard-focus-footer { grid-area: footer; }
+.dashboard-focus-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 235px), 1fr)); gap: 10px; }
+.dashboard-focus-card { display: grid; align-content: start; gap: 10px; min-width: 0; padding: 14px; border: 1px solid var(--line-soft); border-radius: 9px; color: inherit; background: var(--panel-raised); transition: border-color .16s ease, transform .16s ease; }
 .dashboard-focus-card:hover { transform: translateY(-1px); border-color: #57536f; }
 .dashboard-focus-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .dashboard-focus-top .project-glyph { width: 30px; height: 30px; }
-.dashboard-focus-name { overflow: hidden; color: #e7e6ed; font-size: 14px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.dashboard-focus-next { display: grid; gap: 4px; min-height: 42px; color: #dedee3; font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
-.dashboard-focus-next small { color: var(--muted); font-size: 9px; }
-.dashboard-progress-meta { display: flex; justify-content: space-between; gap: 8px; color: #a4a5ae; font-size: 9px; }
-.dashboard-progress-meta > span { color: #777984; white-space: nowrap; }
-.dashboard-progress-track { height: 4px; overflow: hidden; border-radius: 99px; background: #33343b; }
-.dashboard-progress-track > span { display: block; height: 100%; border-radius: inherit; background: #a9a3ed; }
-.dashboard-focus-footer { display: flex; align-items: center; justify-content: flex-end; gap: 4px; color: #a9a3db; font-size: 9px; }
-.dashboard-focus-footer .icon { width: 12px; height: 12px; }
+.dashboard-focus-name { appearance: none; padding: 0; border: 0; color: var(--text); background: transparent; text-align: left; font-size: 14px; font-weight: 650; cursor: pointer; }
+.dashboard-focus-name:hover { color: #b7b0ef; }
+.dashboard-project-detail { display: grid; gap: 4px; color: var(--text); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.dashboard-project-detail small { color: var(--muted); font-size: 9px; }
+.dashboard-progress-meta { color: var(--muted); font-size: 9px; }
+.dashboard-project-links, .dashboard-focus-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.dashboard-project-link { display: inline-flex; align-items: center; gap: 4px; color: #b7b0ef; font-size: 10px; text-decoration: none; }
+.dashboard-project-link:hover { text-decoration: underline; }
+.dashboard-project-link.unavailable { color: var(--muted); }
+.dashboard-project-link .icon { width: 11px; height: 11px; }
+.dashboard-focus-actions { justify-content: space-between; padding-top: 7px; border-top: 1px solid var(--line-soft); }
 .dashboard-recent-status { flex: 0 0 auto; }
 .dashboard-recent-status .status-pill { min-height: 19px; font-size: 8px; }
 .dashboard-ai-suggestion { display: grid; gap: 7px; padding: 14px 16px; }
@@ -287,15 +281,19 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 .filter-button:hover { color: #d3d4da; background: #1a1b1f; }
 .filter-button.active { color: #e3e1fa; border-color: #3f3c55; background: #24222f; }
 .project-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.project-card { padding: 16px; cursor: pointer; transition: border-color .16s, transform .16s; }
+.project-card { padding: 16px; transition: border-color .16s, transform .16s; }
 .project-card:hover { border-color: #464450; transform: translateY(-1px); }
 .project-card-top { display: flex; align-items: flex-start; gap: 11px; }
 .project-card .project-glyph { width: 37px; height: 37px; font-size: 12px; }
 .project-card .project-main { padding-top: 2px; }
-.project-card h3 { margin: 0; font: 600 13px Manrope, sans-serif; letter-spacing: -.02em; }
+.project-card-title { appearance: none; display: block; padding: 0; border: 0; color: var(--text); background: transparent; text-align: left; font: 600 13px Manrope, sans-serif; letter-spacing: -.02em; cursor: pointer; }
+.project-card-title:hover { color: #b7b0ef; }
 .project-card p { min-height: 34px; margin: 13px 0 15px; color: #a0a1aa; font-size: 10px; line-height: 1.65; }
 .project-card-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 11px; border-top: 1px solid var(--line-soft); color: #777984; font-size: 9px; }
 .project-card-github { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; color: var(--muted); font-size: 9px; }
+.project-card-actions { display: flex; justify-content: space-between; gap: 8px; margin-top: 12px; }
+.project-pin-count { color: var(--muted); font-size: 10px; white-space: nowrap; }
+.project-pin-notice { margin: 10px 0; }
 .github-overview-status, .github-status { color: var(--muted); font-size: 9px; white-space: nowrap; }
 .github-info-card { padding: 16px; margin-bottom: 14px; }
 .github-info-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }

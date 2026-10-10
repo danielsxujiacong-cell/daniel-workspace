@@ -3,18 +3,22 @@ import { createDemoData } from "../mock-data.js";
 const collections = {
   projects: {
     table: "workspace_projects",
-    fields: ["name", "description", "status", "stage", "next", "github", "url", "notes"],
-    toRow: (item, userId) => ({
-      ...baseRow(item, userId),
-      name: item.name || "",
-      description: item.description || "",
-      status: item.status || "计划中",
-      stage: item.stage || "",
-      next_step: item.next || "",
-      github_url: item.github || "",
-      website_url: item.url || "",
-      notes: item.notes || "",
-    }),
+    fields: ["name", "description", "status", "stage", "next", "github", "url", "notes", "isPinned"],
+    toRow: (item, userId) => {
+      const row = {
+        ...baseRow(item, userId),
+        name: item.name || "",
+        description: item.description || "",
+        status: item.status || "计划中",
+        stage: item.stage || "",
+        next_step: item.next || "",
+        github_url: item.github || "",
+        website_url: item.url || "",
+        notes: item.notes || "",
+      };
+      // Pin state is updated in isolation; bulk project sync must not overwrite another device's pin.
+      return row;
+    },
     fromRow: (row) => ({
       ...baseRecord(row),
       name: row.name || "",
@@ -25,6 +29,7 @@ const collections = {
       github: row.github_url || "",
       url: row.website_url || "",
       notes: row.notes || "",
+      isPinned: typeof row.is_pinned === "boolean" ? row.is_pinned : undefined,
     }),
   },
   tasks: {
@@ -142,7 +147,14 @@ function snapshot(workspace) {
 }
 
 function canonicalEqual(kind, left, right) {
-  return JSON.stringify(normalizedRecord(kind, left)) === JSON.stringify(normalizedRecord(kind, right));
+  const leftRecord = normalizedRecord(kind, left);
+  const rightRecord = normalizedRecord(kind, right);
+  if (kind === "projects") {
+    // Pin state has a dedicated single-field update path; do not let it trigger a project upsert.
+    delete leftRecord.isPinned;
+    delete rightRecord.isPinned;
+  }
+  return JSON.stringify(leftRecord) === JSON.stringify(rightRecord);
 }
 
 function demoRecords() {
@@ -181,15 +193,37 @@ export function hasCloudRecords(workspace) {
   return Object.keys(collections).some((kind) => Array.isArray(workspace?.[kind]) && workspace[kind].length > 0);
 }
 
+export async function checkProjectPinningSupport(client) {
+  const { error } = await client.from("workspace_projects").select("is_pinned").limit(0);
+  if (!error) return true;
+  if (error.code === "42703" || error.code === "PGRST204" || /is_pinned/i.test(error.message || "")) return false;
+  throw error;
+}
+
 export async function loadCloudWorkspace(client, userId, shouldContinue = () => true) {
-  const entries = await Promise.all(Object.entries(collections).map(async ([kind, spec]) => {
-    if (!shouldContinue()) throw new Error("Workspace is no longer active");
-    const { data, error } = await client.from(spec.table).select("*").eq("user_id", userId);
-    if (error) throw error;
-    return [kind, (data || []).map(spec.fromRow)];
-  }));
+  const [entries, projectPinningAvailable] = await Promise.all([
+    Promise.all(Object.entries(collections).map(async ([kind, spec]) => {
+      if (!shouldContinue()) throw new Error("Workspace is no longer active");
+      const { data, error } = await client.from(spec.table).select("*").eq("user_id", userId);
+      if (error) throw error;
+      return [kind, (data || []).map(spec.fromRow)];
+    })),
+    checkProjectPinningSupport(client),
+  ]);
   const data = Object.fromEntries(entries);
-  return { data, baseline: snapshot(data) };
+  return { data, baseline: snapshot(data), projectPinningAvailable };
+}
+
+export async function setCloudProjectPinned(client, userId, projectId, isPinned) {
+  const { data, error } = await client.from("workspace_projects")
+    .update({ is_pinned: isPinned === true })
+    .eq("user_id", userId)
+    .eq("id", String(projectId))
+    .select("id")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data?.id) throw new Error("项目不存在或当前账号无权更新置顶状态");
+  return true;
 }
 
 export async function saveCloudChanges(client, userId, workspace, baseline, shouldContinue = () => true) {
@@ -270,7 +304,19 @@ export function mergePendingCloudChanges(remoteWorkspace, cachedWorkspace, basel
       const local = cached.get(id);
       const changed = previous ? (!local || !canonicalEqual(kind, previous, local)) : Boolean(local);
       if (!changed) continue;
-      if (local) remote.set(id, { ...local });
+      if (local) {
+        const remoteItem = remote.get(id);
+        const localPin = typeof local.isPinned === "boolean" ? local.isPinned : null;
+        const previousPin = typeof previous?.isPinned === "boolean" ? previous.isPinned : null;
+        const preserveRemotePin = kind === "projects"
+          && previous
+          && remoteItem
+          && localPin === previousPin;
+        remote.set(id, {
+          ...local,
+          ...(preserveRemotePin ? { isPinned: remoteItem.isPinned } : {}),
+        });
+      }
       else remote.delete(id);
     }
     merged[kind] = [...remote.values()];

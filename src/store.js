@@ -49,9 +49,9 @@ export function loadCloudCache(userId) {
   }
 }
 
-export function saveCloudCache(userId, data, baseline, lastSyncedAt = "") {
+export function saveCloudCache(userId, data, baseline, lastSyncedAt = "", projectPinningAvailable = null) {
   try {
-    localStorage.setItem(CLOUD_CACHE_KEY, JSON.stringify({ version: 1, userId, data, baseline, lastSyncedAt }));
+    localStorage.setItem(CLOUD_CACHE_KEY, JSON.stringify({ version: 1, userId, data, baseline, lastSyncedAt, projectPinningAvailable }));
     return true;
   } catch {
     return false;
