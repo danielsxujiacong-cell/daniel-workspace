@@ -3,10 +3,10 @@
 ## Current state
 
 - **Updated:** 2026-10-10
-- **Stage:** V3.2 Step 2-C.1 Home pinned project card presentation; commit and production acceptance are pending.
+- **Stage:** V3.2 Step 2-C.1 Home pinned project card presentation pushed to `main` as `c990388`.
 - **Step 2-B:** The user confirmed Supabase sync works with 29 projects and 5 pinned projects. No Supabase schema or records changed in Step 2-C.
 - **GitHub activity:** Home automatically reads only pinned public repositories and shows the latest commit summary/time plus the last-seven-day commit count. Automatic reads use a one-hour device-local cache; the Home button forces a refresh. Private/inaccessible and local-only projects show unavailable status. Snapshots are written only to the existing local cloud cache, never sent through Supabase sync.
-- **Step 2-C verification:** The focused GitHub/pinning tests pass 14/14; JS syntax and `git diff --check` pass. Cache-busted production HTML, gate, app, GitHub API module, and CSS on `workspace.danielxu.cn` returned HTTP 200 with the V3.2 markers. In this follow-up, the available browser is signed in and shows 29 projects and 5 pins; presentation and responsive card acceptance will be checked after deployment. No Supabase data or sync code is in scope.
+- **Step 2-C.1 verification:** GitHub/pinning tests pass 14/14; JS syntax and `git diff --check` pass. Cache-busted production HTML, gate, app, and CSS on `workspace.danielxu.cn` returned HTTP 200 and contain the new release markers. Before deployment, the signed-in browser showed 29 projects and 5 pins. Browser automation timed out on the post-deployment reload, so rendered desktop/mobile acceptance remains unverified; production static assets are confirmed. No Supabase data or sync code was changed.
 - **Sync recovery:** A successful authenticated cloud read now replaces cached Projects, Tasks, Knowledge, and Decisions; it does not merge stale cached business rows or automatically run bulk upsert/delete. Device-only settings, activities, local paths/GitHub snapshots, and remote pin values are preserved. Normal later edits compare against the freshly read cloud baseline.
 - **Pins:** Current Home shows 5/5 selected pins: AI Investment Dashboard, Daniel Project Hub, Daniel website, Daniel Workspace, and n8n AI Automation Lab. Pin updates use only `is_pinned`, scoped by authenticated `user_id` and project ID.
 - **Read timeout:** Five authenticated, read-only requests (the four Workspace tables plus pin-column probe) share a 15-second AbortSignal deadline. A stalled request now aborts and reports its table; the existing cache remains display-only and no write/delete fallback runs. An anonymous REST probe returned 401 as expected and did not inspect user data.
@@ -15,4 +15,4 @@
 
 ## Next action
 
-After pushing Step 2-C.1, verify the signed-in 29-project/5-pin Home at desktop and mobile widths: empty details are omitted, latest public Commit summary/time/link are prominent, seven-day counts remain secondary, and the private/local status is concise. Confirm status, GitHub/site shortcuts, pin actions, and manual refresh remain available. Do not edit/delete records or change Supabase settings during acceptance.
+On the signed-in 29-project/5-pin Home, visually check desktop and mobile widths: empty details are omitted, latest public Commit summary/time/link are prominent, seven-day counts remain secondary, and the private/local status is concise. Confirm status, GitHub/site shortcuts, pin actions, and manual refresh remain available. Browser automation timed out after deployment, so this final visual check remains pending. Do not edit/delete records or change Supabase settings during acceptance.
