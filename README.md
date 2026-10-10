@@ -4,7 +4,7 @@
 
 ## Status
 
-- **Stage:** V3.1-B Home pinning and sync recovery. The user reports the additive pinning SQL has been run and Supabase holds 29 projects; three pins are AI Investment Dashboard, Daniel Workspace, and PPT Studio. A production console trace identified and fixed the render exception that hid the sync result after cloud data loaded. Live post-fix success and second-device verification remain pending.
+- **Stage:** V3.1-B Home pinning and sync recovery. The user reports the additive pinning SQL has been run and Supabase holds 29 projects; three pins are AI Investment Dashboard, Daniel Workspace, and PPT Studio. The production render exception is fixed. A freshly signed-in Codex browser now reports “已同步” with 29 projects and 5/5 pins; ordinary Chrome Incognito and second-device verification remain unconfirmed.
 - **Last updated:** 2026-10-10
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
