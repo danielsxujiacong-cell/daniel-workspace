@@ -4,7 +4,7 @@
 
 ## Status
 
-- **Stage:** V3.1-B Home pinning and sync recovery. The user reports the additive pinning SQL has been run and Supabase holds 29 projects; three live pins are AI Investment Dashboard, Daniel Workspace, and PPT Studio. On successful login/retry, Supabase now replaces cached business records without replaying stale cache writes/deletes. Authenticated refresh, re-login, and second-device verification remain pending deployment of the recovery fix.
+- **Stage:** V3.1-B Home pinning and sync recovery. The user reports the additive pinning SQL has been run and Supabase holds 29 projects; three pins are AI Investment Dashboard, Daniel Workspace, and PPT Studio. The recovery fix is deployed. A signed-in refresh showed 29 project cards and all three pins, but the cloud status remained “正在读取”; live cloud completion, re-login, and second-device verification are not yet confirmed.
 - **Last updated:** 2026-10-10
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
