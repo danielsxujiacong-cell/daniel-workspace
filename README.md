@@ -4,7 +4,7 @@
 
 ## Status
 
-- **Stage:** V3.1-B Home pinning is on `main`. Per-project cross-device pinning requires the additive SQL in `supabase/v3.1-b-project-pinning.sql`; until that field exists, pin controls stay disabled and existing sync remains available. The user confirmed Step 2-A imported 26 real projects alongside 3 Mock projects (29 total) and verified cross-device sync. Production pin interaction remains pending SQL application and authenticated browser acceptance.
+- **Stage:** V3.1-B Home pinning and sync recovery. The user reports the additive pinning SQL has been run and Supabase holds 29 projects; three live pins are AI Investment Dashboard, Daniel Workspace, and PPT Studio. On successful login/retry, Supabase now replaces cached business records without replaying stale cache writes/deletes. Authenticated refresh, re-login, and second-device verification remain pending deployment of the recovery fix.
 - **Last updated:** 2026-10-10
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 

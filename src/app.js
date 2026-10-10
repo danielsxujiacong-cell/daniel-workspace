@@ -35,7 +35,6 @@ const {
   hasLocalMigrationCandidates,
   insertCloudProjects,
   loadCloudWorkspace,
-  mergePendingCloudChanges,
   migrateLocalWorkspace,
   preserveDeviceOnlyData,
   saveCloudChanges,
@@ -311,8 +310,8 @@ async function initializeCloudSync() {
     if (!workspaceActive) return;
 
     if (cloudCacheActive && cloudBaseline) {
-      activateCloudWorkspace(remote, db, true);
-      await syncCloudNow();
+      // A fresh authenticated read is authoritative. Never replay stale cache on reconnect.
+      activateCloudWorkspace(remote, db);
       return;
     }
 
