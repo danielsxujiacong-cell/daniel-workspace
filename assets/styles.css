@@ -133,6 +133,13 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 .dashboard-focus-section { padding: 17px; }
 .dashboard-focus-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .dashboard-focus-card { appearance: none; display: grid; align-content: start; gap: 11px; min-width: 0; padding: 14px; border: 1px solid var(--line-soft); border-radius: 9px; color: inherit; background: var(--panel-raised); text-align: left; cursor: pointer; transition: border-color .16s ease, transform .16s ease; }
+.dashboard-focus-grid-single .dashboard-focus-card { grid-template-areas: "top name next" "progress track next" "footer footer footer"; grid-template-columns: minmax(180px, .8fr) minmax(260px, 1.3fr) minmax(240px, .9fr); align-items: center; column-gap: 20px; row-gap: 12px; }
+.dashboard-focus-grid-single .dashboard-focus-top { grid-area: top; }
+.dashboard-focus-grid-single .dashboard-focus-name { grid-area: name; }
+.dashboard-focus-grid-single .dashboard-focus-next { grid-area: next; min-height: 0; }
+.dashboard-focus-grid-single .dashboard-progress-meta { grid-area: progress; }
+.dashboard-focus-grid-single .dashboard-progress-track { grid-area: track; }
+.dashboard-focus-grid-single .dashboard-focus-footer { grid-area: footer; }
 .dashboard-focus-card:hover { transform: translateY(-1px); border-color: #57536f; }
 .dashboard-focus-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .dashboard-focus-top .project-glyph { width: 30px; height: 30px; }
@@ -429,6 +436,7 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
   .dashboard-stat-card { min-height: 96px; padding: 12px; }
   .dashboard-stat-card > strong { font-size: 24px; }
   .dashboard-focus-grid { grid-template-columns: minmax(0, 1fr); }
+  .dashboard-focus-grid-single .dashboard-focus-card { grid-template-areas: "top" "name" "next" "progress" "track" "footer"; grid-template-columns: minmax(0, 1fr); align-items: stretch; column-gap: 0; }
   .dashboard-focus-name { white-space: normal; }
   .dashboard-ai-footer { align-items: flex-start; flex-direction: column; }
   .dashboard-ai-footer > span { white-space: normal; }

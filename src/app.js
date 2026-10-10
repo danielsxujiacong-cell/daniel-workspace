@@ -1086,7 +1086,8 @@ function renderDashboardFocusProjects(projects, tasks, dataAvailable) {
   const empty = !dataAvailable
     ? dashboardUnavailableMessage()
     : "目前没有进行中的项目。可以在 Projects 中查看其他项目或开始一个项目。";
-  return `<section class="card card-pad dashboard-focus-section grid-span-12"><div class="section-title"><h2>我的重点项目</h2><button class="button quiet small" data-action="dashboard-stat" data-target-page="projects" data-filter="active">查看全部进行中 ${icon("arrow")}</button></div>${cards ? `<div class="dashboard-focus-grid">${cards}</div>` : `<div class="empty-state">${esc(empty)}${dataAvailable ? `<button class="button quiet small" data-action="dashboard-stat" data-target-page="projects" data-filter="all">查看全部项目</button>` : ""}</div>`}</section>`;
+  const focusGridClass = active.length === 1 ? "dashboard-focus-grid dashboard-focus-grid-single" : "dashboard-focus-grid";
+  return `<section class="card card-pad dashboard-focus-section grid-span-12"><div class="section-title"><h2>我的重点项目</h2><button class="button quiet small" data-action="dashboard-stat" data-target-page="projects" data-filter="active">查看全部进行中 ${icon("arrow")}</button></div>${cards ? `<div class="${focusGridClass}">${cards}</div>` : `<div class="empty-state">${esc(empty)}${dataAvailable ? `<button class="button quiet small" data-action="dashboard-stat" data-target-page="projects" data-filter="all">查看全部项目</button>` : ""}</div>`}</section>`;
 }
 
 function renderDashboardSections(model, dataAvailable) {
