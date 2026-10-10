@@ -20,7 +20,7 @@ const {
 const { buildAssistantContext } = await import("./ai/context.js");
 const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = await import("./ai/service.js");
 const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = await import("./suggestions.js");
-const { fetchPublicGitHubRepository, parsePublicGitHubRepository } = await import("./github/public-api.js");
+const { fetchPublicGitHubRepository, GITHUB_CACHE_TTL_MS, isGitHubSnapshotFresh, parsePublicGitHubRepository } = await import("./github/public-api.js?v=3.2");
 const { buildCloudDashboardModel, buildLocalDashboardModel, compareLocalProjects, taskPriorityLabel } = await import("./dashboard.js");
 const {
   countPinnedProjects,
@@ -90,6 +90,7 @@ const ui = {
   chatBusy: false,
   githubRefreshing: false,
   githubRefreshStatus: {},
+  githubRefreshAttemptAt: {},
   cloud: {
     status: navigator.onLine === false ? "offline" : "loading",
     lastSyncedAt: cloudCache?.lastSyncedAt || "",
@@ -251,6 +252,7 @@ function formattedTimestamp(iso) {
 function githubStatus(project) {
   const requestStatus = ui.githubRefreshStatus[project.id];
   if (requestStatus === "loading") return "正在刷新";
+  if (requestStatus === "unavailable") return "暂不可公开读取";
   if (requestStatus === "error") return "请求失败 · 保留已有数据";
   if (!parsePublicGitHubRepository(project.github)) return "未配置公开仓库";
   return project.githubData?.refreshedAt ? "GitHub 已连接" : "尚未刷新";
@@ -1075,6 +1077,35 @@ function dashboardStatCard(label, value, page, filter, description) {
   return `<button class="dashboard-stat-card" data-action="dashboard-stat" data-target-page="${page}" data-filter="${filter}" aria-label="${esc(`${label}：${value}，${description}`)}"><span class="dashboard-stat-label">${esc(label)}</span><strong>${value}</strong><span class="dashboard-stat-link">${esc(description)} ${icon("chevron")}</span></button>`;
 }
 
+function renderDashboardGitHubActivity(project) {
+  const repository = parsePublicGitHubRepository(project.github);
+  const requestStatus = ui.githubRefreshStatus[project.id];
+  const snapshot = project.githubData;
+  if (!repository) {
+    return `<div class="dashboard-github-activity unavailable"><small>GitHub 开发动态</small><span>私有仓库或仅本地项目暂不可读取</span></div>`;
+  }
+
+  const latest = snapshot?.latestCommit;
+  const commitUrl = safeExternal(latest?.url || "");
+  const commitDate = latest?.committedAt && !Number.isNaN(new Date(latest.committedAt).getTime())
+    ? `<span>提交时间 · <time datetime="${esc(latest.committedAt)}" title="${esc(formattedTimestamp(latest.committedAt))}">${esc(timeAgoIfKnown(latest.committedAt))}</time></span>`
+    : `<span>提交时间 · 未知</span>`;
+  const recentCount = Number.isInteger(snapshot?.recentSevenDayCommitCount) && snapshot.recentSevenDayCommitCount >= 0
+    ? `${snapshot.recentSevenDayCommitCount} 次提交`
+    : "待更新";
+  const commitContent = snapshot
+    ? `<span class="dashboard-github-summary">${esc(latest?.message || "暂无提交记录")}</span>${commitDate}<span>最近 7 天 · ${esc(recentCount)}</span>${commitUrl ? `<a class="dashboard-project-link" href="${esc(commitUrl)}" target="_blank" rel="noopener noreferrer">查看 Commit ${icon("external")}</a>` : ""}<small class="dashboard-github-cache">上次读取 ${esc(timeAgoIfKnown(snapshot.refreshedAt))}</small>`
+    : `<span>${requestStatus === "loading" ? "正在读取公开仓库…" : requestStatus === "unavailable" ? "私有仓库或无法公开访问，暂不可读取" : requestStatus === "error" ? "GitHub 暂时无法访问，可手动刷新" : "等待首页自动读取"}</span>`;
+  const refreshNotice = requestStatus === "loading" && snapshot
+    ? "正在刷新，保留上次成功数据"
+    : requestStatus === "unavailable" && snapshot
+      ? "仓库暂不可公开读取，显示上次成功数据"
+      : requestStatus === "error" && snapshot
+        ? "请求失败，显示上次成功数据"
+        : "";
+  return `<div class="dashboard-github-activity" aria-live="polite"><small>GitHub 开发动态 · ${esc(repository.fullName)}</small>${commitContent}${refreshNotice ? `<span class="dashboard-github-notice">${esc(refreshNotice)}</span>` : ""}</div>`;
+}
+
 function renderDashboardFocusProjects(projects, tasks, dataAvailable) {
   const pinnedCount = countPinnedProjects(projects);
   const pinned = dataAvailable && ui.projectPinningAvailable === true ? getHomePinnedProjects(projects) : [];
@@ -1087,7 +1118,7 @@ function renderDashboardFocusProjects(projects, tasks, dataAvailable) {
     const links = (url, label) => url
       ? `<a class="dashboard-project-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)} ${icon("external")}</a>`
       : `<span class="dashboard-project-link unavailable">${esc(label)} 未填写</span>`;
-    return `<article class="dashboard-focus-card"><div class="dashboard-focus-top"><span class="project-glyph">${esc(initials(project.name))}</span>${statusPill(project.status)}</div><button class="dashboard-focus-name" data-action="view-project" data-id="${esc(project.id)}">${esc(project.name)}</button><div class="dashboard-project-detail"><small>当前阶段</small><span>${esc(project.stage || "未填写")}</span></div><div class="dashboard-project-detail"><small>下一步</small><span>${esc(project.next || "未填写")}</span></div><div class="dashboard-progress-meta">${projectTasks.length ? `关联任务完成 ${done}/${projectTasks.length}` : "进度未填写"}</div><div class="dashboard-project-links">${links(github, "GitHub")}${links(website, "线上网站")}</div><div class="dashboard-focus-actions"><button class="button quiet small" data-action="view-project" data-id="${esc(project.id)}">打开项目</button><button class="button quiet small" data-action="toggle-project-pin" data-id="${esc(project.id)}" ${pending ? "disabled aria-busy=\"true\"" : ""}>${pending ? "保存中…" : "取消置顶"}</button></div></article>`;
+    return `<article class="dashboard-focus-card"><div class="dashboard-focus-top"><span class="project-glyph">${esc(initials(project.name))}</span>${statusPill(project.status)}</div><button class="dashboard-focus-name" data-action="view-project" data-id="${esc(project.id)}">${esc(project.name)}</button><div class="dashboard-project-detail"><small>当前阶段</small><span>${esc(project.stage || "未填写")}</span></div><div class="dashboard-project-detail"><small>下一步</small><span>${esc(project.next || "未填写")}</span></div><div class="dashboard-progress-meta">${projectTasks.length ? `关联任务完成 ${done}/${projectTasks.length}` : "进度未填写"}</div>${renderDashboardGitHubActivity(project)}<div class="dashboard-project-links">${links(github, "GitHub")}${links(website, "线上网站")}</div><div class="dashboard-focus-actions"><button class="button quiet small" data-action="view-project" data-id="${esc(project.id)}">打开项目</button><button class="button quiet small" data-action="toggle-project-pin" data-id="${esc(project.id)}" ${pending ? "disabled aria-busy=\"true\"" : ""}>${pending ? "保存中…" : "取消置顶"}</button></div></article>`;
   }).join("");
   const empty = !dataAvailable
     ? dashboardUnavailableMessage()
@@ -1098,7 +1129,7 @@ function renderDashboardFocusProjects(projects, tasks, dataAvailable) {
         : pinnedCount < MIN_HOME_PROJECT_PINS
           ? pinnedCount ? `已置顶 ${pinnedCount} 个项目；再置顶 ${MIN_HOME_PROJECT_PINS - pinnedCount} 个后，首页会显示项目卡片。` : "还没有置顶项目。请在 Projects 中手动选择 3–5 个项目。"
           : "当前没有可显示的置顶项目。";
-  return `<section class="card card-pad dashboard-focus-section grid-span-12"><div class="section-title"><div><h2>首页置顶项目</h2><p class="minor">仅显示手动置顶项目 · ${pinnedCount}/${MAX_HOME_PROJECT_PINS}</p></div><button class="button quiet small" data-action="dashboard-stat" data-target-page="projects" data-filter="all">在 Projects 管理 ${icon("arrow")}</button></div>${cards ? `<div class="dashboard-focus-grid">${cards}</div>` : `<div class="empty-state">${esc(empty)}${dataAvailable ? `<br><br><button class="button quiet small" data-action="dashboard-stat" data-target-page="projects" data-filter="all">查看 Projects ${icon("arrow")}</button>` : ""}</div>`}</section>`;
+  return `<section class="card card-pad dashboard-focus-section grid-span-12"><div class="section-title"><div><h2>首页置顶项目</h2><p class="minor">仅显示手动置顶项目 · ${pinnedCount}/${MAX_HOME_PROJECT_PINS} · GitHub 数据缓存 1 小时</p></div><div class="heading-actions"><button class="button quiet small" data-action="refresh-home-github" ${ui.githubRefreshing || !pinned.length ? "disabled aria-busy=\"true\"" : ""}>${icon("reset")} 刷新动态</button><button class="button quiet small" data-action="dashboard-stat" data-target-page="projects" data-filter="all">在 Projects 管理 ${icon("arrow")}</button></div></div>${cards ? `<div class="dashboard-focus-grid">${cards}</div>` : `<div class="empty-state">${esc(empty)}${dataAvailable ? `<br><br><button class="button quiet small" data-action="dashboard-stat" data-target-page="projects" data-filter="all">查看 Projects ${icon("arrow")}</button>` : ""}</div>`}</section>`;
 }
 
 function renderDashboardSections(model, dataAvailable) {
@@ -1144,8 +1175,9 @@ function renderProjects() {
   const pinnedProjectCount = countPinnedProjects(cloudProjects);
   const configured = cloudProjects.filter((project) => parsePublicGitHubRepository(project.github));
   const hasRequestFailure = configured.some((project) => ui.githubRefreshStatus[project.id] === "error");
+  const hasUnavailableRepository = configured.some((project) => ui.githubRefreshStatus[project.id] === "unavailable");
   const connectedCount = configured.filter((project) => project.githubData?.refreshedAt).length;
-  const connectionLabel = hasRequestFailure ? "GitHub 请求失败" : !configured.length ? "GitHub 未配置" : connectedCount ? "GitHub 已连接" : "GitHub 待刷新";
+  const connectionLabel = hasRequestFailure ? "GitHub 请求失败" : hasUnavailableRepository ? "部分仓库暂不可读取" : !configured.length ? "GitHub 未配置" : connectedCount ? "GitHub 已连接" : "GitHub 待刷新";
   const localProjects = ui.localProjects?.items || [];
   const scanLabel = ui.localProjectsStatus === "ready" ? `${localProjects.length} 个项目 · 在线` : ui.localProjectsStatus === "loading" ? (ui.localProjects ? `检测中 · 缓存 ${localProjects.length} 个` : "正在连接") : ui.localProjects ? `${localProjects.length} 个项目 · 可能过期` : "Companion 离线";
   const canSyncLocalProjects = ui.localProjectsStatus === "ready" && ui.localProjectsSource === "live" && ui.cloud.status === "synced" && !cloudSyncRunning && !cloudSyncTimer;
@@ -1558,6 +1590,14 @@ function render() {
   app.innerHTML = `${renderNav()}<main class="main-shell"><header class="topbar"><div class="breadcrumbs"><span>Daniel Workspace</span><span class="crumb-sep">/</span><strong>${esc(pageTitle())}</strong></div><div class="search-wrap"><div class="search-box">${icon("search")}<input id="global-search" type="search" value="${esc(ui.query)}" placeholder="搜索项目、资料、决策或任务…" autocomplete="off" aria-label="全局搜索"/><kbd class="search-hint">Ctrl K</kbd></div><div id="search-results"></div></div><div class="topbar-actions"><span class="today-label">${formattedDate()}</span><button class="cloud-sync-indicator ${esc(ui.cloud.status)}" data-action="retry-cloud-sync" title="点击重新检查 Supabase 同步状态" aria-live="polite" ${["loading", "syncing", "migrating"].includes(ui.cloud.status) ? "disabled" : ""}>${esc(cloudStatusLabel())}</button><button class="icon-button theme-toggle" data-action="toggle-theme" title="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式" aria-label="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式">${icon(document.documentElement.dataset.theme === "light" ? "moon" : "sun")}</button><button class="icon-button" data-action="open-assistant" title="打开 AI Assistant" aria-label="打开 AI Assistant">${icon("sparkle")}</button><button class="button quiet small logout-button" data-action="logout">退出登录</button></div></header><div class="content">${renderCloudNotice()}${page}</div></main>${renderAssistant()}${renderModal()}<div class="toast-region" id="toast-region" aria-live="polite"></div>`;
   renderSearchResults();
   if (ui.assistantOpen) document.querySelector("#assistant-messages")?.scrollTo({ top: 999999, behavior: "smooth" });
+  if (ui.page === "home" && cloudWorkspaceAvailable() && ui.projectPinningAvailable === true && !ui.githubRefreshing) {
+    const stalePinnedIds = getHomePinnedProjects(db.projects)
+      .filter((project) => parsePublicGitHubRepository(project.github) && !isGitHubSnapshotFresh(project.githubData)
+        && ui.githubRefreshStatus[project.id] !== "loading"
+        && !(ui.githubRefreshAttemptAt[project.id] && Date.now() - ui.githubRefreshAttemptAt[project.id] < GITHUB_CACHE_TTL_MS))
+      .map((project) => project.id);
+    if (stalePinnedIds.length) void refreshGitHubData(stalePinnedIds, { force: false, silent: true });
+  }
 }
 
 function toast(message) {
@@ -1690,13 +1730,17 @@ function submitRecord(form) {
   toast(existing ? "修改已保存" : ({ project: "项目已创建", task: "任务已创建", knowledge: "资料已保存", decision: "决策已保存" })[kind]);
 }
 
-async function refreshGitHubData(projectId = null) {
+async function refreshGitHubData(projectIds = null, { force = true, silent = false } = {}) {
   if (ui.githubRefreshing) return;
-  const candidates = (projectId ? db.projects.filter((project) => project.id === projectId) : db.projects)
+  const selectedIds = projectIds === null ? null : new Set(Array.isArray(projectIds) ? projectIds : [projectIds]);
+  const candidates = db.projects
+    .filter((project) => !selectedIds || selectedIds.has(project.id))
     .map((project) => ({ project, githubUrl: project.github, repository: parsePublicGitHubRepository(project.github) }))
-    .filter((item) => item.repository);
+    .filter(({ project, repository }) => repository && (force || (!isGitHubSnapshotFresh(project.githubData)
+      && ui.githubRefreshStatus[project.id] !== "loading"
+      && !(ui.githubRefreshAttemptAt[project.id] && Date.now() - ui.githubRefreshAttemptAt[project.id] < GITHUB_CACHE_TTL_MS))));
   if (!candidates.length) {
-    toast("没有可读取的公开 GitHub 仓库地址");
+    if (!silent) toast("没有可读取的公开 GitHub 仓库地址");
     return;
   }
 
@@ -1707,11 +1751,14 @@ async function refreshGitHubData(projectId = null) {
   const results = await Promise.all(candidates.map(async ({ project, githubUrl }) => {
     try {
       const snapshot = await fetchPublicGitHubRepository(githubUrl);
-      if (projectById(project.id) === project && project.github === githubUrl) project.githubData = snapshot;
+      const currentProject = projectById(project.id);
+      if (currentProject?.github === githubUrl) currentProject.githubData = snapshot;
       ui.githubRefreshStatus[project.id] = "connected";
+      delete ui.githubRefreshAttemptAt[project.id];
       return "success";
-    } catch {
-      ui.githubRefreshStatus[project.id] = "error";
+    } catch (error) {
+      ui.githubRefreshAttemptAt[project.id] = Date.now();
+      ui.githubRefreshStatus[project.id] = error?.status === 404 ? "unavailable" : "error";
       return "error";
     }
   }));
@@ -1719,8 +1766,9 @@ async function refreshGitHubData(projectId = null) {
   ui.githubRefreshing = false;
   const successCount = results.filter((result) => result === "success").length;
   const errorCount = results.length - successCount;
-  if (successCount) persist();
+  if (successCount) saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt, ui.projectPinningAvailable);
   render();
+  if (silent) return;
   if (errorCount && successCount) toast(`已更新 ${successCount} 个仓库；${errorCount} 个请求失败，已有数据已保留`);
   else if (errorCount) toast("GitHub 请求失败，已有数据已保留");
   else toast(`GitHub 数据已更新（${successCount} 个仓库）`);
@@ -2006,6 +2054,7 @@ function handleAction(action, element, sourceEvent) {
     }
   }
   if (action === "refresh-github") refreshGitHubData(id || null);
+  if (action === "refresh-home-github") refreshGitHubData(getHomePinnedProjects(db.projects).map((project) => project.id));
   if (action === "refresh-local-projects") refreshLocalProjects();
 }
 

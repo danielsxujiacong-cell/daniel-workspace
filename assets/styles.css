@@ -141,6 +141,11 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 .dashboard-project-detail { display: grid; gap: 4px; color: var(--text); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
 .dashboard-project-detail small { color: var(--muted); font-size: 9px; }
 .dashboard-progress-meta { color: var(--muted); font-size: 9px; }
+.dashboard-github-activity { display: grid; gap: 5px; min-width: 0; padding: 9px 10px; border: 1px solid var(--line-soft); border-radius: 7px; background: color-mix(in srgb, var(--panel) 72%, transparent); color: var(--text); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+.dashboard-github-activity > small { color: var(--muted); font-size: 9px; }
+.dashboard-github-activity.unavailable { color: var(--muted); }
+.dashboard-github-summary { font-weight: 600; }
+.dashboard-github-cache, .dashboard-github-notice { color: var(--muted); font-size: 9px; }
 .dashboard-project-links, .dashboard-focus-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
 .dashboard-project-link { display: inline-flex; align-items: center; gap: 4px; color: #b7b0ef; font-size: 10px; text-decoration: none; }
 .dashboard-project-link:hover { text-decoration: underline; }

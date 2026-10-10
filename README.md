@@ -1,10 +1,10 @@
 # Daniel Workspace
 
-私人 AI 工作台 V3.1-B。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI；私人 Home 只展示 3–5 个手动置顶项目，其他项目保留在 Projects。项目卡展示已填写的阶段和下一步、真实关联任务计数，以及经过 HTTP/HTTPS 校验的 GitHub 和线上网站入口；缺少信息时显示“未填写”。访客首页仍以「企业 AI 自动化工作台」定位展示异常处理价值，并通过 TK-1001 说明异常发现、固定规则、SOP、决策与完成的闭环。私人模式不提供演示数据重置；共享数据层拒绝重置，云端写入路径拒绝内置 Mock 记录。访客内容明确标注为规则驱动的模拟数据，不调用真实 AI 或代表真实企业案例；访客重置仍只影响当前页面内存，不读取 Supabase 配置或会话，也不连接 Companion、Codex 或 AI。
+私人 AI 工作台 V3.2。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI；私人 Home 只展示 3–5 个手动置顶项目，其他项目保留在 Projects。项目卡展示已填写的阶段和下一步、真实关联任务计数，以及经过 HTTP/HTTPS 校验的 GitHub 和线上网站入口；缺少信息时显示“未填写”。首页置顶项目会自动读取公开 GitHub 最近提交、提交时间和最近 7 天提交数，快照保存在当前设备并缓存 1 小时；手动刷新可立即读取，私有或仅本地项目明确标为暂不可读取。访客首页仍以「企业 AI 自动化工作台」定位展示异常处理价值，并通过 TK-1001 说明异常发现、固定规则、SOP、决策与完成的闭环。私人模式不提供演示数据重置；共享数据层拒绝重置，云端写入路径拒绝内置 Mock 记录。访客内容明确标注为规则驱动的模拟数据，不调用真实 AI 或代表真实企业案例；访客重置仍只影响当前页面内存，不读取 Supabase 配置或会话，也不连接 Companion、Codex 或 AI。
 
 ## Status
 
-- **Stage:** V3.1-B Home pinning and sync recovery. The user reports the additive pinning SQL has been run and Supabase holds 29 projects; three pins are AI Investment Dashboard, Daniel Workspace, and PPT Studio. The production render exception is fixed. A freshly signed-in Codex browser now reports “已同步” with 29 projects and 5/5 pins; ordinary Chrome Incognito and second-device verification remain unconfirmed.
+- **Stage:** V3.2 Step 2-C public GitHub activity for Home pins. Step 2-B was accepted with Supabase sync working, 29 projects, and 5 pinned projects. Home reads public commit activity only; GitHub snapshots remain in the device-local cloud cache and are excluded from Supabase writes.
 - **Last updated:** 2026-10-10
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
