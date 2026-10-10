@@ -3,8 +3,10 @@
 ## Current state
 
 - **Updated:** 2026-10-10
-- **Stage:** V3.1-B cache-recovery, bounded read, and post-read rendering fix is pushed to `main` and verified in the signed-in Codex browser.
-- **Step 2-A:** The user reports 29 existing Supabase projects and has already run the additive project-pinning SQL. Supabase MCP was not used.
+- **Stage:** V3.2 Step 2-C public GitHub development activity is pushed to `main` as `f8ca063`.
+- **Step 2-B:** The user confirmed Supabase sync works with 29 projects and 5 pinned projects. No Supabase schema or records changed in Step 2-C.
+- **GitHub activity:** Home automatically reads only pinned public repositories and shows the latest commit summary/time plus the last-seven-day commit count. Automatic reads use a one-hour device-local cache; the Home button forces a refresh. Private/inaccessible and local-only projects show unavailable status. Snapshots are written only to the existing local cloud cache, never sent through Supabase sync.
+- **Step 2-C verification:** The focused GitHub/pinning tests pass 14/14; JS syntax and `git diff --check` pass. Cache-busted production HTML, gate, app, GitHub API module, and CSS on `workspace.danielxu.cn` returned HTTP 200 with the V3.2 markers. The available browser showed the login page, so authenticated Home/card and refresh-link interaction acceptance remains pending; no credentials were entered.
 - **Sync recovery:** A successful authenticated cloud read now replaces cached Projects, Tasks, Knowledge, and Decisions; it does not merge stale cached business rows or automatically run bulk upsert/delete. Device-only settings, activities, local paths/GitHub snapshots, and remote pin values are preserved. Normal later edits compare against the freshly read cloud baseline.
 - **Pins:** Current Home shows 5/5 selected pins: AI Investment Dashboard, Daniel Project Hub, Daniel website, Daniel Workspace, and n8n AI Automation Lab. Pin updates use only `is_pinned`, scoped by authenticated `user_id` and project ID.
 - **Read timeout:** Five authenticated, read-only requests (the four Workspace tables plus pin-column probe) share a 15-second AbortSignal deadline. A stalled request now aborts and reports its table; the existing cache remains display-only and no write/delete fallback runs. An anonymous REST probe returned 401 as expected and did not inspect user data.
@@ -13,4 +15,4 @@
 
 ## Next action
 
-If strict browser acceptance is needed, repeat the same signed-in refresh in ordinary Chrome Incognito and confirm “已同步”, 29 projects, and all five pins; use a second signed-in device for cross-device reading. Do not edit/delete records during acceptance.
+In a signed-in browser, confirm the 29-project/5-pin Home and verify an available public repository card, its Commit link, manual refresh, and the unavailable label for a private or local-only project. Do not edit/delete records or change Supabase settings during acceptance.
