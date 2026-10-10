@@ -1082,28 +1082,28 @@ function renderDashboardGitHubActivity(project) {
   const requestStatus = ui.githubRefreshStatus[project.id];
   const snapshot = project.githubData;
   if (!repository) {
-    return `<div class="dashboard-github-activity unavailable"><small>GitHub 开发动态</small><span>私有仓库或仅本地项目暂不可读取</span></div>`;
+    return `<div class="dashboard-github-activity unavailable"><small>GitHub 动态</small><span>私有/本地暂不可读</span></div>`;
   }
 
   const latest = snapshot?.latestCommit;
   const commitUrl = safeExternal(latest?.url || "");
   const commitDate = latest?.committedAt && !Number.isNaN(new Date(latest.committedAt).getTime())
-    ? `<span>提交时间 · <time datetime="${esc(latest.committedAt)}" title="${esc(formattedTimestamp(latest.committedAt))}">${esc(timeAgoIfKnown(latest.committedAt))}</time></span>`
-    : `<span>提交时间 · 未知</span>`;
+    ? `<time class="dashboard-github-time" datetime="${esc(latest.committedAt)}" title="${esc(formattedTimestamp(latest.committedAt))}">${esc(timeAgoIfKnown(latest.committedAt))}</time>`
+    : `<span class="dashboard-github-time">时间未知</span>`;
   const recentCount = Number.isInteger(snapshot?.recentSevenDayCommitCount) && snapshot.recentSevenDayCommitCount >= 0
-    ? `${snapshot.recentSevenDayCommitCount} 次提交`
-    : "待更新";
+    ? `近 7 天 ${snapshot.recentSevenDayCommitCount} 次提交`
+    : "近 7 天待更新";
   const commitContent = snapshot
-    ? `<span class="dashboard-github-summary">${esc(latest?.message || "暂无提交记录")}</span>${commitDate}<span>最近 7 天 · ${esc(recentCount)}</span>${commitUrl ? `<a class="dashboard-project-link" href="${esc(commitUrl)}" target="_blank" rel="noopener noreferrer">查看 Commit ${icon("external")}</a>` : ""}<small class="dashboard-github-cache">上次读取 ${esc(timeAgoIfKnown(snapshot.refreshedAt))}</small>`
-    : `<span>${requestStatus === "loading" ? "正在读取公开仓库…" : requestStatus === "unavailable" ? "私有仓库或无法公开访问，暂不可读取" : requestStatus === "error" ? "GitHub 暂时无法访问，可手动刷新" : "等待首页自动读取"}</span>`;
+    ? `<span class="dashboard-github-summary">${esc(latest?.message || "暂无提交记录")}</span><div class="dashboard-github-meta">${commitDate}${commitUrl ? `<a class="dashboard-project-link" href="${esc(commitUrl)}" target="_blank" rel="noopener noreferrer">查看 Commit ${icon("external")}</a>` : ""}</div><small class="dashboard-github-count">${esc(recentCount)}</small>`
+    : `<span class="dashboard-github-status">${requestStatus === "loading" ? "正在读取…" : requestStatus === "unavailable" ? "仓库暂不可读" : requestStatus === "error" ? "读取失败" : "等待读取"}</span>`;
   const refreshNotice = requestStatus === "loading" && snapshot
-    ? "正在刷新，保留上次成功数据"
+    ? "刷新中 · 显示缓存"
     : requestStatus === "unavailable" && snapshot
-      ? "仓库暂不可公开读取，显示上次成功数据"
+      ? "暂不可读 · 显示缓存"
       : requestStatus === "error" && snapshot
-        ? "请求失败，显示上次成功数据"
+        ? "读取失败 · 显示缓存"
         : "";
-  return `<div class="dashboard-github-activity" aria-live="polite"><small>GitHub 开发动态 · ${esc(repository.fullName)}</small>${commitContent}${refreshNotice ? `<span class="dashboard-github-notice">${esc(refreshNotice)}</span>` : ""}</div>`;
+  return `<div class="dashboard-github-activity" aria-live="polite"><small class="dashboard-github-heading">最近提交 · ${esc(repository.fullName)}</small>${commitContent}${refreshNotice ? `<small class="dashboard-github-notice">${esc(refreshNotice)}</small>` : ""}</div>`;
 }
 
 function renderDashboardFocusProjects(projects, tasks, dataAvailable) {
@@ -1112,13 +1112,17 @@ function renderDashboardFocusProjects(projects, tasks, dataAvailable) {
   const cards = pinned.map((project) => {
     const projectTasks = tasks.filter((task) => task.projectId === project.id);
     const done = projectTasks.filter((task) => task.status === "done").length;
+    const stage = typeof project.stage === "string" ? project.stage.trim() : "";
+    const next = typeof project.next === "string" ? project.next.trim() : "";
+    const hasStage = stage && stage !== "未填写";
+    const hasNext = next && next !== "未填写";
     const github = safeExternal(project.github);
     const website = safeExternal(project.url);
     const pending = ui.projectPinUpdatingId === project.id;
     const links = (url, label) => url
       ? `<a class="dashboard-project-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)} ${icon("external")}</a>`
       : `<span class="dashboard-project-link unavailable">${esc(label)} 未填写</span>`;
-    return `<article class="dashboard-focus-card"><div class="dashboard-focus-top"><span class="project-glyph">${esc(initials(project.name))}</span>${statusPill(project.status)}</div><button class="dashboard-focus-name" data-action="view-project" data-id="${esc(project.id)}">${esc(project.name)}</button><div class="dashboard-project-detail"><small>当前阶段</small><span>${esc(project.stage || "未填写")}</span></div><div class="dashboard-project-detail"><small>下一步</small><span>${esc(project.next || "未填写")}</span></div><div class="dashboard-progress-meta">${projectTasks.length ? `关联任务完成 ${done}/${projectTasks.length}` : "进度未填写"}</div>${renderDashboardGitHubActivity(project)}<div class="dashboard-project-links">${links(github, "GitHub")}${links(website, "线上网站")}</div><div class="dashboard-focus-actions"><button class="button quiet small" data-action="view-project" data-id="${esc(project.id)}">打开项目</button><button class="button quiet small" data-action="toggle-project-pin" data-id="${esc(project.id)}" ${pending ? "disabled aria-busy=\"true\"" : ""}>${pending ? "保存中…" : "取消置顶"}</button></div></article>`;
+    return `<article class="dashboard-focus-card"><div class="dashboard-focus-top"><span class="project-glyph">${esc(initials(project.name))}</span>${statusPill(project.status)}</div><button class="dashboard-focus-name" data-action="view-project" data-id="${esc(project.id)}">${esc(project.name)}</button>${hasStage ? `<div class="dashboard-project-detail"><small>当前阶段</small><span>${esc(stage)}</span></div>` : ""}${hasNext ? `<div class="dashboard-project-detail"><small>下一步</small><span>${esc(next)}</span></div>` : ""}${projectTasks.length ? `<div class="dashboard-progress-meta">关联任务完成 ${done}/${projectTasks.length}</div>` : ""}${renderDashboardGitHubActivity(project)}<div class="dashboard-project-links">${links(github, "GitHub")}${links(website, "线上网站")}</div><div class="dashboard-focus-actions"><button class="button quiet small" data-action="view-project" data-id="${esc(project.id)}">打开项目</button><button class="button quiet small" data-action="toggle-project-pin" data-id="${esc(project.id)}" ${pending ? "disabled aria-busy=\"true\"" : ""}>${pending ? "保存中…" : "取消置顶"}</button></div></article>`;
   }).join("");
   const empty = !dataAvailable
     ? dashboardUnavailableMessage()

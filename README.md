@@ -1,10 +1,10 @@
 # Daniel Workspace
 
-私人 AI 工作台 V3.2。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI；私人 Home 只展示 3–5 个手动置顶项目，其他项目保留在 Projects。项目卡展示已填写的阶段和下一步、真实关联任务计数，以及经过 HTTP/HTTPS 校验的 GitHub 和线上网站入口；缺少信息时显示“未填写”。首页置顶项目会自动读取公开 GitHub 最近提交、提交时间和最近 7 天提交数，快照保存在当前设备并缓存 1 小时；手动刷新可立即读取，私有或仅本地项目明确标为暂不可读取。访客首页仍以「企业 AI 自动化工作台」定位展示异常处理价值，并通过 TK-1001 说明异常发现、固定规则、SOP、决策与完成的闭环。私人模式不提供演示数据重置；共享数据层拒绝重置，云端写入路径拒绝内置 Mock 记录。访客内容明确标注为规则驱动的模拟数据，不调用真实 AI 或代表真实企业案例；访客重置仍只影响当前页面内存，不读取 Supabase 配置或会话，也不连接 Companion、Codex 或 AI。
+私人 AI 工作台 V3.2。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI；私人 Home 只展示 3–5 个手动置顶项目，其他项目保留在 Projects。项目卡只显示真实填写的阶段、下一步和关联任务完成数；没有数据时省略对应行。卡片突出公开 GitHub 最近提交的摘要、时间和 Commit 链接，并以最近 7 天提交数作为辅助信息；GitHub 和线上网站入口仅接受 HTTP/HTTPS。GitHub 快照保存在当前设备并缓存 1 小时；手动刷新可立即读取，私有或仅本地项目显示简短的暂不可读状态。访客首页仍以「企业 AI 自动化工作台」定位展示异常处理价值，并通过 TK-1001 说明异常发现、固定规则、SOP、决策与完成的闭环。私人模式不提供演示数据重置；共享数据层拒绝重置，云端写入路径拒绝内置 Mock 记录。访客内容明确标注为规则驱动的模拟数据，不调用真实 AI 或代表真实企业案例；访客重置仍只影响当前页面内存，不读取 Supabase 配置或会话，也不连接 Companion、Codex 或 AI。
 
 ## Status
 
-- **Stage:** V3.2 Step 2-C public GitHub activity for Home pins. Step 2-B was accepted with Supabase sync working, 29 projects, and 5 pinned projects. Home reads public commit activity only; GitHub snapshots remain in the device-local cloud cache and are excluded from Supabase writes.
+- **Stage:** V3.2 Step 2-C.1 Home pinned project card presentation. Step 2-B was accepted with Supabase sync working, 29 projects, and 5 pinned projects. Home reads public commit activity only; GitHub snapshots remain in the device-local cloud cache and are excluded from Supabase writes.
 - **Last updated:** 2026-10-10
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -68,7 +68,7 @@ node .\node_modules\wrangler\bin\wrangler.js secret put AI_API_KEY --config .\cl
 
 ## V1 功能
 
-- Dashboard：以当前 Supabase 账号的真实项目/任务为主，提供可点击的项目/任务统计、3–5 个手动置顶项目、优先待办和既有低权重建议；未置顶项目只在 Projects 显示。项目阶段、下一步和任务完成计数只用已保存数据，缺失内容显示“未填写”；外部链接仅接受 HTTP/HTTPS。Companion 仅作可选增强并显示在次要位置。云同步失败时标明缓存状态、错误和重试入口，不将本机草稿当作云端资料。
+- Dashboard：以当前 Supabase 账号的真实项目/任务为主，提供可点击的项目/任务统计、3–5 个手动置顶项目、优先待办和既有低权重建议；未置顶项目只在 Projects 显示。项目阶段、下一步和任务完成计数只用已保存数据，无数据时省略对应字段；置顶卡片突出 GitHub 最近提交。外部链接仅接受 HTTP/HTTPS。Companion 仅作可选增强并显示在次要位置。云同步失败时标明缓存状态、错误和重试入口，不将本机草稿当作云端资料。
 - Projects：项目列表与详情，可创建、编辑、删除项目、查看 TODO、关联资料及活动。删除项目会保留关联记录并解除关联。
 - GitHub 仓库只读摘要：可刷新公开仓库的名称、默认分支、仓库更新时间、最新 commit、Pages 地址、可见性和本地刷新时间；刷新失败时保留上次成功数据。
 - 本地项目只读扫描：Projects 显示 `D:\_Codex project` 下发现的项目、路径、Git 仓库/分支/clean 状态、HEAD、`origin/main`、领先/落后、最近本地 commit、常见文档文件是否存在和最后修改时间。

@@ -132,7 +132,7 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 .dashboard-stat-link .icon { width: 12px; height: 12px; }
 .dashboard-focus-section { padding: 17px; }
 .dashboard-focus-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 235px), 1fr)); gap: 10px; }
-.dashboard-focus-card { display: grid; align-content: start; gap: 10px; min-width: 0; padding: 14px; border: 1px solid var(--line-soft); border-radius: 9px; color: inherit; background: var(--panel-raised); transition: border-color .16s ease, transform .16s ease; }
+.dashboard-focus-card { display: grid; align-content: start; gap: 9px; min-width: 0; padding: 12px; border: 1px solid var(--line-soft); border-radius: 9px; color: inherit; background: var(--panel-raised); transition: border-color .16s ease, transform .16s ease; }
 .dashboard-focus-card:hover { transform: translateY(-1px); border-color: #57536f; }
 .dashboard-focus-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .dashboard-focus-top .project-glyph { width: 30px; height: 30px; }
@@ -141,11 +141,13 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 .dashboard-project-detail { display: grid; gap: 4px; color: var(--text); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
 .dashboard-project-detail small { color: var(--muted); font-size: 9px; }
 .dashboard-progress-meta { color: var(--muted); font-size: 9px; }
-.dashboard-github-activity { display: grid; gap: 5px; min-width: 0; padding: 9px 10px; border: 1px solid var(--line-soft); border-radius: 7px; background: color-mix(in srgb, var(--panel) 72%, transparent); color: var(--text); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
+.dashboard-github-activity { display: grid; gap: 6px; min-width: 0; padding: 10px; border: 1px solid var(--line-soft); border-radius: 7px; background: color-mix(in srgb, var(--panel) 72%, transparent); color: var(--text); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
 .dashboard-github-activity > small { color: var(--muted); font-size: 9px; }
 .dashboard-github-activity.unavailable { color: var(--muted); }
-.dashboard-github-summary { font-weight: 600; }
-.dashboard-github-cache, .dashboard-github-notice { color: var(--muted); font-size: 9px; }
+.dashboard-github-heading { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dashboard-github-summary { display: -webkit-box; overflow: hidden; color: var(--text); font-size: 11px; font-weight: 650; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.dashboard-github-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.dashboard-github-time, .dashboard-github-count, .dashboard-github-status, .dashboard-github-notice { color: var(--muted); font-size: 9px; }
 .dashboard-project-links, .dashboard-focus-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
 .dashboard-project-link { display: inline-flex; align-items: center; gap: 4px; color: #b7b0ef; font-size: 10px; text-decoration: none; }
 .dashboard-project-link:hover { text-decoration: underline; }
@@ -440,6 +442,10 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
   .dashboard-stat-card { min-height: 96px; padding: 12px; }
   .dashboard-stat-card > strong { font-size: 24px; }
   .dashboard-focus-grid { grid-template-columns: minmax(0, 1fr); }
+  .dashboard-focus-card { gap: 8px; padding: 11px; }
+  .dashboard-github-activity { gap: 5px; padding: 9px; }
+  .dashboard-focus-section > .section-title { align-items: flex-start; flex-direction: column; }
+  .dashboard-focus-section > .section-title .heading-actions { width: 100%; flex-wrap: wrap; }
   .dashboard-focus-grid-single .dashboard-focus-card { grid-template-areas: "top" "name" "next" "progress" "track" "footer"; grid-template-columns: minmax(0, 1fr); align-items: stretch; column-gap: 0; }
   .dashboard-focus-name { white-space: normal; }
   .dashboard-ai-footer { align-items: flex-start; flex-direction: column; }
