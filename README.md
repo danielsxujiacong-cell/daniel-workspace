@@ -4,7 +4,7 @@
 
 ## Status
 
-- **Stage:** V3.1-A private Home implementation is ready for authenticated real-data acceptance; EdgeOne deploys from `main`. V3.0-C visitor showcase and the previously confirmed V2.8 sync remain in place.
+- **Stage:** V3.1-A private Home implementation is committed to `main`; the public Pages URL serves `V3.1-A`. Authenticated interaction and Companion-offline browser acceptance remain pending because the production tab stopped responding after reload. V3.0-C visitor showcase and the previously confirmed V2.8 sync remain in place.
 - **Last updated:** 2026-10-10
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
