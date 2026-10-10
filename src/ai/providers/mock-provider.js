@@ -85,6 +85,12 @@ export function createMockReply({ message = "", currentPage = "home", currentPro
       : "当前没有可用的本机扫描数据。";
     if (nextIntent.test(message)) {
       if (local) {
+        if (local.source === "cloud") {
+          const nextStep = local.priorityTask
+            ? `优先完成「${local.priorityTask.title}」（${local.priorityTask.priority}优先级${local.priorityTask.due ? `，${local.priorityTask.due}到期` : ""}）。`
+            : `下一步：${local.nextStep}。`;
+          return `根据当前账号的云端资料，建议继续「${local.projectName}」（${local.workspaceStatus}）。${local.lastWork}。${nextStep}`;
+        }
         const github = local.githubData;
         return `根据本地 Git、项目修改时间、GitHub 快照、工作台待办和文档存在状态，今天建议继续「${local.projectName}」。\n最近进展：${local.lastWork}。\n当前状态：${local.workspaceStatus}；${local.gitStatus}；${local.remoteStatus}。\n下一步：${local.nextStep}。${local.priorityTask ? `\n关联待办：${local.priorityTask.title}（${local.priorityTask.priority}优先级${local.priorityTask.due ? `，${local.priorityTask.due}到期` : ""}）。` : ""}${local.missingDocuments?.length ? `\n缺少项目记录：${local.missingDocuments.join("、")}。` : ""}${github ? `\nGitHub：${github.repositoryName || local.projectName}，更新时间 ${github.updatedAt || "未知"}${github.latestCommit?.message ? `，最近 commit「${github.latestCommit.message}」` : ""}。` : ""}\n${healthSummary}`;
       }

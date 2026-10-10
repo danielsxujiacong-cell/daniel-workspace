@@ -58,6 +58,7 @@ let activeLocalScanController = null;
 const ui = {
   page: "home",
   projectId: null,
+  projectFilter: "all",
   localProjectId: null,
   localProjects: scanCache.inventory,
   localProjectsSource: scanCache.inventory ? "cache" : null,
@@ -160,6 +161,7 @@ function projectById(id) { return db.projects.find((project) => project.id === i
 function projectTitle(id) { return projectById(id)?.name || "未关联项目"; }
 function localProjectById(id) { return ui.localProjects?.items?.find((project) => project.id === id) || null; }
 function openTasks() { return db.tasks.filter((task) => task.status !== "done"); }
+function taskMatchesFilter(task, filter) { return filter === "all" || (filter === "done" ? task.status === "done" : task.status !== "done"); }
 function priorityClass(priority = "低") { return priority === "高" ? "high" : priority === "中" ? "medium" : "low"; }
 function statusClass(status = "") { return status === "进行中" ? "active" : status === "暂停" ? "paused" : "planned"; }
 function initials(title = "?") { return [...title.trim()].slice(0, 2).join("") || "?"; }
@@ -226,6 +228,10 @@ function timeAgo(iso) {
   if (hours < 24) return `${hours} 小时前`;
   const days = Math.floor(hours / 24);
   return days < 7 ? `${days} 天前` : date.toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
+}
+
+function timeAgoIfKnown(iso) {
+  return iso && !Number.isNaN(new Date(iso).getTime()) ? timeAgo(iso) : "时间未知";
 }
 
 function formattedTimestamp(iso) {
@@ -647,13 +653,14 @@ function requestDashboardSuggestion(candidate, localProject) {
   }
   const isCloudSuggestion = candidate.source === "cloud";
   const cloudContext = isCloudSuggestion ? buildAssistantContext({
-    data: db,
-    currentPage: "home",
-    projectId: candidate.projectId,
-    localProjects: [],
-    dashboardModel: cloudDashboardModel(),
-    companionStatus: ui.localProjectsStatus,
-  }).relevantContext : null;
+      data: db,
+      currentPage: "home",
+      projectId: candidate.projectId,
+      localProjects: [],
+      dashboardModel: cloudDashboardModel(),
+      companionStatus: ui.localProjectsStatus,
+    }).relevantContext : null;
+  if (cloudContext) delete cloudContext.companion;
   const request = {
     message: isCloudSuggestion
       ? `根据当前账号的云端 Projects、Tasks、Knowledge、Decisions，为首页推荐生成简短建议。严格返回 JSON：{"issueType":"${candidate.issueType}","severity":"low|medium|high","title":"项目或待办名称","reason":"依据云端资料的原因","suggestedAction":"下一步建议"}。issueType 必须保持 ${candidate.issueType}。只根据提供的云端资料判断；尊重任务优先级和期限，不得把低优先级任务描述为最高优先级。不要推断 Companion、本机文件、Git 分支、clean 状态、ahead/behind 或 commit。不要提出本机写文件或执行命令。`
@@ -1044,66 +1051,88 @@ function renderDashboardRecent(model) {
   return `<section class="card card-pad grid-span-12">${sectionTitle("最近活跃项目", `<span class="minor">按本地修改、Git commit、GitHub 更新时间综合排序</span>`)}${projects.length ? `<div class="dashboard-recent-grid">${projects.map(({ item, project, activityAt }) => `<button class="dashboard-recent-project" data-action="view-local-project" data-id="${esc(item.id)}"><span class="project-glyph">${esc(initials(item.name))}</span><span class="dashboard-recent-copy"><strong>${esc(item.name)}</strong><span>${esc(item.lastLocalCommit?.message || project?.githubData?.latestCommit?.message || "暂无 commit 摘要")}</span></span><span class="dashboard-recent-time">${activityAt ? timeAgo(new Date(activityAt).toISOString()) : "时间未知"}</span>${icon("chevron")}</button>`).join("")}</div>` : `<div class="empty-state">扫描中没有项目记录。</div>`}</section>`;
 }
 
-function renderCloudDashboardSections(model) {
-  const counts = model.counts;
+function cloudWorkspaceAvailable() {
+  return cloudCacheActive || ["synced", "syncing"].includes(ui.cloud.status);
+}
+
+function dashboardUnavailableMessage() {
+  if (ui.cloud.status === "loading") return "Supabase 正在读取当前账号资料。";
+  if (ui.cloud.status === "migration") return "Supabase 中暂时没有项目和任务；本机旧资料尚未迁移。";
+  if (ui.cloud.status === "error" || ui.cloud.status === "offline") return "当前没有可用的云端缓存；本机草稿不会计入首页。";
+  return "Supabase 资料尚未载入。";
+}
+
+function dashboardStatCard(label, value, page, filter, description) {
+  return `<button class="dashboard-stat-card" data-action="dashboard-stat" data-target-page="${page}" data-filter="${filter}" aria-label="${esc(`${label}：${value}，${description}`)}"><span class="dashboard-stat-label">${esc(label)}</span><strong>${value}</strong><span class="dashboard-stat-link">${esc(description)} ${icon("chevron")}</span></button>`;
+}
+
+function nextTaskForProject(project, tasks) {
+  return tasks.filter((task) => task.projectId === project.id && task.status !== "done")
+    .sort((left, right) => ({ 高: 0, 中: 1, 低: 2 }[left.priority] ?? 1) - ({ 高: 0, 中: 1, 低: 2 }[right.priority] ?? 1)
+      || new Date(right.updatedAt || right.createdAt || 0) - new Date(left.updatedAt || left.createdAt || 0))[0] || null;
+}
+
+function renderDashboardFocusProjects(projects, tasks, dataAvailable) {
+  const active = projects.filter((project) => project.status === "进行中")
+    .sort((left, right) => new Date(right.updatedAt || right.createdAt || 0) - new Date(left.updatedAt || left.createdAt || 0));
+  const cards = active.map((project) => {
+    const projectTasks = tasks.filter((task) => task.projectId === project.id);
+    const done = projectTasks.filter((task) => task.status === "done").length;
+    const nextTask = nextTaskForProject(project, tasks);
+    const progress = projectTasks.length ? Math.round(done / projectTasks.length * 100) : null;
+    const updatedAt = project.updatedAt || project.createdAt;
+    return `<button class="dashboard-focus-card" data-action="view-project" data-id="${esc(project.id)}"><span class="dashboard-focus-top"><span class="project-glyph">${esc(initials(project.name))}</span>${statusPill(project.status)}</span><strong class="dashboard-focus-name">${esc(project.name)}</strong><span class="dashboard-focus-next"><small>下一步</small>${esc(nextTask?.title || project.next || "尚未记录下一步任务")}</span><span class="dashboard-progress-meta">${projectTasks.length ? `任务进度 ${done}/${projectTasks.length}` : "暂无关联任务"}<span>${esc(timeAgoIfKnown(updatedAt))}</span></span>${progress === null ? "" : `<span class="dashboard-progress-track"><span style="width:${progress}%"></span></span>`}<span class="dashboard-focus-footer">打开项目详情 ${icon("chevron")}</span></button>`;
+  }).join("");
+  const empty = !dataAvailable
+    ? dashboardUnavailableMessage()
+    : "目前没有进行中的项目。可以在 Projects 中查看其他项目或开始一个项目。";
+  return `<section class="card card-pad dashboard-focus-section grid-span-12"><div class="section-title"><h2>我的重点项目</h2><button class="button quiet small" data-action="dashboard-stat" data-target-page="projects" data-filter="active">查看全部进行中 ${icon("arrow")}</button></div>${cards ? `<div class="dashboard-focus-grid">${cards}</div>` : `<div class="empty-state">${esc(empty)}${dataAvailable ? `<button class="button quiet small" data-action="dashboard-stat" data-target-page="projects" data-filter="all">查看全部项目</button>` : ""}</div>`}</section>`;
+}
+
+function renderDashboardSections(model, dataAvailable) {
   const taskRows = model.priorityTasks.length
-    ? model.priorityTasks.map((task) => `<button class="dashboard-alert cloud-task-row" data-page="tasks"><span class="alert-mark"></span><span class="dashboard-alert-copy"><strong>${esc(task.title)}</strong><span>${esc(projectTitle(task.projectId))} · ${esc(taskPriorityLabel(task))}${task.due ? ` · ${esc(task.due)}` : ""}</span></span>${icon("chevron")}</button>`).join("")
-    : `<div class="empty-state">当前没有待办任务。</div>`;
+    ? model.priorityTasks.map((task) => `<button class="dashboard-alert cloud-task-row" data-action="dashboard-stat" data-target-page="tasks" data-filter="todo"><span class="alert-mark"></span><span class="dashboard-alert-copy"><strong>${esc(task.title)}</strong><span>${esc(projectTitle(task.projectId))} · ${esc(taskPriorityLabel(task))}${task.due ? ` · ${esc(task.due)}` : ""}</span></span>${icon("chevron")}</button>`).join("")
+    : `<div class="empty-state">${dataAvailable ? "当前没有未完成任务。" : esc(dashboardUnavailableMessage())}</div>`;
   const projectRows = model.recentProjects.length
-    ? model.recentProjects.map((project) => `<button class="dashboard-recent-project" data-action="view-project" data-id="${esc(project.id)}"><span class="project-glyph">${esc(initials(project.name))}</span><span class="dashboard-recent-copy"><strong>${esc(project.name)}</strong><span>${esc(project.description || project.next || project.status || "云端项目")}</span></span><span class="dashboard-recent-time">${timeAgo(project.updatedAt || project.createdAt)}</span>${icon("chevron")}</button>`).join("")
-    : `<div class="empty-state">Supabase 中暂无项目。</div>`;
-  return `<section class="card dashboard-health grid-span-12"><div class="card-header"><div><h2>云端工作区</h2><p>Supabase · 当前账号真实资料</p></div></div><div class="dashboard-health-grid cloud-dashboard-metrics"><div class="health-metric"><strong>${counts.projects}</strong><span>项目</span></div><div class="health-metric"><strong>${counts.activeProjects}</strong><span>进行中</span></div><div class="health-metric"><strong>${counts.openTasks}</strong><span>待办</span></div><div class="health-metric"><strong>${counts.doneTasks}</strong><span>已完成</span></div></div></section>
-    <section class="card card-pad grid-span-6"><div class="card-header"><h2>优先待办</h2><button class="button quiet small" data-page="tasks">全部任务 ${icon("arrow")}</button></div><div class="dashboard-alert-list">${taskRows}</div></section>
-    <section class="card card-pad grid-span-6"><div class="card-header"><h2>最近项目</h2><button class="button quiet small" data-page="projects">全部项目 ${icon("arrow")}</button></div><div class="dashboard-recent-grid">${projectRows}</div></section>`;
+    ? model.recentProjects.map((project) => `<button class="dashboard-recent-project" data-action="view-project" data-id="${esc(project.id)}"><span class="project-glyph">${esc(initials(project.name))}</span><span class="dashboard-recent-copy"><strong>${esc(project.name)}</strong><span>${esc(project.next || project.description || "尚未记录下一步")}</span></span><span class="dashboard-recent-status">${statusPill(project.status || "未设置")}</span><span class="dashboard-recent-time">${esc(timeAgoIfKnown(project.updatedAt || project.createdAt))}</span>${icon("chevron")}</button>`).join("")
+    : `<div class="empty-state">${dataAvailable ? "Supabase 中暂无项目。" : esc(dashboardUnavailableMessage())}</div>`;
+  return `<section class="card card-pad grid-span-6"><div class="card-header"><h2>优先待办</h2><button class="button quiet small" data-action="dashboard-stat" data-target-page="tasks" data-filter="todo">全部未完成任务 ${icon("arrow")}</button></div><div class="dashboard-alert-list">${taskRows}</div></section>
+    <section class="card card-pad grid-span-6"><div class="card-header"><h2>最近项目</h2><button class="button quiet small" data-action="dashboard-stat" data-target-page="projects" data-filter="all">全部项目 ${icon("arrow")}</button></div><div class="dashboard-recent-grid">${projectRows}</div></section>`;
+}
+
+function renderDashboardSuggestion(today, suggestion) {
+  if (!today || !suggestion) return "";
+  const status = ui.dashboardSuggestionStatus === "generating" ? "GLM 正在整理"
+    : ui.dashboardSuggestionStatus === "ready" ? "GLM-4-Flash"
+      : ui.dashboardSuggestionStatus === "error" ? "暂用云端记录"
+        : getAIStatus().mode === "real" ? "GLM 建议" : "云端资料建议";
+  const action = today.projectId
+    ? `<button class="button quiet small" data-action="view-project" data-id="${esc(today.projectId)}">打开项目 ${icon("chevron")}</button>`
+    : `<button class="button quiet small" data-action="dashboard-stat" data-target-page="tasks" data-filter="todo">查看未完成任务 ${icon("chevron")}</button>`;
+  return `<section class="card dashboard-ai-suggestion grid-span-12"><div class="dashboard-ai-heading"><span>${icon("sparkle")} AI 下一步建议</span><span class="tag">${esc(status)}</span></div><strong>${esc(suggestion.projectName)}</strong><p>${esc(suggestion.suggestedAction)}</p>${suggestion.error ? `<small class="suggestion-error">${esc(suggestion.error)}</small>` : ""}<div class="dashboard-ai-footer"><span>${esc(suggestion.reason)}</span>${action}</div></section>`;
 }
 
 function renderDashboard() {
-  const localModel = localDashboardModel();
-  const cloudModel = localModel ? null : cloudDashboardModel();
-  const model = localModel || cloudModel;
-  const today = model?.todayContinue;
+  const cloudModel = cloudDashboardModel();
+  const dataAvailable = cloudWorkspaceAvailable();
+  const projects = dataAvailable ? db.projects : [];
+  const tasks = dataAvailable ? db.tasks : [];
+  const today = cloudModel.todayContinue;
   const suggestion = suggestionForDashboard(today);
-  const assistantStatus = getAIStatus();
-  const localStatus = ui.localProjectsStatus === "ready" ? `Companion 在线 · ${ui.localProjects.items.length} 个本地项目` : ui.localProjectsStatus === "loading" ? (ui.localProjects ? `正在检测 · 缓存 ${ui.localProjects.items.length} 个项目` : "正在连接 Companion") : ui.localProjects ? `Companion 离线 · 缓存 ${ui.localProjects.items.length} 个项目` : "Companion 离线";
-  const taskExists = suggestion?.source !== "cloud" && suggestion && suggestionTaskExists(suggestion);
-  const codexForSuggestion = ui.codex?.sourceKey === suggestion?.sourceKey ? ui.codex : null;
-  const codexLabel = codexForSuggestion?.status === "complete" ? "查看 Codex 结果"
-    : codexForSuggestion && ["starting", "queued", "running", "applying"].includes(codexForSuggestion.status) ? "Codex 正在处理…"
-      : codexForSuggestion?.status === "awaiting_confirmation" ? "查看 Codex 草稿"
-        : codexForSuggestion?.status === "fallback" ? "查看 Codex Task"
-          : "交给 Codex";
-  const codexDisabled = codexForSuggestion && ["starting", "queued", "running", "applying"].includes(codexForSuggestion.status);
-  const suggestionStatus = ui.dashboardSuggestionStatus === "generating" ? "GLM 正在整理建议…"
-    : ui.dashboardSuggestionStatus === "ready" ? "GLM-4-Flash · 结构化建议"
-      : ui.dashboardSuggestionStatus === "error" ? `GLM 暂不可用 · 显示${suggestion?.source === "cloud" ? "云端" : "扫描"}建议`
-        : assistantStatus.mode === "real" ? "GLM 建议" : suggestion?.source === "cloud" ? "云端资料建议" : "本地建议";
-  const taskLabel = taskExists ? (ui.createdSuggestionKeys.includes(suggestion?.sourceKey) ? "✅ 已创建任务" : "已在 Tasks 中") : "创建任务";
-  const sourceTag = today?.source === "cloud" ? `<span class="tag">基于云端资料</span>` : "";
-  const resolvedTaskReminder = today?.source === "local" && today.resolvedTasks?.length
-    ? `<div class="runner-status" role="status">本机扫描核对到以下任务对应的文件已存在：${today.resolvedTasks.map((task) => `「${esc(task.title)}」对应 ${esc(task.projectName)} 的 ${esc(task.documentLabel)}.md`).join("；")}。请在 Tasks 中确认这些云端任务是否已完成；工作台不会自动修改或删除任务。</div>`
-    : "";
-  const localTaskPriority = today?.source === "local" && today.priorityTask
-    ? `<div class="suggestion-detail"><span>云端任务顺序</span><p>${esc(today.nextStep)}</p></div>`
-    : "";
-  const continuationActions = today?.source === "cloud"
-    ? `${today.projectId ? `<button class="button primary" data-page="projects">查看云端项目 ${icon("arrow")}</button>` : ""}${today.priorityTask ? `<button class="button ${today.projectId ? "quiet" : "primary"}" data-page="tasks">查看云端待办 ${icon("arrow")}</button>` : ""}`
-    : `<button class="button" data-action="view-suggestion-project" data-id="${esc(suggestion?.localProjectId)}">查看项目 ${icon("arrow")}</button><button class="button ${taskExists ? "quiet" : "primary"}" data-action="create-suggestion-task" ${taskExists ? "disabled" : ""}>${taskLabel}</button>${suggestion?.allowedActions.includes("send_to_codex") ? `<button class="button quiet small" data-action="${codexForSuggestion && ["complete", "awaiting_confirmation", "fallback"].includes(codexForSuggestion.status) ? "show-codex-result" : "send-to-codex"}" ${codexDisabled ? "disabled" : ""}>${esc(codexLabel)}</button>` : ""}`;
-  const continueCard = today && suggestion
-    ? `<div class="today-continue-main"><div class="today-continue-copy"><div class="suggestion-kicker">${icon("sparkle", "icon spark")} AI 建议下一步 ${sourceTag} <span class="tag">${esc(suggestionStatus)}</span></div><h2>${esc(suggestion.projectName)}</h2><p class="today-last-work">${esc(today.lastWork)}</p><div class="today-status"><span>${esc(today.workspaceStatus)}</span><span>${esc(today.gitStatus)}</span><span>${esc(today.remoteStatus)}</span></div><div class="suggestion-detail"><span>发现</span><strong>${esc(suggestion.finding)}</strong></div><div class="suggestion-detail"><span>原因</span><p>${esc(suggestion.reason)}</p></div><div class="suggestion-detail suggestion-advice"><span>AI 建议</span><p>${esc(suggestion.suggestedAction)}</p></div>${localTaskPriority}${resolvedTaskReminder}${suggestion.error ? `<p class="suggestion-error">${esc(suggestion.error)}</p>` : ""}${today.source === "cloud" ? "" : renderCodexStatus(suggestion)}</div><div class="today-continue-actions">${continuationActions}</div></div>`
-    : `<div class="local-companion-notice"><strong>${localModel ? "扫描范围内暂无本机项目" : ui.cloud.status === "loading" ? "正在加载云端资料…" : "暂无云端 Projects 或 Tasks"}</strong><p>${localModel ? "工作区扫描成功，但没有可推荐的本地项目。" : "登录后的云端项目和待办会显示在这里；本机扫描不可用时，首页不会生成 Git 或文件状态。"}</p></div>`;
-  const scanControl = ["loading", "ready"].includes(ui.localProjectsStatus)
-    ? `<button class="button quiet small" data-action="refresh-local-projects" ${ui.localProjectsStatus === "loading" ? "disabled" : ""}>${icon("reset")} ${ui.localProjectsStatus === "loading" ? "正在检测" : "重新扫描"}</button>`
-    : "";
-  const cloudMode = !localModel;
-  return `<div class="page-heading"><div><div class="eyebrow">${formattedDate()} · ${cloudMode ? "Supabase 云端工作区" : esc(localStatus)}</div><h1>今天继续什么</h1><p>${cloudMode ? "项目、任务和建议来自当前账号的 Supabase 资料。" : "先看最值得推进的项目，再处理真实的工作区提醒。"}</p></div><div class="heading-actions">${scanControl}<button class="button primary" data-action="open-create-task">${icon("plus")} 新建任务</button></div></div>
-    <div class="dashboard-grid"><section class="today-continue-card grid-span-12">${continueCard}</section>
-      ${cloudMode ? renderCloudDashboardSections(cloudModel) : `${renderDashboardHealth(localModel)}${renderDashboardAlerts(localModel)}${renderDashboardChanges()}${renderDashboardRecent(localModel)}`}
-    </div>${cloudMode ? `<div class="companion-secondary-status" role="status">本机 Companion：${esc(localStatus)}${ui.localProjectsStatus === "ready" ? ` · <button class="text-button" data-action="refresh-local-projects">重新扫描</button>` : ""} · 仅影响本机 Git 与文件状态显示。</div>` : ""}`;
+  const localStatus = ui.localProjectsStatus === "ready" ? `Companion 在线 · ${ui.localProjects.items.length} 个本地项目` : ui.localProjectsStatus === "loading" ? (ui.localProjects ? `检测中 · 缓存 ${ui.localProjects.items.length} 个项目` : "正在连接") : ui.localProjects ? `Companion 离线 · 缓存 ${ui.localProjects.items.length} 个项目` : "Companion 离线";
+  const counts = cloudModel.counts;
+  const values = dataAvailable ? counts : { projects: "—", activeProjects: "—", openTasks: "—", doneTasks: "—" };
+  const stats = `<div class="dashboard-stat-row">${dashboardStatCard("全部项目", values.projects, "projects", "all", "查看所有项目")}${dashboardStatCard("进行中", values.activeProjects, "projects", "active", "查看进行中项目")}${dashboardStatCard("未完成任务", values.openTasks, "tasks", "todo", "查看未完成任务")}${dashboardStatCard("已完成任务", values.doneTasks, "tasks", "done", "查看已完成任务")}</div>`;
+  return `<div class="dashboard-home"><div class="page-heading"><div><div class="eyebrow">${formattedDate()} · ${dataAvailable ? "当前账号资料" : "Supabase 云端资料"}</div><h1>今天继续什么？</h1><p>先看正在推进的项目，再确认今天要完成的任务。</p></div><div class="heading-actions"><button class="button primary" data-action="open-create-task">${icon("plus")} 新建任务</button></div></div>
+    ${stats}<div class="dashboard-grid">${renderDashboardFocusProjects(projects, tasks, dataAvailable)}${renderDashboardSections(cloudModel, dataAvailable)}${renderDashboardSuggestion(today, suggestion)}</div>
+    <div class="companion-secondary-status" role="status">本机 Companion：${esc(localStatus)}${ui.localProjectsStatus === "ready" ? ` · <button class="text-button" data-action="refresh-local-projects">重新扫描</button>` : ""} · 仅增强本机 Git 与文件状态。</div></div>`;
 }
 
 function renderProjects() {
-  const projects = [...db.projects].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const configured = projects.filter((project) => parsePublicGitHubRepository(project.github));
+  const cloudProjects = cloudWorkspaceAvailable() ? [...db.projects] : [];
+  const projects = cloudProjects.filter((project) => ui.projectFilter !== "active" || project.status === "进行中")
+    .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
+  const configured = cloudProjects.filter((project) => parsePublicGitHubRepository(project.github));
   const hasRequestFailure = configured.some((project) => ui.githubRefreshStatus[project.id] === "error");
   const connectedCount = configured.filter((project) => project.githubData?.refreshedAt).length;
   const connectionLabel = hasRequestFailure ? "GitHub 请求失败" : !configured.length ? "GitHub 未配置" : connectedCount ? "GitHub 已连接" : "GitHub 待刷新";
@@ -1120,14 +1149,14 @@ function renderProjects() {
     return `<article class="card local-project-row"><div class="local-project-main"><h3>${esc(item.name)}</h3><code>${esc(item.path)}</code><span class="local-project-link">${linked ? `工作台项目：${esc(linked.name)}` : repository ? `<a href="${esc(repository)}" target="_blank" rel="noreferrer">${esc(repository.replace("https://github.com/", ""))}</a>` : "未关联工作台项目"}</span></div><div class="local-project-meta"><span class="local-state ${gitClass}">${esc(gitLabel)}</span><span>分支 ${esc(item.branch || (item.hasGit ? "未知" : "—"))}</span><span>${esc(localAheadBehind(item))}</span></div><button class="button small" data-action="view-local-project" data-id="${esc(item.id)}">查看状态 ${icon("chevron")}</button></article>`;
   }).join("")}</div>` : ui.localProjects ? `<div class="card empty-state">扫描目录中没有发现本地项目。</div>` : `<div class="card local-companion-notice"><strong>${ui.localProjectsStatus === "loading" ? "正在读取本地项目" : "尚未连接本地 Companion"}</strong><p>请确认开机 Companion 已启动，或在本机项目目录运行 <code>python local_companion.py</code>，然后重新扫描。GitHub Pages 通过允许的跨源请求尝试访问本机 127.0.0.1:4174。</p></div>`}</section>`;
   return `<div class="page-heading"><div><div class="eyebrow">工作空间</div><h1>Projects</h1><p>云端保存项目基础资料；本机 Git 状态由当前设备的 Companion 提供。</p></div><div class="heading-actions"><span class="github-overview-status">${esc(connectionLabel)}</span><button class="button" data-action="refresh-github" ${ui.githubRefreshing ? "disabled aria-busy=\"true\"" : ""}>${icon("reset")} 刷新 GitHub 数据</button><button class="button primary" data-action="open-create-project">${icon("plus")} 新建项目</button></div></div>
-    ${localSection}
     <div class="section-title cloud-project-heading"><div><h2>云端项目资料</h2><p>名称、描述、状态、GitHub URL 和手工备注随账号同步。</p></div></div>
+    <div class="toolbar"><div class="filter-list">${[["all", "全部项目"], ["active", "进行中"]].map(([filter, label]) => `<button class="filter-button ${ui.projectFilter === filter ? "active" : ""}" data-action="filter-projects" data-filter="${filter}">${label}${filter === "active" && cloudWorkspaceAvailable() ? ` · ${cloudProjects.filter((project) => project.status === "进行中").length}` : ""}</button>`).join("")}</div><span class="muted">${cloudWorkspaceAvailable() ? `${projects.length} 个项目` : esc(dashboardUnavailableMessage())}</span></div>
     ${projects.length ? `<div class="project-cards">${projects.map((project) => {
       const tasks = db.tasks.filter((item) => item.projectId === project.id);
       const done = tasks.filter((item) => item.status === "done").length;
       const recentUpdate = project.githubData?.updatedAt ? `最近更新 ${timeAgo(project.githubData.updatedAt)}` : "";
       return `<article class="card project-card" data-action="view-project" data-id="${esc(project.id)}" tabindex="0" role="button"><div class="project-card-top"><div class="project-glyph">${esc(initials(project.name))}</div><div class="project-main"><h3>${esc(project.name)}</h3><div class="project-meta">${esc(project.stage || "尚未设置阶段")}</div></div>${statusPill(project.status)}</div><p>${esc(project.description || "还没有项目简介。")}</p><div class="project-card-bottom"><span>${esc(project.next || "下一步待定")}</span><span>${done}/${tasks.length} 完成</span></div><div class="project-card-github"><span>${esc(githubStatus(project))}</span>${recentUpdate ? `<span>${esc(recentUpdate)}</span>` : ""}</div></article>`;
-    }).join("")}</div>` : `<div class="card empty-state"><strong>还没有项目</strong>创建第一个项目来整理任务与资料。<br><br><button class="button primary" data-action="open-create-project">${icon("plus")} 新建项目</button></div>`}`;
+    }).join("")}</div>` : `<div class="card empty-state"><strong>${cloudWorkspaceAvailable() ? ui.projectFilter === "active" ? "没有进行中的项目" : "还没有项目" : "Supabase 资料不可用"}</strong>${cloudWorkspaceAvailable() ? "创建第一个项目来整理任务与资料。" : esc(dashboardUnavailableMessage())}${ui.projectFilter === "all" ? `<br><br><button class="button primary" data-action="open-create-project">${icon("plus")} 新建项目</button>` : ""}</div>`}${ui.projectFilter === "all" ? localSection : ""}`;
 }
 
 function safeExternal(url) {
@@ -1234,10 +1263,11 @@ function renderLocalProjectDetail() {
 
 function renderTasks() {
   const filters = [["all", "全部"], ["todo", "待办"], ["done", "已完成"]];
-  const tasks = [...db.tasks].filter((task) => ui.taskFilter === "all" || task.status === ui.taskFilter).sort((a, b) => Number(a.status === "done") - Number(b.status === "done") || ["高", "中", "低"].indexOf(a.priority) - ["高", "中", "低"].indexOf(b.priority));
+  const cloudTasks = cloudWorkspaceAvailable() ? db.tasks : [];
+  const tasks = [...cloudTasks].filter((task) => taskMatchesFilter(task, ui.taskFilter)).sort((a, b) => Number(a.status === "done") - Number(b.status === "done") || ["高", "中", "低"].indexOf(a.priority) - ["高", "中", "低"].indexOf(b.priority));
   return `<div class="page-heading"><div><div class="eyebrow">行动清单 · 云端同步</div><h1>Tasks</h1><p>把下一步写清楚，一件一件完成。</p></div><div class="heading-actions"><button class="button primary" data-action="open-create-task">${icon("plus")} 新建任务</button></div></div>
-    <div class="toolbar"><div class="filter-list">${filters.map(([value, label]) => `<button class="filter-button ${ui.taskFilter === value ? "active" : ""}" data-action="filter-tasks" data-filter="${value}">${label}${value === "todo" ? ` · ${openTasks().length}` : ""}</button>`).join("")}</div><span class="muted">${tasks.length} 项任务</span></div>
-    <section class="card card-pad"><div class="task-list">${tasks.map((task) => taskRow(task)).join("") || `<div class="empty-state"><strong>没有符合条件的任务</strong>创建一条任务，让下一步更清晰。</div>`}</div></section>`;
+    <div class="toolbar"><div class="filter-list">${filters.map(([value, label]) => `<button class="filter-button ${ui.taskFilter === value ? "active" : ""}" data-action="filter-tasks" data-filter="${value}">${label}${value === "todo" && cloudWorkspaceAvailable() ? ` · ${cloudTasks.filter((task) => task.status !== "done").length}` : ""}</button>`).join("")}</div><span class="muted">${cloudWorkspaceAvailable() ? `${tasks.length} 项任务` : esc(dashboardUnavailableMessage())}</span></div>
+    <section class="card card-pad"><div class="task-list">${tasks.map((task) => taskRow(task)).join("") || `<div class="empty-state"><strong>${cloudWorkspaceAvailable() ? "没有符合条件的任务" : "Supabase 资料不可用"}</strong>${cloudWorkspaceAvailable() ? "创建一条任务，让下一步更清晰。" : esc(dashboardUnavailableMessage())}</div>`}</div></section>`;
 }
 
 function renderKnowledge() {
@@ -1265,7 +1295,7 @@ function pageTitle() {
 
 function renderNav() {
   const items = [["home", "grid", "Home"], ["projects", "folder", "Projects"], ["knowledge", "inbox", "Knowledge"], ["decisions", "bulb", "Decisions"], ["tasks", "checkSquare", "Tasks"]];
-  return `<aside class="sidebar"><div class="brand"><div class="brand-mark">D</div><div><div class="brand-name">Daniel Workspace · ${APP_VERSION}</div><div class="brand-caption">个人 AI 工作台</div></div></div><div class="nav-label">Workspace</div><nav class="nav-list" aria-label="主导航">${items.map(([page, iconName, label]) => `<button class="nav-item ${(ui.page === page || (ui.page === "project" && page === "projects")) ? "active" : ""}" data-page="${page}">${icon(iconName)}<span>${label}</span>${page === "tasks" ? `<span class="nav-count">${openTasks().length}</span>` : ""}</button>`).join("")}</nav><div class="sidebar-spacer"></div><div class="workspace-mini"><div class="avatar">D</div><div><div class="workspace-title">Daniel 的工作区</div><div class="workspace-sub">云端资料 · 本机状态</div></div><button class="icon-button" data-action="reset-demo" title="重置演示数据" aria-label="重置演示数据">${icon("more")}</button></div><div class="sidebar-footer"><span class="local-label"><span class="local-dot"></span> Companion 只读扫描</span><button class="icon-button" data-action="reset-demo" title="重置演示数据" aria-label="重置演示数据">${icon("reset")}</button></div></aside>`;
+  return `<aside class="sidebar"><div class="brand"><div class="brand-mark">D</div><div><div class="brand-name">Daniel Workspace · ${APP_VERSION}</div><div class="brand-caption">个人 AI 工作台</div></div></div><div class="nav-label">Workspace</div><nav class="nav-list" aria-label="主导航">${items.map(([page, iconName, label]) => `<button class="nav-item ${(ui.page === page || (ui.page === "project" && page === "projects")) ? "active" : ""}" data-page="${page}">${icon(iconName)}<span>${label}</span>${page === "tasks" ? `<span class="nav-count">${cloudWorkspaceAvailable() ? openTasks().length : "—"}</span>` : ""}</button>`).join("")}</nav><div class="sidebar-spacer"></div><div class="workspace-mini"><div class="avatar">D</div><div><div class="workspace-title">Daniel 的工作区</div><div class="workspace-sub">云端资料 · 本机状态</div></div><button class="icon-button" data-action="reset-demo" title="重置演示数据" aria-label="重置演示数据">${icon("more")}</button></div><div class="sidebar-footer"><span class="local-label"><span class="local-dot"></span> Companion 只读扫描</span><button class="icon-button" data-action="reset-demo" title="重置演示数据" aria-label="重置演示数据">${icon("reset")}</button></div></aside>`;
 }
 
 function searchItems(query) {
@@ -1486,6 +1516,15 @@ function cloudStatusLabel() {
 }
 
 function renderCloudNotice() {
+  if (ui.cloud.status === "error" || ui.cloud.status === "offline") {
+    const cacheMessage = cloudCacheActive
+      ? `当前显示上次成功同步的云端缓存${ui.cloud.lastSyncedAt ? `（${formattedTimestamp(ui.cloud.lastSyncedAt)}）` : ""}。`
+      : "没有可用的云端缓存；首页不会把本机草稿当成云端数据展示。";
+    const localNotice = ui.cloud.localDataUnmerged
+      ? "本机旧资料仍保留在设备上，当前显示账号云端资料。"
+      : "";
+    return `<section class="cloud-notice cloud-notice-subtle" role="status"><div><strong>${ui.cloud.status === "offline" ? "云端连接中断" : "云端同步失败"}</strong><p>${ui.cloud.error ? `${esc(ui.cloud.error)} · ` : ""}${esc(cacheMessage)}${localNotice ? ` ${localNotice}` : ""}恢复网络或服务后可重试。</p></div><div class="cloud-notice-actions">${ui.cloud.migrationAvailable ? `<button class="button primary small" data-action="migrate-legacy-data">重试迁移</button>` : ""}<button class="button quiet small" data-action="retry-cloud-sync">${icon("reset")} 重试云同步</button></div></section>`;
+  }
   if (ui.cloud.migrationAvailable && !ui.cloud.migrationDismissed) {
     const counts = countLocalMigrationCandidates(db);
     const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
@@ -1494,9 +1533,6 @@ function renderCloudNotice() {
   }
   if (ui.cloud.localDataUnmerged) {
     return `<section class="cloud-notice" role="status"><div><strong>云端已有工作区资料</strong><p>为保护云端内容，本机旧资料没有自动合并；它仍保存在这台设备原有的 localStorage 中。当前显示云端资料。</p></div></section>`;
-  }
-  if (ui.cloud.status === "error" || ui.cloud.status === "offline") {
-    return `<section class="cloud-notice cloud-notice-subtle" role="status"><div><strong>${ui.cloud.status === "offline" ? "云端连接中断" : "云端同步失败"}</strong><p>${ui.cloud.error ? `${esc(ui.cloud.error)} · ` : ""}页面保留最近一次成功读取的 Supabase 资料；恢复网络或服务后可重新同步。</p></div><div class="cloud-notice-actions"><button class="button quiet small" data-action="retry-cloud-sync" ${["loading", "syncing", "migrating"].includes(ui.cloud.status) ? "disabled" : ""}>${icon("reset")} 重试云同步</button></div></section>`;
   }
   return "";
 }
@@ -1859,6 +1895,13 @@ function handleAction(action, element, sourceEvent) {
   if (action === "view-decision") { ui.expandedDecisionId = id; go("decisions"); }
   if (action === "toggle-decision") { ui.expandedDecisionId = ui.expandedDecisionId === id ? null : id; render(); }
   if (action === "open-search-result") handleSearchResult(element.dataset.kind, id);
+  if (action === "dashboard-stat") {
+    const page = element.dataset.targetPage;
+    if (page === "projects") ui.projectFilter = element.dataset.filter || "all";
+    if (page === "tasks") ui.taskFilter = element.dataset.filter || "all";
+    if (page) go(page);
+  }
+  if (action === "filter-projects") { ui.projectFilter = element.dataset.filter || "all"; render(); }
   if (action === "filter-tasks") { ui.taskFilter = element.dataset.filter; render(); }
   if (action === "toggle-task") {
     const task = db.tasks.find((item) => item.id === id);
@@ -1912,7 +1955,7 @@ function handleAction(action, element, sourceEvent) {
       message: "此操作会清除本浏览器中保存的自定义内容，并恢复内置演示数据；主题选择会保留。",
       confirmLabel: "重置演示数据",
       onConfirm: () => {
-        db = resetData({ theme: db.settings?.theme || "system" }); applyTheme(); ui.page = "home"; ui.projectId = null; ui.taskFilter = "all"; ui.query = ""; ui.githubRefreshStatus = {}; ui.chat = [{ role: "assistant", text: "演示数据已恢复。你可以从当前页面开始提问。" }]; ui.modal = null; persist(); render(); toast("演示数据已恢复");
+        db = resetData({ theme: db.settings?.theme || "system" }); applyTheme(); ui.page = "home"; ui.projectId = null; ui.projectFilter = "all"; ui.taskFilter = "all"; ui.query = ""; ui.githubRefreshStatus = {}; ui.chat = [{ role: "assistant", text: "演示数据已恢复。你可以从当前页面开始提问。" }]; ui.modal = null; persist(); render(); toast("演示数据已恢复");
       },
     });
   }
@@ -1921,7 +1964,12 @@ function handleAction(action, element, sourceEvent) {
 app.addEventListener("click", (event) => {
   const element = event.target.closest("[data-action], [data-page]");
   if (!element) return;
-  if (element.dataset.page) { go(element.dataset.page); return; }
+  if (element.dataset.page) {
+    if (element.dataset.page === "projects") ui.projectFilter = "all";
+    if (element.dataset.page === "tasks") ui.taskFilter = "all";
+    go(element.dataset.page);
+    return;
+  }
   handleAction(element.dataset.action, element, event);
 });
 

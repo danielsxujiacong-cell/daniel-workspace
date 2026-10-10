@@ -1,10 +1,10 @@
 # Daniel Workspace
 
-私人 AI 工作台 V3.0。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI；访客首页以「企业 AI 自动化工作台」定位展示异常处理价值，并通过 TK-1001 说明异常发现、固定规则、SOP、决策与完成的闭环。访客内容明确标注为规则驱动的模拟数据，不调用真实 AI 或代表真实企业案例；交互仅保存在当前访客页面内存，不读取 Supabase 配置或会话，也不连接 Companion、Codex 或 AI。
+私人 AI 工作台 V3.1-A。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI；私人 Home 以当前账号的项目和任务为主，访客首页仍以「企业 AI 自动化工作台」定位展示异常处理价值，并通过 TK-1001 说明异常发现、固定规则、SOP、决策与完成的闭环。访客内容明确标注为规则驱动的模拟数据，不调用真实 AI 或代表真实企业案例；交互仅保存在当前访客页面内存，不读取 Supabase 配置或会话，也不连接 Companion、Codex 或 AI。
 
 ## Status
 
-- **Stage:** V3.0-C visitor showcase polish complete; EdgeOne deploys from `main`. V2.9 cloud-first home and the previously confirmed V2.8 sync remain in place.
+- **Stage:** V3.1-A private Home implementation is ready for authenticated real-data acceptance; EdgeOne deploys from `main`. V3.0-C visitor showcase and the previously confirmed V2.8 sync remain in place.
 - **Last updated:** 2026-10-10
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -68,7 +68,7 @@ node .\node_modules\wrangler\bin\wrangler.js secret put AI_API_KEY --config .\cl
 
 ## V1 功能
 
-- Dashboard：云端优先展示当前 Supabase 账号的项目/任务统计、最近项目、优先待办和现有 AI 建议；Companion 在线时仍可查看实时扫描健康、提醒和变化。Companion 离线时收起本机专属模块并将状态置于次要位置；云同步失败保留明确说明及重试入口。
+- Dashboard：以当前 Supabase 账号的真实项目/任务为主，提供可点击的项目/任务统计、进行中重点项目、优先待办、最近项目和低权重 AI 建议；Companion 仅作可选增强并显示在次要位置。云同步失败时标明缓存状态、错误和重试入口，不将本机草稿当作云端资料。
 - Projects：项目列表与详情，可创建、编辑、删除项目、查看 TODO、关联资料及活动。删除项目会保留关联记录并解除关联。
 - GitHub 仓库只读摘要：可刷新公开仓库的名称、默认分支、仓库更新时间、最新 commit、Pages 地址、可见性和本地刷新时间；刷新失败时保留上次成功数据。
 - 本地项目只读扫描：Projects 显示 `D:\_Codex project` 下发现的项目、路径、Git 仓库/分支/clean 状态、HEAD、`origin/main`、领先/落后、最近本地 commit、常见文档文件是否存在和最后修改时间。

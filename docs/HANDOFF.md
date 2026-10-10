@@ -3,15 +3,13 @@
 ## Current state
 
 - **Updated:** 2026-10-10
-- **Stage:** V3.0-C guest showcase polish is implemented, browser-checked, committed, and pushed to `main`.
-- **Private version label:** Kept unchanged with the private mode; this handoff uses V3.0-C for the guest-only presentation update.
-- **Visitor route:** `?mode=guest` loads the standalone demo with Home, Projects, Tasks, Knowledge, and Decisions. Home leads with the enterprise automation positioning and business value, labels the fixed-rule mock data and non-AI boundary, shows the five-stage TK-1001 flow, and provides a direct ticket entry. The two-minute tour is started manually; task filters, reset, and exit remain. TK-1001 still supports deterministic P1 guidance, a linked supplier exception SOP, solution selection, a simulated Decision, and completion with live Home/Tasks updates. Changes exist only in the mounted page's memory.
-- **Isolation:** Guest and post-exit `?mode=login` routes skip Supabase config loading and session restoration. The browser request log for guest mode showed only the HTML, stylesheet, gate, route helper, visitor module, and favicon request; no Auth SDK, workspace storage, Companion, Codex Runner, or AI module was requested.
-- **Private flow:** The normal route still restores a session through Supabase Auth; email/password login still verifies the user with `getUser()`, checks the configured allowlist, and only then imports `src/app.js`. Cloud sync, Companion, Codex Runner, and AI code were not changed.
-- **Verification:** Desktop and 390×844 browser layouts were reviewed; the Home CTA opened TK-1001, and the browser completed its rule/SOP/Decision/completion flow. Reset returned to Home without starting the tour; exit showed `?mode=login` without restoring a session. `npm test` passes 7/7 checks; guest module/test syntax checks and `git diff --check` pass. Guest code remains free of private storage, network, and service modules. No credentials were entered or submitted.
-- **Delivery:** The V3.0-C commit is on `origin/main`; the repository is configured for EdgeOne deployment from `main`. Live propagation is not independently checked because the deployment URL is not recorded in the repository.
-- **Existing data:** No Supabase records, legacy `daniel-workspace-v1` data, schemas, or Companion services were modified.
+- **Stage:** V3.1-A private Home implementation is ready for authenticated real-data acceptance. Changes are local and not committed or pushed.
+- **Private version:** `V3.1-A`; the isolated V3.0-C visitor experience remains separate.
+- **Home:** Shows four clickable cloud-backed statistics, active project cards with real task progress/next task/update time, priority tasks, recent projects, and a lower-weight cloud-based AI suggestion. Companion status is secondary.
+- **Filters:** Project statistics open Projects with either all records or `status=进行中`; task statistics open Tasks with incomplete or completed records. If cloud records are unavailable and no account cache exists, Home shows placeholders and the project/task lists do not expose local drafts as cloud records.
+- **Verification so far:** `npm test` passes 7/7; changed JS syntax checks and `git diff --check` pass; a synthetic dashboard-model check passed. The existing logged-in production app showed 16 cloud projects (1 active), 2 tasks (2 incomplete, 0 complete), and the active `个人工作台` detail with its real next step and 0/1 task progress. The current Supabase status reports a sync failure while account data remains visible; no records were changed. These counts are the acceptance baseline for the V3.1-A Home.
+- **Delivery:** V3.1-A local changes are not yet committed. Production still serves V3.0-B, so the new statistic-card filters and Companion-offline Home must be checked after deployment. No database, login, Supabase permission, or visitor-demo code was changed.
 
 ## Next action
 
-If a public EdgeOne propagation check is needed, use the site's configured URL from EdgeOne.
+After the scoped changes are pushed, verify the deployed V3.1-A Home against the authenticated baseline: all four clickable statistics and filtered records, project detail navigation, and the Home while Companion is unavailable. Confirm visitor isolation remains intact. If any cloud count differs, report the discrepancy without changing data; otherwise finish the handoff with deployment evidence.
