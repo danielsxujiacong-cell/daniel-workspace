@@ -1,5 +1,7 @@
 import { createDemoData } from "../mock-data.js";
 
+export const CLOUD_READ_TIMEOUT_MS = 15000;
+
 const collections = {
   projects: {
     table: "workspace_projects",
@@ -193,25 +195,46 @@ export function hasCloudRecords(workspace) {
   return Object.keys(collections).some((kind) => Array.isArray(workspace?.[kind]) && workspace[kind].length > 0);
 }
 
-export async function checkProjectPinningSupport(client) {
-  const { error } = await client.from("workspace_projects").select("is_pinned").limit(0);
+export async function checkProjectPinningSupport(client, signal) {
+  let query = client.from("workspace_projects").select("is_pinned").limit(0);
+  if (signal) query = query.abortSignal(signal);
+  const { error } = await query;
   if (!error) return true;
   if (error.code === "42703" || error.code === "PGRST204" || /is_pinned/i.test(error.message || "")) return false;
   throw error;
 }
 
-export async function loadCloudWorkspace(client, userId, shouldContinue = () => true) {
-  const [entries, projectPinningAvailable] = await Promise.all([
-    Promise.all(Object.entries(collections).map(async ([kind, spec]) => {
+export async function loadCloudWorkspace(client, userId, shouldContinue = () => true, timeoutMs = CLOUD_READ_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const readCollection = async ([kind, spec]) => {
       if (!shouldContinue()) throw new Error("Workspace is no longer active");
-      const { data, error } = await client.from(spec.table).select("*").eq("user_id", userId);
-      if (error) throw error;
-      return [kind, (data || []).map(spec.fromRow)];
-    })),
-    checkProjectPinningSupport(client),
-  ]);
-  const data = Object.fromEntries(entries);
-  return { data, baseline: snapshot(data), projectPinningAvailable };
+      try {
+        const { data, error } = await client.from(spec.table).select("*").eq("user_id", userId).abortSignal(controller.signal);
+        if (error) throw error;
+        return [kind, (data || []).map(spec.fromRow)];
+      } catch (error) {
+        if (controller.signal.aborted) throw new Error(`Supabase 云端读取超时（${Math.ceil(timeoutMs / 1000)} 秒）：${spec.table}`);
+        throw error;
+      }
+    };
+
+    const [entries, projectPinningAvailable] = await Promise.all([
+      Promise.all(Object.entries(collections).map(readCollection)),
+      checkProjectPinningSupport(client, controller.signal).catch((error) => {
+        if (controller.signal.aborted) throw new Error(`Supabase 云端读取超时（${Math.ceil(timeoutMs / 1000)} 秒）：项目置顶状态`);
+        throw error;
+      }),
+    ]);
+    const data = Object.fromEntries(entries);
+    return { data, baseline: snapshot(data), projectPinningAvailable };
+  } catch (error) {
+    controller.abort();
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export async function setCloudProjectPinned(client, userId, projectId, isPinned) {

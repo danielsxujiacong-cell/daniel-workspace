@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-10 · V3.1-B 云端读取超时保护
+
+- Supabase 五个只读读取请求（四张 Workspace 表和置顶字段探测）增加 15 秒 AbortSignal 截止时间，避免网络请求一直 pending 时同步状态永久停在“正在读取”。
+- 超时显示明确的失败状态和对应表名；读取失败不会启用缓存回写或触发任何云端写入/删除。
+- 增加 stalled-read 超时回归测试，并覆盖已有 29 项恢复防护测试。
+
 ## 2026-10-10 · V3.1-B 云同步恢复只认 Supabase
 
 - 修复登录、重试和联网恢复时将旧云缓存与 Supabase 记录合并并立即回传的问题；成功读取后以远端 Projects、Tasks、Knowledge、Decisions 重建云缓存。

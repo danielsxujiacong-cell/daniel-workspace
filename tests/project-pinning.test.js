@@ -7,7 +7,7 @@ import {
   MIN_HOME_PROJECT_PINS,
   toggleProjectPin,
 } from "../src/project-pinning.js";
-import { checkProjectPinningSupport, loadCloudWorkspace, mergePendingCloudChanges, saveCloudChanges, setCloudProjectPinned } from "../src/cloud/sync.js";
+import { checkProjectPinningSupport, CLOUD_READ_TIMEOUT_MS, loadCloudWorkspace, mergePendingCloudChanges, saveCloudChanges, setCloudProjectPinned } from "../src/cloud/sync.js";
 
 function projects(count) {
   return Array.from({ length: count }, (_, index) => ({
@@ -39,8 +39,9 @@ test("pin toggle caps new pins at five while allowing unpin", () => {
 });
 
 test("pin schema probe distinguishes an unapplied additive migration", async () => {
-  const client = { from: () => ({ select: () => ({ limit: async () => ({ error: { code: "PGRST204", message: "is_pinned missing" } }) }) }) };
-  assert.equal(await checkProjectPinningSupport(client), false);
+  const result = { error: { code: "PGRST204", message: "is_pinned missing" } };
+  const client = { from: () => ({ select: () => ({ limit: () => ({ abortSignal: async () => result }) }) }) };
+  assert.equal(await checkProjectPinningSupport(client, new AbortController().signal), false);
 });
 
 test("cloud load reads pin state when the additive column is present", async () => {
@@ -49,13 +50,15 @@ test("cloud load reads pin state when the additive column is present", async () 
     from(table) {
       return {
         select(columns) {
-          return {
-            limit: async () => ({ error: null }),
-            eq: async (_column, userId) => ({
-              error: null,
-              data: table === "workspace_projects" && columns === "*" && userId === "u1" ? [projectRow] : [],
-            }),
+          const response = columns === "is_pinned"
+            ? { error: null }
+            : { error: null, data: table === "workspace_projects" && columns === "*" ? [projectRow] : [] };
+          const query = {
+            limit: () => query,
+            eq: (_column, userId) => userId === "u1" ? query : query,
+            abortSignal: async () => response,
           };
+          return query;
         },
       };
     },
@@ -64,6 +67,36 @@ test("cloud load reads pin state when the additive column is present", async () 
   assert.equal(result.projectPinningAvailable, true);
   assert.equal(result.data.projects[0].isPinned, true);
   assert.equal(result.baseline.projects[0].isPinned, true);
+});
+
+test("cloud read aborts a stalled collection and returns a bounded failure", async () => {
+  const client = {
+    from(table) {
+      return {
+        select(columns) {
+          const response = columns === "is_pinned" || table !== "workspace_tasks"
+            ? { error: null, data: [] }
+            : null;
+          const query = {
+            eq: () => query,
+            limit: () => query,
+            abortSignal(signal) {
+              if (response) return Promise.resolve(response);
+              return new Promise((_resolve, reject) => {
+                signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+              });
+            },
+          };
+          return query;
+        },
+      };
+    },
+  };
+  await assert.rejects(
+    loadCloudWorkspace(client, "u1", () => true, 15),
+    /Supabase 云端读取超时（1 秒）：workspace_tasks/,
+  );
+  assert.equal(CLOUD_READ_TIMEOUT_MS, 15000);
 });
 
 test("pending edits to other project fields retain a remote pin change", () => {
