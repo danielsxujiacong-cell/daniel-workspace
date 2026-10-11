@@ -72,7 +72,7 @@ Build a usable personal workspace that brings projects, notes, decisions, and ta
 
 ## Verification
 
-- V3.5-B.3: the live Worker now uses an App JWT and short-lived installation tokens, with fixed GitHub `User-Agent` and sanitized upstream diagnostics. A signed-in Workspace session read 3 authorized repositories and latest private commit `docs: record V3.5-B.2 deployment status` (`0926e3c…`). Seven focused client/Worker tests and changed-file syntax checks pass. The user should finish acceptance with Local Companion stopped; no Supabase schema/data or GitHub permissions changed.
+- V3.5-B.3: the live Worker uses an App JWT and short-lived installation tokens, with fixed GitHub `User-Agent` and sanitized upstream diagnostics. Custom-domain Workspace serves V3.5-B.3; a signed-in session read 3 authorized repositories, and “刷新动态” returned the newly pushed `main` commit as the latest private commit. Seven focused client/Worker tests pass, changed-file syntax checks pass, `/health` returns 200, and unauthenticated repository access returns 401. Companion-offline acceptance remains with the user; no Supabase schema/data or GitHub permissions changed.
 - ESM syntax checks for app and AI modules; local Mock context verified through the UI; `git diff --check`.
 - Browser regression across project/knowledge/decision/task CRUD, search, page-context Mock AI, confirmation/reset flows, reload/reopen persistence, both themes, and mobile layout.
 - V2.2 browser regression: public GitHub refresh, cached snapshot display, failure fallback, dashboard recency, and GitHub-aware project Mock AI response.
