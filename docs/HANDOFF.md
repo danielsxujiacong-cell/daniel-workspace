@@ -5,7 +5,7 @@
 - **Updated:** 2026-10-11
 - **Stage:** V3.7 reduces the Home, Projects, project detail, work-log form, empty states, and navigation. It changes only frontend presentation; the existing Supabase schema and Supabase/GitHub/AI request paths remain unchanged.
 - **V3.7 UI:** Home order is focus projects → recent progress → pending tasks only when present → collapsed AI Summary. Projects defaults to cloud records with a separate local-scan view; project technical details are collapsed; Knowledge and Decisions are under More; work-log form is collapsed and only completion text is required. Same GitHub/local commits are deduplicated by SHA or message, with the newest distinct commit shown.
-- **V3.7 verification:** Local syntax checks and focused tests passed 17/17; `git diff --check` passed. The current Codex in-app browser had no tabs, so signed-in visual acceptance remains pending. Static deployment verification is pending the main push.
+- **V3.7 verification:** Local syntax checks and focused tests passed 17/17; `git diff --check` passed. Commit `a13e61d` is pushed to `main`. Cache-busted requests for the entry page, auth gate, app, dashboard helper, and stylesheet on `workspace.danielxu.cn` returned HTTP 200 with V3.7 markers. The current Codex in-app browser had no tabs, so signed-in visual acceptance remains pending.
 - **Stage before V3.7:** V3.6 adds per-project work logs and evidence-grounded daily/weekly AI summaries. The additive Supabase migration is applied and the V3.6 source was live on both configured static hosts.
 - **Supabase:** The user confirmed `lanlan-cloud-pet`, ref `vjqsorzsilxblufpdxxc`, as the shared project with separate Workspace tables. Read-only verification after migration reports 26 projects, 5 pinned projects, and 0 work logs. The new table has RLS, user-scoped SELECT/INSERT/UPDATE policies, and no anon or delete privilege. Existing Workspace rows were not changed.
 - **V3.6 AI:** Daily brief combines up to five pinned projects' verified GitHub commits, project status, and recent work logs; weekly summary covers all current project statuses, this week's logs, and available pinned-project commits. Both require the real GLM Worker, pass output through evidence validation, and omit evidence URLs from requests. Worker `/health` reports `configured: true` and `glm-4-flash-250414`; two synthetic requests passed the app's validators.
@@ -18,4 +18,4 @@
 
 ## Next action
 
-Push the V3.7 frontend change to `main` and verify cache-busted assets on the configured static hosts. Then use the user's existing login to review signed-in Home/Projects/project-detail/work-log layouts on desktop and a 390px mobile viewport. No live records or AI requests are needed for these UI checks.
+Use the user's existing login to review signed-in Home/Projects/project-detail/work-log layouts on desktop and a 390px mobile viewport. No live records or AI requests are needed for these UI checks.
