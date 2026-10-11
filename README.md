@@ -47,7 +47,7 @@ npm test
 - Worker 通过 `/api/github/connect` 生成 10 分钟签名 state 并跳转 GitHub App 安装页；GitHub App `Setup URL` 必须设为 `https://daniel-workspace-api.ai-investment-dashboard.workers.dev/api/github/callback`。由 GitHub 安装页选择授权仓库。
 - GitHub App 仅需 Repository permissions：`Contents: Read-only` 与 `Metadata: Read-only`；不需要 webhook 或写权限。安装后会进行一次用户授权，仅用于验证安装归属，得到的用户令牌立即丢弃。Worker 以 GitHub App 私钥生成短期 installation token，仅用于读取已选仓库。
 - GitHub App 两个回调地址：`Setup URL` 为 `https://daniel-workspace-api.ai-investment-dashboard.workers.dev/api/github/callback`；`Callback URL` 为 `https://daniel-workspace-api.ai-investment-dashboard.workers.dev/api/github/oauth/callback`。启用 GitHub App 的 user authorization callback URL。
-- Cloudflare Worker Secrets：`GITHUB_APP_ID`、`GITHUB_APP_SLUG`、`GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`GITHUB_APP_PRIVATE_KEY`（PKCS#8 PEM）和 `GITHUB_STATE_SECRET`。KV `GITHUB_INSTALLATIONS` 只保存已核验 Supabase 用户 ID 到 GitHub installation ID 的映射和短期一次性 state；GitHub 用户令牌只在回调中核验 installation 所属用户后丢弃，不保存。不要将任何 Secret 写入代码、`.dev.vars`、聊天或日志。
+- Cloudflare Worker Secrets：`GITHUB_APP_ID`、`GITHUB_APP_SLUG`、`GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`GITHUB_APP_PRIVATE_KEY`（PKCS#8 PEM）；随机 `GITHUB_STATE_SECRET` 已由服务端生成。KV `GITHUB_INSTALLATIONS` 只保存已核验 Supabase 用户 ID 到 GitHub installation ID 的映射和短期一次性 state；GitHub 用户令牌只在回调中核验 installation 所属用户后丢弃，不保存。不要将任何 Secret 写入代码、`.dev.vars`、聊天或日志。
 - 项目 `github` 字段填入与安装授权仓库一致的 `https://github.com/{owner}/{repo}`。Worker 只返回匹配项目的仓库元数据和最近提交，首页缓存保存在当前设备浏览器；不写入 Supabase、不改变现有同步字段。AI 今日简报的显式生成请求可包含授权 GitHub App 提交摘要；本机 Companion 提交说明、代码、路径仍不会发送给 AI。
 - 公开仓库仍使用匿名 Public API；Companion 仍只读。本地离线或授权撤销时保留上次成功快照并提示状态。
 
