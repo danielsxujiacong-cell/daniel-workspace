@@ -33,7 +33,10 @@ test("daily brief context separates verified commits from the last 24 hours and 
   assert.match(prompt, /1–7 天/);
   assert.match(prompt, /不要建议创建任务/);
   assert.match(prompt, /可验收结果/);
-  assert.match(prompt, /逐字引用摘要和 ISO 时间/);
+  assert.match(prompt, /GitHub/);
+  assert.match(prompt, /工作记录时必须写记录日期并逐字引用/);
+  assert.match(prompt, /completed 只写提交或工作记录明确支持的变更/);
+  assert.equal((prompt.match(/Local Companion 数据只含本机 Git 元数据/g) || []).length, 1);
   const vagueNext = buildDailyBriefContext([{ ...project, next: "创建一个任务" }], { now });
   assert.equal(vagueNext[0].confirmedNextStep, "");
 });
@@ -107,4 +110,30 @@ test("daily brief accepts a fresh private GitHub App snapshot as commit evidence
   assert.equal(context[0].commitsLast24Hours[0].message, "Private workspace improvement");
   const answer = JSON.stringify({ completed: [{ project: project.name, period: "last24Hours", text: "完善私人工作台", basis: "Private workspace improvement · 2026-10-11T07:50:00Z" }], recommendations: [], watch: [] });
   assert.equal(parseDailyBriefResponse(answer, [privateProject], context).completed.length, 1);
+});
+
+test("daily brief grounds completions and actions in recent work logs without sending links or IDs", () => {
+  const now = Date.parse("2026-10-11T08:00:00Z");
+  const workLogs = [{
+    id: "private-row-id", userId: "private-user-id", projectId: "p1", workDate: "2026-10-11",
+    completedItems: "实现记录跨设备同步", outcomes: "保存后重新读取保持一致", nextStep: "补充移动端表单验证",
+    evidenceLinks: ["https://private.example/evidence"],
+  }];
+  const context = buildDailyBriefContext([project], { now, workLogs });
+  assert.equal(context[0].workLogs[0].period, "workLogToday");
+  assert.equal(JSON.stringify(context).includes("private.example"), false);
+  assert.equal(JSON.stringify(context).includes("private-row-id"), false);
+  const response = JSON.stringify({
+    completed: [{ project: "Workspace", period: "workLogToday", text: "完成工作记录跨设备同步", basis: "2026-10-11 · 实现记录跨设备同步 · 保存后重新读取保持一致" }],
+    recommendations: [{ project: "Workspace", text: "验证窄屏表单回填", acceptance: "移动端保存后各字段重新载入一致", basis: "2026-10-11 · 补充移动端表单验证" }],
+    watch: [],
+  });
+  const parsed = parseDailyBriefResponse(response, [project], context);
+  assert.equal(parsed.completed.length, 1);
+  assert.equal(parsed.recommendations.length, 1);
+  const wrongDate = JSON.stringify({
+    completed: [{ project: "Workspace", period: "workLogToday", text: "已完成", basis: "2026-10-10 · 实现记录跨设备同步" }],
+    recommendations: [], watch: [],
+  });
+  assert.throws(() => parseDailyBriefResponse(wrongDate, [project], context), /可验证项目依据/);
 });

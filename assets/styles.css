@@ -142,6 +142,37 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 .daily-brief-part li small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
 .daily-brief-message, .daily-brief-empty { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .daily-brief-message.error { color: var(--danger, #c54d4d); }
+.weekly-summary-sections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.weekly-summary-part { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-raised); }
+.weekly-summary-part h3 { margin: 0 0 10px; font-size: 13px; }
+.weekly-summary-part ul { display: grid; gap: 9px; margin: 0; padding: 0; list-style: none; }
+.weekly-summary-part li { min-width: 0; font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+.weekly-summary-part li small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+.weekly-summary-message, .weekly-summary-empty { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.weekly-summary-message.error { color: var(--danger, #c54d4d); }
+.weekly-summary-meta { margin: 12px 0 0; }
+.project-work-logs { display: grid; gap: 13px; margin: 0 0 14px; grid-column: 1 / -1; }
+.project-work-logs .card-header { margin: 0; align-items: flex-start; }
+.project-work-logs .card-header h3 { margin: 0; color: var(--text); font-size: 14px; }
+.project-work-logs .card-header p { margin: 5px 0 0; line-height: 1.5; }
+.work-log-form { display: grid; gap: 12px; padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-raised); }
+.work-log-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+.work-log-form label { display: grid; align-content: start; gap: 6px; min-width: 0; color: var(--muted); font-size: 11px; }
+.work-log-form label .minor { margin-left: 4px; font-size: 9px; }
+.work-log-form input, .work-log-form textarea { width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 7px; color: var(--text); background: var(--panel); font: inherit; line-height: 1.5; }
+.work-log-form textarea { resize: vertical; white-space: pre-wrap; }
+.work-log-wide { grid-column: 1 / -1; }
+.work-log-form-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.work-log-list { display: grid; gap: 10px; }
+.work-log-entry { display: grid; gap: 9px; min-width: 0; padding: 13px; border: 1px solid var(--line-soft); border-radius: 10px; }
+.work-log-entry header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.work-log-entry time { color: var(--accent-strong); font-size: 12px; font-weight: 650; }
+.work-log-entry > div > strong { color: var(--muted); font-size: 10px; }
+.work-log-text { margin: 4px 0 0; color: var(--text); font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.work-log-links { display: grid; gap: 4px; margin: 4px 0 0; padding-left: 18px; font-size: 11px; overflow-wrap: anywhere; }
+.work-log-links a { color: var(--accent-strong); }
+.work-log-message { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.work-log-message.error { color: var(--danger, #c54d4d); }
 .dashboard-focus-card { display: grid; align-content: start; gap: 9px; min-width: 0; padding: 12px; border: 1px solid var(--line-soft); border-radius: 9px; color: inherit; background: var(--panel-raised); transition: border-color .16s ease, transform .16s ease; }
 .dashboard-focus-card:hover { transform: translateY(-1px); border-color: #57536f; }
 .dashboard-focus-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -476,6 +507,13 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
   .dashboard-stat-card > strong { font-size: 24px; }
   .dashboard-focus-grid { grid-template-columns: minmax(0, 1fr); }
   .daily-brief-content { grid-template-columns: minmax(0, 1fr); }
+  .weekly-summary-sections { grid-template-columns: minmax(0, 1fr); }
+  .work-log-form-grid { grid-template-columns: minmax(0, 1fr); }
+  .work-log-wide { grid-column: auto; }
+  .work-log-form-actions { flex-direction: column-reverse; }
+  .work-log-form-actions .button { width: 100%; }
+  .project-work-logs > .card-header { flex-direction: column; }
+  .project-work-logs > .card-header > button { width: 100%; }
   .dashboard-focus-card { gap: 8px; padding: 11px; }
   .dashboard-github-activity { gap: 5px; padding: 9px; }
   .dashboard-focus-section > .section-title { align-items: flex-start; flex-direction: column; }

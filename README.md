@@ -1,10 +1,10 @@
 # Daniel Workspace
 
-私人 AI 工作台 V3.5-B。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI；首页 3–5 个置顶项目卡片可显示 GitHub 最新 commit、提交时间、默认分支和近 7 天活动。公开仓库由 Cloudflare Worker 读取 GitHub Public API；私有仓库使用服务端 GitHub App 只读授权。本机私有提交说明、代码、路径和仓库 URL 不进入 AI 请求；授权 GitHub App 返回的仓库提交摘要会用于简报。断网或授权失效时保留浏览器上次成功快照，并继续展示 Companion/公开 GitHub 数据。不改 Supabase 数据表和云同步机制。
+私人 AI 工作台 V3.6。登录用户使用现有 Supabase 云同步、本机 Companion 和私人 AI；项目详情可新增/编辑跨设备工作记录，首页支持有证据的 AI 今日简报和按需每周总结。首页 3–5 个置顶项目卡片可显示 GitHub 最新 commit、提交时间、默认分支和近 7 天活动。公开仓库由 Cloudflare Worker 读取 GitHub Public API；私有仓库使用服务端 GitHub App 只读授权。本机私有提交说明、代码、路径和仓库 URL 不进入 AI 请求；授权 GitHub App 返回的仓库提交摘要会用于简报。断网或授权失效时保留浏览器上次成功快照，并继续展示 Companion/公开 GitHub 数据。
 
 ## Status
 
-- **Stage:** V3.5-B.4 Worker is deployed. Public and private GitHub reads use the Cloudflare Worker; public reads prefer an installation token and fall back to Worker-origin anonymous access, while private reads remain scoped to GitHub App authorization. Signed-in mobile refresh remains the user acceptance step.
+- **Stage:** V3.6 source and additive Supabase migration are complete. Signed-in UI save/read, second-device sync, and mobile acceptance remain the final manual checks.
 - **Last updated:** 2026-10-11
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -21,6 +21,13 @@ python local_companion.py
 手动控制 Companion：前台运行 `python local_companion.py` 时按 `Ctrl+C` 停止；开机任务启动的后台实例可在 PowerShell 执行 `Stop-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion"` 停止。取消后续登录自动启动，执行 `Unregister-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion" -Confirm:$false`。重新登录 Windows 会再次启动仍注册的任务。
 
 主题、本机 Companion 扫描缓存、GitHub 只读快照和云端离线副本保存在当前浏览器的 `localStorage`。云端业务资料以 Supabase 为准，可在已登录设备间共享；首次遇到旧版本机内容时会先询问是否迁移。旧 `daniel-workspace-v1` 数据不会因迁移或云端读取而被删除。
+
+## V3.6 工作记录与 AI 总结
+
+- 项目详情提供工作记录表单：日期、完成事项、成果、下一步和最多 10 个 HTTP/HTTPS 证据链接。记录存入独立的 `workspace_work_logs` 表；用户 ID 与 `auth.uid()` RLS 一致，客户端只有读取、新增和更新权限，不提供删除入口。V3.6 迁移不改动 Projects、Tasks、Knowledge、Decisions 的现有行。
+- 首页 AI 今日简报在点击后刷新置顶项目的 GitHub 真实提交，结合项目状态、近 7 天工作记录和可选的 Companion 元数据生成行动建议。简报只走已配置的真实 GLM Worker，输出必须匹配来源日期和原文依据；证据链接地址不会发送给模型。
+- AI 每周总结按需汇总本周（Asia/Shanghai 周一至今天）的工作记录、当前项目状态与 GitHub 提交，分为本周成果、项目推进、问题与阻塞、下周计划，并支持复制。无法通过来源核验的内容会被丢弃。
+- Supabase 只读核对：现有 26 个 Workspace 项目、5 个置顶项目保持不变，新工作记录表初始为 0 行。当前用户可在登录态手动验证保存、刷新后读取及另一设备同步；未进行模拟写入。
 
 ## V2.5 登录配置
 
@@ -124,6 +131,8 @@ node .\node_modules\wrangler\bin\wrangler.js secret put AI_API_KEY --config .\cl
 | `src/auth/gate.js` | Login-first session validation and private app boot |
 | `src/auth/config.js` | Public Supabase URL and anon/publishable-key configuration |
 | `src/cloud/sync.js` | RLS-bound workspace queries, safe local migration, cloud diff and project pin updates |
+| `src/cloud/work-logs.js` | Validated per-user work-log reads/upserts to the separate RLS-protected table |
+| `src/ai/weekly-summary.js` | Weekly range, bounded evidence context, output validation, and copy formatting |
 | `src/app.js` | 页面、交互、Assistant 面板和记录表单 |
 | `src/version.js` | 单一页面版本来源 |
 | `src/suggestions.js` | Dashboard 建议结构、安全动作列表和 Codex Task 模板 |
@@ -139,6 +148,7 @@ node .\node_modules\wrangler\bin\wrangler.js secret put AI_API_KEY --config .\cl
 | `src/store.js` | localStorage 读写与演示数据恢复 |
 | `supabase/v2.6-cloud-sync.sql` | V2.6 tables, per-user RLS, grants, and updated_at triggers |
 | `supabase/v3.1-b-project-pinning.sql` | Additive `workspace_projects.is_pinned` field for cross-device Home pinning |
+| `supabase/migrations/20261011083802_v3_6_work_logs.sql` | Additive work-log table, index, per-user RLS, and read/insert/update grants |
 | `supabase/v2.8-task-suggestions.sql` | Task description/source-key columns and idempotency index |
 | `src/mock-data.js` | 初始演示数据 |
 | `assets/styles.css` | 浅色/深色响应式界面 |

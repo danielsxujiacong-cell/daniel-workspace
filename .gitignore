@@ -14,6 +14,7 @@ Thumbs.db
 # Runtime caches and logs
 node_modules/
 cache/
+supabase/.temp/
 .wrangler/
 cloudflare/.wrangler/
 cloudflare/.dev.vars

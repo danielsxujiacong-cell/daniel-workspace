@@ -20,7 +20,8 @@ const {
 const { buildAssistantContext } = await import("./ai/context.js");
 const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = await import("./ai/service.js?v=3.4.2");
 const { buildProjectNextStepContext, buildProjectNextStepPrompt, parseProjectNextStepResponse, verifiedProjectGitHubCommit } = await import("./ai/project-next-step.js?v=3.3.2");
-const { buildDailyBriefContext, buildDailyBriefPrompt, parseDailyBriefResponse } = await import("./ai/daily-brief.js?v=3.5-b");
+const { buildDailyBriefContext, buildDailyBriefPrompt, getRecentWorkLogRange, parseDailyBriefResponse } = await import("./ai/daily-brief.js?v=3.6");
+const { buildWeeklySummaryContext, buildWeeklySummaryPrompt, getWeeklySummaryRange, parseWeeklySummaryResponse, shanghaiDateKey, weeklySummaryMarkdown } = await import("./ai/weekly-summary.js?v=3.6");
 const { fetchPrivateGitHubSnapshots, listPrivateGitHubRepositories } = await import("./github/private-api.js?v=3.5-b.4");
 const { localScanEndpointFor, shouldRenderDashboardGitHubActivity } = await import("./local-companion.js?v=3.5-a.2");
 const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = await import("./suggestions.js");
@@ -44,7 +45,8 @@ const {
   saveCloudChanges,
   setCloudProjectPinned,
 } = await import("./cloud/sync.js");
-  const { APP_VERSION } = await import("./version.js?v=3.5-b.4");
+const { loadProjectWorkLogs, loadWorkLogsForRange, saveWorkLogRecord, workLogCloudError } = await import("./cloud/work-logs.js?v=3.6");
+const { APP_VERSION } = await import("./version.js?v=3.6");
 
 const app = document.querySelector("#app");
 let legacyData = loadData();
@@ -90,6 +92,9 @@ const ui = {
   dashboardSuggestionStatus: "idle",
   dailyBrief: null,
   dailyBriefStatus: "idle",
+  weeklySummary: null,
+  weeklySummaryStatus: "idle",
+  projectWorkLogs: { projectId: null, status: "idle", items: [], error: "", editingId: "", saving: false },
   projectNextStep: null,
   createdSuggestionKeys: [],
   codex: null,
@@ -526,6 +531,7 @@ function go(page, projectId = null, push = true) {
   ui.searchOpen = false;
   if (push) history.pushState({ page, projectId }, "", page === "project" ? `#project/${encodeURIComponent(projectId)}` : `#${page}`);
   render();
+  if (page === "project" && projectId) void loadProjectWorkLogEntries(projectId);
 }
 
 function goLocalProject(localProjectId, push = true) {
@@ -1166,7 +1172,7 @@ function renderDashboardSections(model, dataAvailable) {
 }
 
 async function generateDailyBrief() {
-  if (ui.dailyBriefStatus === "loading") return;
+  if (ui.dailyBriefStatus === "loading" || ui.weeklySummaryStatus === "loading") return;
   if (!workspaceActive || !cloudWorkspaceAvailable()) {
     ui.dailyBrief = null;
     ui.dailyBriefStatus = "unavailable";
@@ -1184,13 +1190,14 @@ async function generateDailyBrief() {
   ui.dailyBrief = null;
   render();
   try {
-    await refreshPrivateGitHubData(projects, { silent: true });
-    const privateNames = new Set((ui.githubAppRepositories || []).map((repo) => repo.fullName.toLowerCase()));
-    const publicProjectIds = projects.filter((project) => {
-      const repo = parsePublicGitHubRepository(project.github);
-      return repo && !privateNames.has(repo.fullName.toLowerCase()) && project.githubData?.source !== "github-app";
-    }).map((project) => project.id);
-    if (publicProjectIds.length) await refreshGitHubData(publicProjectIds, { force: true, silent: true });
+    projects = await refreshPinnedGitHubSnapshots();
+    if (!workspaceActive) return;
+    const range = getRecentWorkLogRange();
+    const workLogs = await loadWorkLogsForRange(workspaceAuth.client, workspaceAuth.userId, {
+      ...range,
+      projectIds: projects.map((project) => project.id),
+      limit: 100,
+    });
     if (!workspaceActive) return;
     projects = getHomePinnedProjects(db.projects).slice(0, 5);
     const localProgressByProject = ui.localProjectsStatus === "ready"
@@ -1199,7 +1206,7 @@ async function generateDailyBrief() {
         return progress ? [project.id, progress] : null;
       }).filter(Boolean))
       : {};
-    const context = buildDailyBriefContext(projects, { localProgressByProject });
+    const context = buildDailyBriefContext(projects, { localProgressByProject, workLogs });
     const result = await chatWithAI({
       message: buildDailyBriefPrompt(),
       currentPage: "home-daily-brief",
@@ -1218,6 +1225,75 @@ async function generateDailyBrief() {
   render();
 }
 
+async function refreshPinnedGitHubSnapshots() {
+  const pinned = getHomePinnedProjects(db.projects).slice(0, 5);
+  await refreshPrivateGitHubData(pinned, { silent: true });
+  const privateNames = new Set((ui.githubAppRepositories || []).map((repo) => repo.fullName.toLowerCase()));
+  const publicProjectIds = pinned.filter((project) => {
+    const repo = parsePublicGitHubRepository(project.github);
+    return repo && !privateNames.has(repo.fullName.toLowerCase()) && project.githubData?.source !== "github-app";
+  }).map((project) => project.id);
+  if (publicProjectIds.length) await refreshGitHubData(publicProjectIds, { force: true, silent: true });
+  return getHomePinnedProjects(db.projects).slice(0, 5);
+}
+
+async function generateWeeklySummary() {
+  if (ui.weeklySummaryStatus === "loading" || ui.dailyBriefStatus === "loading") return;
+  if (!workspaceActive || !cloudWorkspaceAvailable()) {
+    ui.weeklySummary = null;
+    ui.weeklySummaryStatus = "unavailable";
+    render();
+    return;
+  }
+  if (getAIStatus().mode !== "real") {
+    ui.weeklySummary = null;
+    ui.weeklySummaryStatus = "unavailable";
+    render();
+    return;
+  }
+  ui.weeklySummary = null;
+  ui.weeklySummaryStatus = "loading";
+  render();
+  try {
+    const range = getWeeklySummaryRange();
+    const pinned = await refreshPinnedGitHubSnapshots();
+    if (!workspaceActive) return;
+    const workLogs = await loadWorkLogsForRange(workspaceAuth.client, workspaceAuth.userId, {
+      ...range,
+      projectIds: db.projects.map((project) => project.id),
+      limit: 150,
+    });
+    if (!workspaceActive) return;
+    const githubActivity = buildDailyBriefContext(pinned);
+    const context = buildWeeklySummaryContext(db.projects, workLogs, githubActivity, range);
+    const result = await chatWithAI({
+      message: buildWeeklySummaryPrompt(range),
+      currentPage: "home-weekly-summary",
+      currentProject: null,
+      relevantContext: { weeklySummary: { ...context.range, ...context.facts } },
+      history: [],
+    });
+    if (!workspaceActive) return;
+    if (result.provider !== "real") throw new Error("真实 GLM 服务不可用；未使用 Mock 总结，请检查 AI 配置后重试。");
+    ui.weeklySummary = { ...parseWeeklySummaryResponse(result.message.content, context), generatedAt: new Date().toISOString() };
+    ui.weeklySummaryStatus = "ready";
+  } catch (error) {
+    ui.weeklySummary = { error: error?.message || getAIErrorMessage(error) };
+    ui.weeklySummaryStatus = "error";
+  }
+  render();
+}
+
+async function copyWeeklySummary() {
+  if (ui.weeklySummaryStatus !== "ready" || !ui.weeklySummary) return;
+  try {
+    await navigator.clipboard.writeText(weeklySummaryMarkdown(ui.weeklySummary));
+    toast("每周总结已复制");
+  } catch {
+    toast("浏览器未允许剪贴板访问；请检查页面权限后重试");
+  }
+}
+
 function renderDailyBrief() {
   const brief = ui.dailyBrief;
   const status = ui.dailyBriefStatus;
@@ -1226,13 +1302,25 @@ function renderDailyBrief() {
     ["今天推荐做的事", brief?.recommendations],
     ["需要关注的问题", brief?.watch],
   ];
-  const content = status === "loading" ? `<p class="daily-brief-message" role="status">正在刷新提交并请求 GLM 整理置顶项目资料…</p>`
+  const content = status === "loading" ? `<p class="daily-brief-message" role="status">正在刷新 GitHub、读取近 7 日工作记录并请求 GLM 整理…</p>`
     : status === "error" ? `<p class="daily-brief-message error" role="alert">${esc(brief?.error || "简报生成失败，请重试。")}</p>`
       : status === "unavailable" ? `<p class="daily-brief-message" role="status">${esc(!cloudWorkspaceAvailable() ? dashboardUnavailableMessage() : "GLM 服务未配置为真实 API；为避免 Mock 内容，本次未生成简报。")}</p>`
         : status === "ready" ? sections.map(([title, items]) => `<section class="daily-brief-part"><h3>${title}</h3>${items?.length ? `<ul>${items.map((item) => `<li><strong>${esc(item.project)}</strong> · ${esc(item.text)}<small>依据：${esc(item.basis)}</small></li>`).join("")}</ul>` : `<p class="daily-brief-empty">资料不足，暂无法确认。</p>`}</section>`).join("")
-    : `<p class="daily-brief-message">仅在点击后，依据最多 5 个置顶项目的可验证提交、状态和已确认下一步生成；Companion 在线时还会附带本机分支、提交时间与工作区状态元数据，不发送私有提交说明或代码。</p>`;
+    : `<p class="daily-brief-message">仅在点击后，依据最多 5 个置顶项目的真实提交、项目状态和近 7 日工作记录生成。AI 不接收工作记录里的证据链接地址；Companion 在线时只提供本机分支、提交时间与工作区状态元数据。</p>`;
   const localSource = ui.localProjectsStatus === "ready" ? ` · 本机 Companion 元数据已刷新 ${formattedTimestamp(ui.localProjects?.scannedAt)}` : "";
-  return `<section class="card card-pad daily-brief grid-span-12"><div class="card-header"><div><h2>AI 今日简报</h2><p class="minor">真实 GitHub 提交 · 项目状态 · 已确认下一步${esc(localSource)}</p></div><button class="button primary small" data-action="generate-daily-brief" ${status === "loading" ? "disabled aria-busy=\"true\"" : ""}>${status === "loading" ? "生成中…" : status === "ready" ? "重新生成" : "生成简报"}</button></div><div class="daily-brief-content">${content}</div></section>`;
+  return `<section class="card card-pad daily-brief grid-span-12"><div class="card-header"><div><h2>AI 今日简报</h2><p class="minor">真实 GitHub 提交 · 项目状态 · 工作记录${esc(localSource)}</p></div><button class="button primary small" data-action="generate-daily-brief" ${status === "loading" || ui.weeklySummaryStatus === "loading" ? "disabled aria-busy=\"true\"" : ""}>${status === "loading" ? "生成中…" : status === "ready" ? "重新生成" : "生成简报"}</button></div><div class="daily-brief-content">${content}</div></section>`;
+}
+
+function renderWeeklySummary() {
+  const summary = ui.weeklySummary;
+  const status = ui.weeklySummaryStatus;
+  const sections = [["本周成果", summary?.completed], ["项目推进", summary?.progress], ["问题与阻塞", summary?.issues], ["下周计划", summary?.nextWeek]];
+  const body = status === "loading" ? `<p class="weekly-summary-message" role="status">正在刷新置顶项目 GitHub、读取本周工作记录并请求 GLM…</p>`
+    : status === "error" ? `<p class="weekly-summary-message error" role="alert">${esc(summary?.error || "每周总结生成失败，请重试。")}</p>`
+      : status === "unavailable" ? `<p class="weekly-summary-message" role="status">${esc(!cloudWorkspaceAvailable() ? dashboardUnavailableMessage() : "GLM 服务未配置为真实 API；为避免 Mock 内容，本次未生成总结。")}</p>`
+        : status === "ready" ? `<div class="weekly-summary-sections">${sections.map(([title, items]) => `<section class="weekly-summary-part"><h3>${title}</h3>${items?.length ? `<ul>${items.map((item) => `<li><strong>${esc(item.project)}</strong> · ${esc(item.text)}<small>依据：${esc(item.basis)}</small></li>`).join("")}</ul>` : `<p class="weekly-summary-empty">暂无可核实记录。</p>`}</section>`).join("")}</div><p class="minor weekly-summary-meta">统计范围：${esc(summary.range.startDate)} 至 ${esc(summary.range.endDate)} · 生成于 ${esc(formattedTimestamp(summary.generatedAt))}</p>`
+          : `<p class="weekly-summary-message">按需生成本周总结，汇总工作记录、项目当前状态和本周真实 GitHub 提交。证据链接地址不会发送给 AI；可复制生成结果。</p>`;
+  return `<section class="card card-pad weekly-summary grid-span-12"><div class="card-header"><div><h2>AI 每周总结</h2><p class="minor">本周成果 · 项目推进 · 问题 · 下周计划</p></div><div class="heading-actions"><button class="button primary small" data-action="generate-weekly-summary" ${status === "loading" || ui.dailyBriefStatus === "loading" ? "disabled aria-busy=\"true\"" : ""}>${status === "loading" ? "生成中…" : status === "ready" ? "重新生成" : "生成总结"}</button>${status === "ready" ? `<button class="button quiet small" data-action="copy-weekly-summary">复制</button>` : ""}</div></div>${body}</section>`;
 }
 
 function renderDashboardSuggestion(today, suggestion) {
@@ -1260,7 +1348,7 @@ function renderDashboard() {
   const values = dataAvailable ? counts : { projects: "—", activeProjects: "—", openTasks: "—", doneTasks: "—" };
   const stats = `<div class="dashboard-stat-row">${dashboardStatCard("全部项目", values.projects, "projects", "all", "查看所有项目")}${dashboardStatCard("进行中", values.activeProjects, "projects", "active", "查看进行中项目")}${dashboardStatCard("未完成任务", values.openTasks, "tasks", "todo", "查看未完成任务")}${dashboardStatCard("已完成任务", values.doneTasks, "tasks", "done", "查看已完成任务")}</div>`;
   return `<div class="dashboard-home"><div class="page-heading"><div><div class="eyebrow">${formattedDate()} · ${dataAvailable ? "当前账号资料" : "Supabase 云端资料"}</div><h1>今天继续什么？</h1><p>先看正在推进的项目，再确认今天要完成的任务。</p></div><div class="heading-actions"><button class="button primary" data-action="open-create-task">${icon("plus")} 新建任务</button></div></div>
-    ${stats}<div class="dashboard-grid">${renderDashboardFocusProjects(projects, tasks, dataAvailable)}${renderDailyBrief()}${renderDashboardSections(cloudModel, dataAvailable)}${renderDashboardSuggestion(today, suggestion)}</div>
+    ${stats}<div class="dashboard-grid">${renderDashboardFocusProjects(projects, tasks, dataAvailable)}${renderDailyBrief()}${renderWeeklySummary()}${renderDashboardSections(cloudModel, dataAvailable)}${renderDashboardSuggestion(today, suggestion)}</div>
     <div class="companion-secondary-status" role="status">本机 Companion：${esc(localStatus)}${ui.localProjectsStatus === "ready" ? ` · <button class="text-button" data-action="refresh-local-projects">重新扫描</button>` : ""} · 仅增强本机 Git 与文件状态。</div></div>`;
 }
 
@@ -1556,6 +1644,65 @@ function adoptProjectNextStep(projectId) {
   toast("已采纳为项目下一步，正在同步到云端");
 }
 
+function renderProjectWorkLogs(project) {
+  const state = ui.projectWorkLogs.projectId === project.id ? ui.projectWorkLogs : null;
+  const status = state?.status || "loading";
+  const items = state?.items || [];
+  const editing = state?.editingId ? items.find((item) => item.id === state.editingId) : null;
+  const canSave = cloudSyncEnabled && ui.cloud.status === "synced" && !state?.saving && navigator.onLine !== false;
+  const form = `<form id="project-work-log-form" class="work-log-form" data-project-id="${esc(project.id)}"><div class="work-log-form-grid"><label>日期<input type="date" name="workDate" required value="${esc(editing?.workDate || shanghaiDateKey())}" ${state?.saving ? "disabled" : ""}></label><label class="work-log-wide">完成事项<textarea name="completedItems" rows="3" maxlength="8000" required placeholder="记录具体完成的工作" ${state?.saving ? "disabled" : ""}>${esc(editing?.completedItems || "")}</textarea></label><label class="work-log-wide">成果<textarea name="outcomes" rows="2" maxlength="8000" placeholder="可选：产出、验证结果或影响" ${state?.saving ? "disabled" : ""}>${esc(editing?.outcomes || "")}</textarea></label><label class="work-log-wide">下一步<textarea name="nextStep" rows="2" maxlength="4000" placeholder="可选：下一项具体行动" ${state?.saving ? "disabled" : ""}>${esc(editing?.nextStep || "")}</textarea></label><label class="work-log-wide">证据链接 <span class="minor">每行一个 HTTP/HTTPS 地址，最多 10 个</span><textarea name="evidenceLinks" rows="2" maxlength="20480" placeholder="https://…" ${state?.saving ? "disabled" : ""}>${esc((editing?.evidenceLinks || []).join("\n"))}</textarea></label></div><div class="work-log-form-actions">${editing ? `<button type="button" class="button quiet small" data-action="cancel-work-log-edit" ${state?.saving ? "disabled" : ""}>取消编辑</button>` : ""}<button type="submit" class="button primary small" ${canSave ? "" : "disabled"}>${state?.saving ? "保存中…" : editing ? "保存修改" : "保存工作记录"}</button></div></form>`;
+  const records = items.length ? `<div class="work-log-list">${items.map((item) => `<article class="work-log-entry"><header><time>${esc(item.workDate)}</time><button type="button" class="button quiet small" data-action="edit-work-log" data-id="${esc(item.id)}" ${state?.saving ? "disabled" : ""}>编辑</button></header><div><strong>完成事项</strong><p class="work-log-text">${esc(item.completedItems)}</p></div>${item.outcomes ? `<div><strong>成果</strong><p class="work-log-text">${esc(item.outcomes)}</p></div>` : ""}${item.nextStep ? `<div><strong>下一步</strong><p class="work-log-text">${esc(item.nextStep)}</p></div>` : ""}${item.evidenceLinks.length ? `<div><strong>证据</strong><ul class="work-log-links">${item.evidenceLinks.map((link) => `<li><a href="${esc(link)}" target="_blank" rel="noopener noreferrer">${esc(link)}</a></li>`).join("")}</ul></div>` : ""}</article>`).join("")}</div>` : `<div class="empty-state">这个项目还没有工作记录。</div>`;
+  const statusMessage = status === "loading" ? `<p class="work-log-message" role="status">正在读取 Supabase 工作记录…</p>`
+    : status === "error" ? `<p class="work-log-message error" role="alert">${esc(state?.error || "读取工作记录失败。")}</p>`
+      : !cloudWorkspaceAvailable() ? `<p class="work-log-message" role="status">当前没有可用的云端工作区资料。</p>`
+        : !canSave && !state?.saving ? `<p class="work-log-message" role="status">连接并完成云端同步后即可保存；记录会写入当前登录账号的 Supabase 工作记录表。</p>` : "";
+  return `<section class="card card-pad project-work-logs"><div class="card-header"><div><h3>工作记录</h3><p class="minor">日期 · 完成事项 · 成果 · 下一步 · 证据链接 · 跨设备同步</p></div><button type="button" class="button quiet small" data-action="reload-project-work-logs" data-id="${esc(project.id)}" ${status === "loading" || state?.saving ? "disabled" : ""}>刷新</button></div>${statusMessage}${state?.error && status !== "error" ? `<p class="work-log-message error" role="alert">${esc(state.error)}</p>` : ""}${status !== "loading" ? form : ""}${records}</section>`;
+}
+
+async function loadProjectWorkLogEntries(projectId, { force = false } = {}) {
+  const current = ui.projectWorkLogs;
+  if (!force && current.projectId === projectId && ["loading", "ready"].includes(current.status)) return;
+  ui.projectWorkLogs = { projectId, status: "loading", items: current.projectId === projectId ? current.items : [], error: "", editingId: "", saving: false };
+  render();
+  try {
+    const items = await loadProjectWorkLogs(workspaceAuth.client, workspaceAuth.userId, projectId);
+    if (!workspaceActive || ui.projectId !== projectId) return;
+    ui.projectWorkLogs = { ...ui.projectWorkLogs, status: "ready", items, error: "" };
+  } catch (error) {
+    if (!workspaceActive || ui.projectId !== projectId) return;
+    ui.projectWorkLogs = { ...ui.projectWorkLogs, status: "error", error: workLogCloudError(error) };
+  }
+  if (workspaceActive && ui.projectId === projectId) render();
+}
+
+async function submitProjectWorkLog(form) {
+  const projectId = form.dataset.projectId;
+  const state = ui.projectWorkLogs;
+  if (!workspaceActive || !projectById(projectId) || state.projectId !== projectId || state.saving) return;
+  const values = Object.fromEntries(new FormData(form).entries());
+  const existing = state.items.find((item) => item.id === state.editingId);
+  const record = {
+    ...values,
+    id: existing?.id || uid("work-log"),
+    createdAt: existing?.createdAt || "",
+    evidenceLinks: values.evidenceLinks,
+  };
+  ui.projectWorkLogs = { ...state, saving: true, error: "" };
+  render();
+  try {
+    const saved = await saveWorkLogRecord(workspaceAuth.client, workspaceAuth.userId, projectId, record);
+    if (!workspaceActive || ui.projectId !== projectId) return;
+    const items = [saved, ...ui.projectWorkLogs.items.filter((item) => item.id !== saved.id)]
+      .sort((left, right) => right.workDate.localeCompare(left.workDate) || right.updatedAt.localeCompare(left.updatedAt));
+    ui.projectWorkLogs = { ...ui.projectWorkLogs, status: "ready", items, editingId: "", saving: false, error: "" };
+    toast(existing ? "工作记录已更新并同步" : "工作记录已保存并同步");
+  } catch (error) {
+    if (!workspaceActive || ui.projectId !== projectId) return;
+    ui.projectWorkLogs = { ...ui.projectWorkLogs, status: "ready", saving: false, error: workLogCloudError(error) };
+  }
+  if (workspaceActive && ui.projectId === projectId) render();
+}
+
 function renderProjectDetail() {
   const project = projectById(ui.projectId);
   if (!project) return `<div class="page-heading"><div><h1>找不到这个项目</h1><p>它可能已经被删除。</p></div><button class="button" data-page="projects">${icon("back")} 返回项目</button></div>`;
@@ -1570,6 +1717,7 @@ function renderProjectDetail() {
     <div class="detail-meta-grid"><div class="card meta-card"><div class="meta-label">当前阶段</div><div class="meta-value">${esc(project.stage || "未设置")}</div></div><div class="card meta-card"><div class="meta-label">下一步</div><div class="meta-value">${esc(project.next || "待补充")}</div></div><div class="card meta-card"><div class="meta-label">进度概览</div><div class="meta-value">${tasks.filter((task) => task.status === "done").length} / ${tasks.length} 项任务完成</div></div></div>
     ${renderProjectNextStep(project, tasks)}
     ${project.notes ? `<section class="card card-pad project-notes"><div class="meta-label">云端手工备注</div><p>${esc(project.notes)}</p></section>` : ""}
+    ${renderProjectWorkLogs(project)}
     ${renderGitHubDetails(project)}
     ${renderLocalProjectDetails(localProject)}
     <div class="subgrid"><section class="card task-panel">${sectionTitle("TODO", `<button class="button quiet small" data-action="open-create-task" data-project-id="${esc(project.id)}">${icon("plus")} 添加任务</button>`)}<div>${tasks.map((task) => `<div class="task-detail-row"><button class="check-button ${task.status === "done" ? "checked" : ""}" data-action="toggle-task" data-id="${esc(task.id)}" aria-label="${task.status === "done" ? "重新打开" : "完成"}任务">${task.status === "done" ? icon("checkSquare") : ""}</button><div class="task-text">${esc(task.title)}</div><span class="priority ${priorityClass(task.priority)}">${esc(task.priority || "低")}</span></div>`).join("") || `<div class="empty-state">这个项目还没有任务。</div>`}</div></section>
@@ -2259,6 +2407,22 @@ function handleAction(action, element, sourceEvent) {
   if (action === "open-create-project") openModal("project");
   if (action === "generate-project-next-step") { void generateProjectNextStep(id); return; }
   if (action === "generate-daily-brief") { void generateDailyBrief(); return; }
+  if (action === "generate-weekly-summary") { void generateWeeklySummary(); return; }
+  if (action === "copy-weekly-summary") { void copyWeeklySummary(); return; }
+  if (action === "reload-project-work-logs") { void loadProjectWorkLogEntries(id, { force: true }); return; }
+  if (action === "edit-work-log") {
+    const state = ui.projectWorkLogs;
+    if (state.projectId === ui.projectId && state.items.some((item) => item.id === id)) {
+      ui.projectWorkLogs = { ...state, editingId: id, error: "" };
+      render();
+    }
+    return;
+  }
+  if (action === "cancel-work-log-edit") {
+    ui.projectWorkLogs = { ...ui.projectWorkLogs, editingId: "", error: "" };
+    render();
+    return;
+  }
   if (action === "adopt-project-next-step") { adoptProjectNextStep(id); return; }
   if (action === "preview-local-project-sync") openLocalProjectSyncPreview();
   if (action === "retry-cloud-sync") void initializeCloudSync();
@@ -2459,7 +2623,9 @@ app.addEventListener("focusout", (event) => {
 
 app.addEventListener("submit", (event) => {
   event.preventDefault();
-  if (event.target.id === "record-form") {
+  if (event.target.id === "project-work-log-form") {
+    void submitProjectWorkLog(event.target);
+  } else if (event.target.id === "record-form") {
     submitRecord(event.target);
   } else if (event.target.id === "assistant-form") {
     const input = event.target.elements.message;
@@ -2496,6 +2662,7 @@ if (new URLSearchParams(location.search).has("github_app")) {
   history.replaceState(null, "", cleanUrl);
 }
 render();
+if (ui.page === "project" && ui.projectId) void loadProjectWorkLogEntries(ui.projectId);
 void initializeCloudSync();
 if (localScanEndpoint) refreshLocalProjects();
 void refreshPrivateGitHubData(db.projects, { silent: true });
