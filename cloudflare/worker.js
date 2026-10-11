@@ -114,6 +114,8 @@ async function postChat(request, env) {
 
   const message = typeof body?.message === "string" ? scrubText(body.message.trim(), 4_000) : "";
   const page = typeof body?.currentPage === "string" ? body.currentPage.slice(0, 40) : "home";
+  const isDailyBrief = page === "home-daily-brief";
+  const upstreamTimeoutMs = isDailyBrief ? 25_000 : 20_000;
   if (!message || message.length > 4_000 || !body?.relevantContext || typeof body.relevantContext !== "object") {
     return errorResponse(request, env, 400, "ai_invalid_request", "请输入问题并提供当前 Workspace 页面上下文。");
   }
@@ -150,7 +152,7 @@ async function postChat(request, env) {
       ...history,
       { role: "user", content: message },
     ],
-    max_tokens: 1_200,
+    max_tokens: isDailyBrief ? 900 : 1_200,
   });
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
@@ -160,7 +162,7 @@ async function postChat(request, env) {
         method: "POST",
         headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: "Bearer " + env.AI_API_KEY },
         body: upstreamBody,
-        signal: AbortSignal.timeout(20_000),
+        signal: AbortSignal.timeout(upstreamTimeoutMs),
       });
     } catch (error) {
       const timedOut = error && typeof error === "object" && ["TimeoutError", "AbortError"].includes(error.name);
@@ -168,7 +170,10 @@ async function postChat(request, env) {
         await wait(350);
         continue;
       }
-      return errorResponse(request, env, timedOut ? 504 : 502, timedOut ? "ai_timeout" : "ai_unavailable", timedOut ? "AI 服务响应超时，请重试。" : "AI 服务暂时不可用，请重试。");
+      const message = isDailyBrief && timedOut
+        ? "智谱 GLM 单次简报生成超时（25 秒）；系统已安全重试一次仍未完成，请检查后重试。"
+        : timedOut ? "AI 服务响应超时，请重试。" : "AI 服务暂时不可用，请重试。";
+      return errorResponse(request, env, timedOut ? 504 : 502, timedOut ? "ai_timeout" : "ai_unavailable", message);
     }
 
     if (!upstream.ok) {
@@ -183,7 +188,18 @@ async function postChat(request, env) {
     let payload;
     try {
       payload = await upstream.json();
-    } catch {
+    } catch (error) {
+      const timedOut = error && typeof error === "object" && ["TimeoutError", "AbortError"].includes(error.name);
+      if (timedOut && attempt === 1) {
+        await wait(350);
+        continue;
+      }
+      if (timedOut) {
+        const message = isDailyBrief
+          ? "智谱 GLM 简报响应内容读取超时（25 秒）；系统已安全重试一次仍未完成，请检查后重试。"
+          : "AI 服务响应超时，请重试。";
+        return errorResponse(request, env, 504, "ai_timeout", message);
+      }
       return errorResponse(request, env, 502, "ai_invalid_response", "AI 服务返回了无法读取的响应，请重试。");
     }
     const content = payload?.choices?.[0]?.message?.content;

@@ -18,7 +18,7 @@ const {
   saveLocalScanCache,
 } = await import("./store.js");
 const { buildAssistantContext } = await import("./ai/context.js");
-const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = await import("./ai/service.js");
+const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = await import("./ai/service.js?v=3.4.2");
 const { buildProjectNextStepContext, buildProjectNextStepPrompt, parseProjectNextStepResponse, verifiedProjectGitHubCommit } = await import("./ai/project-next-step.js?v=3.3.2");
 const { buildDailyBriefContext, buildDailyBriefPrompt, parseDailyBriefResponse } = await import("./ai/daily-brief.js?v=3.4.0");
 const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = await import("./suggestions.js");
@@ -1174,7 +1174,7 @@ async function generateDailyBrief() {
     projects = getHomePinnedProjects(db.projects).slice(0, 5);
     const context = buildDailyBriefContext(projects);
     const result = await chatWithAI({
-      message: buildDailyBriefPrompt(context),
+      message: buildDailyBriefPrompt(),
       currentPage: "home-daily-brief",
       currentProject: null,
       relevantContext: { dailyBriefProjects: context },
@@ -1185,7 +1185,7 @@ async function generateDailyBrief() {
     ui.dailyBrief = parseDailyBriefResponse(result.message.content, projects, context);
     ui.dailyBriefStatus = "ready";
   } catch (error) {
-    ui.dailyBrief = { error: error?.code ? getAIErrorMessage(error) : error?.message || getAIErrorMessage(error) };
+    ui.dailyBrief = { error: error?.message || getAIErrorMessage(error) };
     ui.dailyBriefStatus = "error";
   }
   render();
@@ -1199,7 +1199,7 @@ function renderDailyBrief() {
     ["今天推荐做的事", brief?.recommendations],
     ["需要关注的问题", brief?.watch],
   ];
-  const content = status === "loading" ? `<p class="daily-brief-message" role="status">正在请求 GLM 整理置顶项目资料…</p>`
+  const content = status === "loading" ? `<p class="daily-brief-message" role="status">正在刷新提交并请求 GLM 整理置顶项目资料…</p>`
     : status === "error" ? `<p class="daily-brief-message error" role="alert">${esc(brief?.error || "简报生成失败，请重试。")}</p>`
       : status === "unavailable" ? `<p class="daily-brief-message" role="status">${esc(!cloudWorkspaceAvailable() ? dashboardUnavailableMessage() : "GLM 服务未配置为真实 API；为避免 Mock 内容，本次未生成简报。")}</p>`
         : status === "ready" ? sections.map(([title, items]) => `<section class="daily-brief-part"><h3>${title}</h3>${items?.length ? `<ul>${items.map((item) => `<li><strong>${esc(item.project)}</strong> · ${esc(item.text)}<small>依据：${esc(item.basis)}</small></li>`).join("")}</ul>` : `<p class="daily-brief-empty">资料不足，暂无法确认。</p>`}</section>`).join("")

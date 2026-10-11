@@ -1,5 +1,5 @@
 import { mockProviderChat } from "./providers/mock-provider.js";
-import { httpProviderChat } from "./providers/http-provider.js";
+import { httpProviderChat } from "./providers/http-provider.js?v=3.4.2";
 import { getAIConfig } from "./config.js";
 
 let apiUnavailable = false;

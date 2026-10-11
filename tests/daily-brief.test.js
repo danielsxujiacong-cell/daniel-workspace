@@ -28,6 +28,7 @@ test("daily brief context separates verified commits from the last 24 hours and 
   assert.deepEqual(context[0].commitsDays1To7.map(({ message }) => message), ["Commit 3 days ago"]);
   assert.equal(JSON.stringify(context).includes("D:\\private"), false);
   const prompt = buildDailyBriefPrompt(context);
+  assert.equal(prompt.includes(JSON.stringify(context)), false);
   assert.match(prompt, /24 小时/);
   assert.match(prompt, /1–7 天/);
   assert.match(prompt, /不要建议创建任务/);

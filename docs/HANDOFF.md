@@ -3,11 +3,11 @@
 ## Current state
 
 - **Updated:** 2026-10-11
-- **Stage:** V3.4.1 brief-quality improvements, implemented locally.
-- **Data selection:** GitHub refresh preserves up to 20 verified recent commit summaries from the existing seven-day public REST window. Brief context separates commits in the last 24 hours from commits 1–7 days old and excludes older/future commits.
-- **Prompt and validation:** GLM must prioritize 24-hour changes, label the supplemental period, cite the exact commit message, and propose a specific development action with an observable acceptance result. Generic next-step phrases are omitted from context; task-creation and other vague recommendations are filtered. Empty recommendations remain an explicit insufficient-evidence state.
-- **Verification:** `node --check` passed for changed JS modules; 22 targeted tests passed; `git diff --check` passed. No Supabase or page layout changes.
+- **Stage:** V3.4.2 AI daily brief timeout repair.
+- **Diagnosis:** Live `/health` is configured and a synthetic end-to-end brief returned from the deployed GLM Worker in about 11 seconds. Source inspection found duplicate brief context in the message and context fields, a 1,200-token global output budget, a 20-second GLM attempt with one retry (up to about 40 seconds), and the browser clearing its timeout before consuming the response body.
+- **Fix:** The brief sends context once, limits recent commit input and output size, allows 25 seconds per GLM attempt with only one safe retry, and applies a 60-second frontend timeout through full JSON body parsing. Worker errors remain visible and retryable. Other AI pages keep their original token and upstream timeout limits.
+- **Verification:** Targeted timeout and daily brief tests pass; syntax and diff checks pass. No Supabase or layout changes.
 
 ## Next action
 
-After deployment, generate the brief and confirm recent commits are labelled by time window, older commits are absent, each recommendation cites a recent commit and includes an acceptance result, and generic task-creation advice does not appear.
+Deploy the Worker, verify `/health` and a synthetic daily brief request, then test Home with a signed-in session. Confirm normal completion, actionable timeout/error details, and successful manual retry without fabricated content.
