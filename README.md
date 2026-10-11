@@ -4,7 +4,7 @@
 
 ## Status
 
-- **Stage:** V3.5-B.1 fixes connection for an already-installed GitHub App; the Workspace session starts OAuth directly, the Worker binds the matching existing installation, and an uninstalled App falls back to the install flow. Live user authorization and private-repository acceptance are the final checks.
+- **Stage:** V3.5-B.2 automatically retries the private-repository lookup after OAuth while Cloudflare KV propagates the installation mapping; existing installations still use direct OAuth and new installations fall back to the install flow. Live private-repository acceptance remains to be checked on the user's signed-in device.
 - **Last updated:** 2026-10-11
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -47,6 +47,7 @@ npm test
 - Worker 通过 `/api/github/connect` 生成 10 分钟签名 state 并直接发起 GitHub 用户身份授权，因此已安装的 App 不会停在安装管理页。若当前 GitHub 账号尚无该 App 安装，Worker 再跳转至安装页；`Setup URL` 必须设为 `https://daniel-workspace-api.ai-investment-dashboard.workers.dev/api/github/callback`，安装后继续 OAuth 核验。
 - GitHub App 仅需 Repository permissions：`Contents: Read-only` 与 `Metadata: Read-only`；不需要 webhook 或写权限。安装后会进行一次用户授权，仅用于验证安装归属，得到的用户令牌立即丢弃。Worker 以 GitHub App 私钥生成短期 installation token，仅用于读取已选仓库。
 - GitHub App 两个回调地址：`Setup URL` 为 `https://daniel-workspace-api.ai-investment-dashboard.workers.dev/api/github/callback`；`Callback URL` 为 `https://daniel-workspace-api.ai-investment-dashboard.workers.dev/api/github/oauth/callback`。安装和仓库范围更新回调都会继续进入用户身份核验；OAuth 用户令牌只用于确认安装归属，随后丢弃。
+- OAuth 会话不使用 Worker Cookie：Workspace API 请求显式携带 Supabase Bearer 会话并省略 Cookie；两段 GitHub 回调通过签名、一次性 state 关联回已验证用户。KV 对此前不存在的 `user:{id}` 键可能保留负缓存，OAuth 成功回跳后客户端会自动重试仓库列表和快照最多约 65 秒，等待安装映射传播。
 - Cloudflare Worker Secrets：`GITHUB_APP_ID`、`GITHUB_APP_SLUG`、`GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`GITHUB_APP_PRIVATE_KEY`（PKCS#8 PEM）；随机 `GITHUB_STATE_SECRET` 已由服务端生成。KV `GITHUB_INSTALLATIONS` 只保存已核验 Supabase 用户 ID 到 GitHub installation ID 的映射和短期一次性 state；GitHub 用户令牌只在回调中核验 installation 所属用户后丢弃，不保存。不要将任何 Secret 写入代码、`.dev.vars`、聊天或日志。
 - 项目 `github` 字段填入与安装授权仓库一致的 `https://github.com/{owner}/{repo}`。Worker 只返回匹配项目的仓库元数据和最近提交，首页缓存保存在当前设备浏览器；不写入 Supabase、不改变现有同步字段。AI 今日简报的显式生成请求可包含授权 GitHub App 提交摘要；本机 Companion 提交说明、代码、路径仍不会发送给 AI。
 - 公开仓库仍使用匿名 Public API；Companion 仍只读。本地离线或授权撤销时保留上次成功快照并提示状态。

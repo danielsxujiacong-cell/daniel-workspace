@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-11 · V3.5-B.2 修复 OAuth 成功回跳后的 KV 传播延迟
+
+- OAuth 回跳后，客户端会自动重试私有仓库列表和快照读取，处理 Cloudflare KV 对先前“不存在”结果的短期负缓存；Projects 显示授权确认状态，避免用户重复启动 OAuth。
+- 请求继续使用 Supabase Bearer 会话并省略 Cookie；OAuth 回调继续以签名 state 识别 Workspace 用户。定向测试覆盖暂时性 KV 未连接响应和登录/上游错误不重试。
+
 ## 2026-10-11 · V3.5-B.1 修复已安装 GitHub App 的连接回跳
 
 - Workspace 现在先启动 GitHub OAuth 身份核验，Worker 从该用户可访问的安装中绑定现有 App，避免已安装时只落在 GitHub 安装管理页。

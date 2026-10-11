@@ -68,6 +68,7 @@ Build a usable personal workspace that brings projects, notes, decisions, and ta
 | 2026-10-09 | Add the TK-1001 deterministic rule/SOP/Decision/completion workflow only inside the mounted visitor session | Demonstrate an operational handoff while keeping guest actions ephemeral and separate from private account data |
 | 2026-10-10 | Present the guest route as a clearly labelled, fixed-rule enterprise automation demo with a five-step TK-1001 preview | Help visitors understand product value quickly without implying real AI reasoning or customer deployment |
 | 2026-10-11 | Keep project AI next-step generation as an in-memory draft and adopt only into the existing `project.next` field | Reuse the authenticated GLM Worker and sync path without changing schema or writing before user intent |
+| 2026-10-11 | Treat a missing Workers KV installation mapping immediately after OAuth as a transient propagation result | Retry private repository reads after successful OAuth instead of showing a false disconnected state; keep Supabase Bearer auth and avoid cookies or schema changes |
 
 ## Verification
 

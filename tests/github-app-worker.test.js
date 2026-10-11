@@ -103,6 +103,8 @@ test("GitHub App connects an existing installation through OAuth and reads priva
     assert.equal(oauthCallback.status, 302);
     assert.equal(new URL(oauthCallback.headers.get("Location")).searchParams.get("github_app"), "connected");
     assert.equal(await env.GITHUB_INSTALLATIONS.get(`user:${uid}`), "987654");
+    const status = await worker.fetch(req("/api/github/status"), env);
+    assert.deepEqual(await status.json(), { connected: true });
     assert.equal([...store.values()].includes("one-time-user-token"), false);
 
     const repos = await worker.fetch(req("/api/github/repositories"), env);
