@@ -20,7 +20,7 @@ const {
 const { buildAssistantContext } = await import("./ai/context.js");
 const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = await import("./ai/service.js?v=3.4.2");
 const { buildProjectNextStepContext, buildProjectNextStepPrompt, parseProjectNextStepResponse, verifiedProjectGitHubCommit } = await import("./ai/project-next-step.js?v=3.3.2");
-const { buildDailyBriefContext, buildDailyBriefPrompt, parseDailyBriefResponse } = await import("./ai/daily-brief.js?v=3.4.0");
+const { buildDailyBriefContext, buildDailyBriefPrompt, parseDailyBriefResponse } = await import("./ai/daily-brief.js?v=3.5-a");
 const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = await import("./suggestions.js");
 const { fetchPublicGitHubRepository, GITHUB_CACHE_TTL_MS, isGitHubSnapshotFresh, parsePublicGitHubRepository } = await import("./github/public-api.js?v=3.2");
 const { buildCloudDashboardModel, buildLocalDashboardModel, compareLocalProjects, taskPriorityLabel } = await import("./dashboard.js");
@@ -42,7 +42,7 @@ const {
   saveCloudChanges,
   setCloudProjectPinned,
 } = await import("./cloud/sync.js");
-const { APP_VERSION } = await import("./version.js");
+const { APP_VERSION } = await import("./version.js?v=3.5-a");
 
 const app = document.querySelector("#app");
 let legacyData = loadData();
