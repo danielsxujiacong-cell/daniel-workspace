@@ -23,8 +23,10 @@ async function request(path, auth, { method = "GET", body } = {}) {
 }
 
 export async function beginGitHubAppConnection(auth) {
-  const result = await request("/api/github/connect", auth, { method: "POST", body: { returnOrigin: location.origin, returnPath: `${location.pathname}${location.search}` } });
-  if (typeof result.url !== "string" || !result.url.startsWith("https://github.com/apps/")) throw new Error("GitHub App 授权地址无效。");
+  const result = await request("/api/github/connect", auth, { method: "POST", body: { returnOrigin: location.origin, returnPath: `${location.pathname}${location.search}${location.hash}` } });
+  let authorizationUrl;
+  try { authorizationUrl = new URL(result.url); } catch { throw new Error("GitHub App 授权地址无效。"); }
+  if (authorizationUrl.origin !== "https://github.com" || authorizationUrl.pathname !== "/login/oauth/authorize") throw new Error("GitHub App 授权地址无效。");
   location.assign(result.url);
 }
 

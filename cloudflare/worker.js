@@ -107,6 +107,26 @@ function githubConfigured(env) {
   return Boolean(env.GITHUB_APP_ID && env.GITHUB_APP_SLUG && env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET && env.GITHUB_APP_PRIVATE_KEY && env.GITHUB_STATE_SECRET && env.GITHUB_INSTALLATIONS);
 }
 
+function githubOAuthUrl(state, env, origin) {
+  const authorize = new URL("https://github.com/login/oauth/authorize");
+  authorize.searchParams.set("client_id", env.GITHUB_CLIENT_ID);
+  authorize.searchParams.set("redirect_uri", `${origin}/api/github/oauth/callback`);
+  authorize.searchParams.set("state", state);
+  return authorize.href;
+}
+
+function githubInstallUrl(state, env) {
+  const installUrl = new URL(`https://github.com/apps/${encodeURIComponent(env.GITHUB_APP_SLUG)}/installations/new`);
+  installUrl.searchParams.set("state", state);
+  return installUrl.href;
+}
+
+function githubWorkspaceReturn(state, result) {
+  const returnUrl = new URL(state.returnPath || "/", state.returnOrigin);
+  returnUrl.searchParams.set("github_app", result);
+  return returnUrl.href;
+}
+
 async function installationFor(user, env) {
   if (!env.GITHUB_INSTALLATIONS) return "";
   return await env.GITHUB_INSTALLATIONS.get(`user:${user.id}`) || "";
@@ -148,7 +168,7 @@ async function githubRoute(request, env, url) {
   if (request.method === "GET" && url.pathname === "/api/github/callback") {
     const state = await readSignedState(url.searchParams.get("state"), env);
     const installationId = url.searchParams.get("installation_id");
-    if (!state || !/^\d{1,20}$/.test(installationId || "") || url.searchParams.get("setup_action") !== "install") {
+    if (!state || !/^\d{1,20}$/.test(installationId || "") || !["install", "update"].includes(url.searchParams.get("setup_action"))) {
       return new Response("GitHub 安装状态无效或已过期，请回到 Workspace 重试。", { status: 400, headers: { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" } });
     }
     const nonceKey = `state:${state.nonce}`;
@@ -157,37 +177,44 @@ async function githubRoute(request, env, url) {
     const nonce = base64Url(crypto.getRandomValues(new Uint8Array(16)));
     const verifyState = await signedState({ userId: state.userId, installationId, returnOrigin: state.returnOrigin, returnPath: state.returnPath, exp: Date.now() + 10 * 60_000, nonce }, env);
     await env.GITHUB_INSTALLATIONS.put(`state:${nonce}`, state.userId, { expirationTtl: 600 });
-    const authorize = new URL("https://github.com/login/oauth/authorize");
-    authorize.searchParams.set("client_id", env.GITHUB_CLIENT_ID);
-    authorize.searchParams.set("redirect_uri", `${url.origin}/api/github/oauth/callback`);
-    authorize.searchParams.set("state", verifyState);
-    return redirectNoStore(authorize.href);
+    return redirectNoStore(githubOAuthUrl(verifyState, env, url.origin));
   }
   if (request.method === "GET" && url.pathname === "/api/github/oauth/callback") {
     const state = await readSignedState(url.searchParams.get("state"), env);
     const code = url.searchParams.get("code");
     const nonceKey = state?.nonce ? `state:${state.nonce}` : "";
-    if (!state || !/^\d{1,20}$/.test(state.installationId || "") || !code || code.length > 256
+    if (!state || (state.installationId && !/^\d{1,20}$/.test(state.installationId))
       || !nonceKey || await env.GITHUB_INSTALLATIONS.get(nonceKey) !== state.userId) {
       return new Response("GitHub 身份核验失败或已过期，请回到 Workspace 重试。", { status: 400, headers: { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" } });
     }
     await env.GITHUB_INSTALLATIONS.delete(nonceKey);
+    if (url.searchParams.has("error")) return redirectNoStore(githubWorkspaceReturn(state, "denied"));
+    if (!code || code.length > 256) return redirectNoStore(githubWorkspaceReturn(state, "oauth_error"));
     const tokenResponse = await fetch("https://github.com/login/oauth/access_token", {
       method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" },
       body: JSON.stringify({ client_id: env.GITHUB_CLIENT_ID, client_secret: env.GITHUB_CLIENT_SECRET, code }),
       signal: AbortSignal.timeout(10_000),
     });
     const tokenPayload = await tokenResponse.json().catch(() => ({}));
-    if (!tokenResponse.ok || typeof tokenPayload.access_token !== "string") return new Response("GitHub 身份核验未完成，请重试。", { status: 400, headers: { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" } });
+    if (!tokenResponse.ok || typeof tokenPayload.access_token !== "string") return redirectNoStore(githubWorkspaceReturn(state, "oauth_error"));
     const installationsResponse = await githubApi("/user/installations?per_page=100", tokenPayload.access_token);
-    if (!installationsResponse.ok) return new Response("无法验证 GitHub App 安装归属，请重试。", { status: 403, headers: { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" } });
+    if (!installationsResponse.ok) return redirectNoStore(githubWorkspaceReturn(state, "oauth_error"));
     const installations = await installationsResponse.json();
-    const belongsToUser = installations.installations?.some((installation) => String(installation.id) === state.installationId && String(installation.app_id) === String(env.GITHUB_APP_ID));
-    if (!belongsToUser) return new Response("此 GitHub 安装不属于当前授权账号。", { status: 403, headers: { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" } });
-    await env.GITHUB_INSTALLATIONS.put(`user:${state.userId}`, state.installationId);
-    const returnUrl = new URL(state.returnPath || "/", state.returnOrigin);
-    returnUrl.searchParams.set("github_app", "connected");
-    return redirectNoStore(returnUrl.href);
+    const appInstallations = (installations.installations || []).filter((installation) => String(installation.app_id) === String(env.GITHUB_APP_ID));
+    if (state.installationId) {
+      const belongsToUser = appInstallations.some((installation) => String(installation.id) === state.installationId);
+      if (!belongsToUser) return new Response("此 GitHub 安装不属于当前授权账号。", { status: 403, headers: { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" } });
+    } else if (appInstallations.length === 0) {
+      const nonce = base64Url(crypto.getRandomValues(new Uint8Array(16)));
+      const installState = await signedState({ userId: state.userId, returnOrigin: state.returnOrigin, returnPath: state.returnPath, exp: Date.now() + 10 * 60_000, nonce }, env);
+      await env.GITHUB_INSTALLATIONS.put(`state:${nonce}`, state.userId, { expirationTtl: 600 });
+      return redirectNoStore(githubInstallUrl(installState, env));
+    } else if (appInstallations.length > 1) {
+      return redirectNoStore(githubWorkspaceReturn(state, "multiple_installations"));
+    }
+    const installationId = state.installationId || String(appInstallations[0].id);
+    await env.GITHUB_INSTALLATIONS.put(`user:${state.userId}`, installationId);
+    return redirectNoStore(githubWorkspaceReturn(state, "connected"));
   }
   const user = await authenticateWorkspace(request, env);
   if (!user) return githubError(request, env, 401, "github_session_required", "Workspace 登录已失效，请重新登录后重试。");
@@ -201,9 +228,7 @@ async function githubRoute(request, env, url) {
     const nonce = base64Url(crypto.getRandomValues(new Uint8Array(16)));
     const state = await signedState({ userId: user.id, returnOrigin, returnPath, exp: Date.now() + 10 * 60_000, nonce }, env);
     await env.GITHUB_INSTALLATIONS.put(`state:${nonce}`, user.id, { expirationTtl: 600 });
-    const installUrl = new URL(`https://github.com/apps/${encodeURIComponent(env.GITHUB_APP_SLUG)}/installations/new`);
-    installUrl.searchParams.set("state", state);
-    return jsonResponse(request, env, { url: installUrl.href });
+    return jsonResponse(request, env, { url: githubOAuthUrl(state, env, url.origin) });
   }
 
   if (request.method === "POST" && url.pathname === "/api/github/disconnect") {

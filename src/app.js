@@ -21,7 +21,7 @@ const { buildAssistantContext } = await import("./ai/context.js");
 const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = await import("./ai/service.js?v=3.4.2");
 const { buildProjectNextStepContext, buildProjectNextStepPrompt, parseProjectNextStepResponse, verifiedProjectGitHubCommit } = await import("./ai/project-next-step.js?v=3.3.2");
 const { buildDailyBriefContext, buildDailyBriefPrompt, parseDailyBriefResponse } = await import("./ai/daily-brief.js?v=3.5-b");
-const { beginGitHubAppConnection, fetchPrivateGitHubSnapshots, getPrivateGitHubStatus, listPrivateGitHubRepositories } = await import("./github/private-api.js?v=3.5-b");
+const { beginGitHubAppConnection, fetchPrivateGitHubSnapshots, getPrivateGitHubStatus, listPrivateGitHubRepositories } = await import("./github/private-api.js?v=3.5-b.1");
 const { localScanEndpointFor, shouldRenderDashboardGitHubActivity } = await import("./local-companion.js?v=3.5-a.2");
 const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = await import("./suggestions.js");
 const { fetchPublicGitHubRepository, GITHUB_CACHE_TTL_MS, isGitHubSnapshotFresh, parsePublicGitHubRepository } = await import("./github/public-api.js?v=3.2");
@@ -44,7 +44,7 @@ const {
   saveCloudChanges,
   setCloudProjectPinned,
 } = await import("./cloud/sync.js");
-  const { APP_VERSION } = await import("./version.js?v=3.5-b");
+  const { APP_VERSION } = await import("./version.js?v=3.5-b.1");
 
 const app = document.querySelector("#app");
 let legacyData = loadData();
@@ -2488,9 +2488,19 @@ render();
 void initializeCloudSync();
 if (localScanEndpoint) refreshLocalProjects();
 void refreshPrivateGitHubData(db.projects, { silent: true });
-if (new URLSearchParams(location.search).get("github_app") === "connected") {
+const githubAppCallback = new URLSearchParams(location.search).get("github_app");
+if (githubAppCallback) {
   const cleanUrl = new URL(location.href);
   cleanUrl.searchParams.delete("github_app");
   history.replaceState(null, "", cleanUrl);
-  void refreshPrivateGitHubData();
+  if (githubAppCallback === "connected") void refreshPrivateGitHubData();
+  else {
+    ui.githubAppStatus = "error";
+    ui.githubAppMessage = githubAppCallback === "denied"
+      ? "你取消了 GitHub 身份授权；可以重新连接。"
+      : githubAppCallback === "multiple_installations"
+        ? "此 GitHub 账号可访问多个该 App 安装；为避免绑定错误，Worker 未自动选择。"
+        : "GitHub 身份核验未完成；请重新连接并确认使用已安装该 App 的 GitHub 账号。";
+    render();
+  }
 }

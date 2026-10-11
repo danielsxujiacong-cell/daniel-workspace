@@ -63,16 +63,17 @@ test("GitHub installation cannot be bound to Workspace unless the signed-in GitH
   };
   try {
     const connect = await worker.fetch(req("/api/github/connect", { method: "POST", body: { returnOrigin: origin } }), env);
-    const installUrl = new URL((await connect.json()).url);
-    const setup = await worker.fetch(new Request(`https://worker.example/api/github/callback?setup_action=install&installation_id=987654&state=${encodeURIComponent(installUrl.searchParams.get("state"))}`), env);
-    const oauthUrl = new URL(setup.headers.get("Location"));
-    const verification = await worker.fetch(new Request(`https://worker.example/api/github/oauth/callback?code=one-time-code&state=${encodeURIComponent(oauthUrl.searchParams.get("state"))}`), env);
+    const oauthUrl = new URL((await connect.json()).url);
+    const state = oauthUrl.searchParams.get("state");
+    const setup = await worker.fetch(new Request(`https://worker.example/api/github/callback?setup_action=install&installation_id=987654&state=${encodeURIComponent(state)}`), env);
+    const verifiedOauthUrl = new URL(setup.headers.get("Location"));
+    const verification = await worker.fetch(new Request(`https://worker.example/api/github/oauth/callback?code=one-time-code&state=${encodeURIComponent(verifiedOauthUrl.searchParams.get("state"))}`), env);
     assert.equal(verification.status, 403);
     assert.equal(await env.GITHUB_INSTALLATIONS.get(`user:${uid}`), null);
   } finally { globalThis.fetch = originalFetch; }
 });
 
-test("GitHub App authorization stores installation per user and reads repository metadata only", async () => {
+test("GitHub App connects an existing installation through OAuth and reads private repository metadata only", async () => {
   const env = await testEnv();
   const originalFetch = globalThis.fetch;
   const calls = [];
@@ -91,21 +92,18 @@ test("GitHub App authorization stores installation per user and reads repository
   try {
     const connect = await worker.fetch(req("/api/github/connect", { method: "POST", body: { returnOrigin: origin, returnPath: "/daniel-workspace/#home" } }), env);
     assert.equal(connect.status, 200);
-    const installUrl = new URL((await connect.json()).url);
-    assert.equal(installUrl.origin, "https://github.com");
-    assert.equal(installUrl.pathname, "/apps/daniel-workspace-readonly/installations/new");
-    const payloadPart = installUrl.searchParams.get("state").split(".")[0];
-    const payload = JSON.parse(Buffer.from(payloadPart.replace(/-/g, "+").replace(/_/g, "/"), "base64url").toString());
-    assert.equal(await env.GITHUB_INSTALLATIONS.get(`state:${payload.nonce}`), uid);
-    const setup = await worker.fetch(new Request(`https://worker.example/api/github/callback?setup_action=install&installation_id=987654&state=${encodeURIComponent(installUrl.searchParams.get("state"))}`), env);
-    assert.equal(setup.status, 302);
-    const authorizeUrl = new URL(setup.headers.get("Location"));
+    const authorizeUrl = new URL((await connect.json()).url);
     assert.equal(authorizeUrl.origin, "https://github.com");
     assert.equal(authorizeUrl.pathname, "/login/oauth/authorize");
+    assert.equal(authorizeUrl.searchParams.get("redirect_uri"), "https://worker.example/api/github/oauth/callback");
+    const payloadPart = authorizeUrl.searchParams.get("state").split(".")[0];
+    const payload = JSON.parse(Buffer.from(payloadPart.replace(/-/g, "+").replace(/_/g, "/"), "base64url").toString());
+    assert.equal(await env.GITHUB_INSTALLATIONS.get(`state:${payload.nonce}`), uid);
     const oauthCallback = await worker.fetch(new Request(`https://worker.example/api/github/oauth/callback?code=one-time-code&state=${encodeURIComponent(authorizeUrl.searchParams.get("state"))}`), env);
     assert.equal(oauthCallback.status, 302);
-    assert.equal(new URL(oauthCallback.headers.get("Location")).origin, origin);
+    assert.equal(new URL(oauthCallback.headers.get("Location")).searchParams.get("github_app"), "connected");
     assert.equal(await env.GITHUB_INSTALLATIONS.get(`user:${uid}`), "987654");
+    assert.equal([...store.values()].includes("one-time-user-token"), false);
 
     const repos = await worker.fetch(req("/api/github/repositories"), env);
     assert.equal(repos.status, 200);
@@ -119,5 +117,33 @@ test("GitHub App authorization stores installation per user and reads repository
     assert.equal(item.latestCommit.message, "Improve private dashboard");
     assert.equal(item.recentSevenDayCommitCount, 1);
     assert.ok(calls.every((call) => call.method !== "PUT" && call.method !== "PATCH" && call.method !== "DELETE"));
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("GitHub App still installs a new installation before returning to Workspace", async () => {
+  const env = await testEnv();
+  const originalFetch = globalThis.fetch;
+  let installed = false;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes("/auth/v1/user")) return Response.json({ id: uid });
+    if (url === "https://github.com/login/oauth/access_token") return Response.json({ access_token: "one-time-user-token" });
+    if (url.includes("/user/installations")) return Response.json({ installations: installed ? [{ id: 7654321, app_id: 12345 }] : [] });
+    return new Response("unexpected", { status: 500 });
+  };
+  try {
+    const connect = await worker.fetch(req("/api/github/connect", { method: "POST", body: { returnOrigin: origin } }), env);
+    const authorizeUrl = new URL((await connect.json()).url);
+    const firstCallback = await worker.fetch(new Request(`https://worker.example/api/github/oauth/callback?code=first-code&state=${encodeURIComponent(authorizeUrl.searchParams.get("state"))}`), env);
+    const installUrl = new URL(firstCallback.headers.get("Location"));
+    assert.equal(installUrl.origin, "https://github.com");
+    assert.equal(installUrl.pathname, "/apps/daniel-workspace-readonly/installations/new");
+    const setup = await worker.fetch(new Request(`https://worker.example/api/github/callback?setup_action=install&installation_id=7654321&state=${encodeURIComponent(installUrl.searchParams.get("state"))}`), env);
+    const finalAuthorizeUrl = new URL(setup.headers.get("Location"));
+    assert.equal(finalAuthorizeUrl.pathname, "/login/oauth/authorize");
+    installed = true;
+    const finalCallback = await worker.fetch(new Request(`https://worker.example/api/github/oauth/callback?code=second-code&state=${encodeURIComponent(finalAuthorizeUrl.searchParams.get("state"))}`), env);
+    assert.equal(new URL(finalCallback.headers.get("Location")).searchParams.get("github_app"), "connected");
+    assert.equal(await env.GITHUB_INSTALLATIONS.get(`user:${uid}`), "7654321");
   } finally { globalThis.fetch = originalFetch; }
 });

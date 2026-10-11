@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-11 · V3.5-B.1 修复已安装 GitHub App 的连接回跳
+
+- Workspace 现在先启动 GitHub OAuth 身份核验，Worker 从该用户可访问的安装中绑定现有 App，避免已安装时只落在 GitHub 安装管理页。
+- 尚未安装的账号仍会进入原安装流程；Worker 对安装与仓库范围更新都继续验证签名 state、Supabase 用户和 GitHub 安装归属。
+- OAuth 完成后返回 Workspace 原页面并刷新授权仓库；多安装情形显式提示，不自动绑定错误账号。私有仓库读取回归测试通过，线上实际读取待完成用户 OAuth。
+
 ## 2026-10-11 · V3.5-B GitHub App 私有仓库云端同步
 
 - 为现有 Cloudflare Worker 增加 GitHub App 安装授权回调、一次性签名 state、Supabase 身份验证、用户隔离安装映射和仅 Contents/Metadata 读取的短期 installation token 流程。
