@@ -19,7 +19,7 @@ const {
 } = await import("./store.js");
 const { buildAssistantContext } = await import("./ai/context.js");
 const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = await import("./ai/service.js");
-const { buildProjectNextStepContext, parseProjectNextStepResponse } = await import("./ai/project-next-step.js");
+const { buildProjectNextStepContext, parseProjectNextStepResponse, verifiedProjectGitHubCommit } = await import("./ai/project-next-step.js?v=3.3.1");
 const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = await import("./suggestions.js");
 const { fetchPublicGitHubRepository, GITHUB_CACHE_TTL_MS, isGitHubSnapshotFresh, parsePublicGitHubRepository } = await import("./github/public-api.js?v=3.2");
 const { buildCloudDashboardModel, buildLocalDashboardModel, compareLocalProjects, taskPriorityLabel } = await import("./dashboard.js");
@@ -1287,26 +1287,6 @@ function knowledgeContent(item) {
   return href ? `<a class="knowledge-external" href="${esc(href)}" target="_blank" rel="noreferrer">${esc(href)} ${icon("external")}</a>` : esc(item.content);
 }
 
-function verifiedProjectGitHubCommit(project) {
-  const repository = parsePublicGitHubRepository(project?.github);
-  const snapshot = project?.githubData;
-  const commit = snapshot?.latestCommit;
-  if (!repository || snapshot?.isPublic !== true
-    || String(snapshot.repositoryName || "").toLowerCase() !== repository.fullName.toLowerCase()
-    || !/^[a-f0-9]{7,40}$/i.test(commit?.sha || "")
-    || !String(commit?.message || "").trim()
-    || !Number.isFinite(new Date(commit?.committedAt || "").getTime())
-    || commit?.url !== `${repository.url}/commit/${commit.sha}`
-    || !Number.isFinite(new Date(snapshot.refreshedAt || "").getTime())) return null;
-  return {
-    repositoryName: repository.fullName,
-    message: commit.message,
-    committedAt: commit.committedAt,
-    refreshedAt: snapshot.refreshedAt,
-    fresh: isGitHubSnapshotFresh(snapshot),
-  };
-}
-
 function projectNextStepContext(project, tasks) {
   const githubCommit = verifiedProjectGitHubCommit(project);
   return buildProjectNextStepContext({ project, tasks, githubCommit, githubFresh: githubCommit?.fresh === true });
@@ -1399,12 +1379,19 @@ async function generateProjectNextStep(projectId) {
       githubFresh: githubResult.commit?.fresh === true,
     });
     if (!context.hasEvidence) {
-      ui.projectNextStep = { projectId, requestId, busy: false, error: "资料不足，无法生成可靠建议。请补充项目简介、关联任务或可读取的公开 GitHub 提交。", missing: context.missing, warning: githubResult.warning };
+      ui.projectNextStep = { projectId, requestId, busy: false, error: `资料不足，暂不生成泛化建议。请补齐：${context.missing.join("、")}。`, missing: context.missing, warning: githubResult.warning };
       render();
       return;
     }
     const result = await chatWithAI({
-      message: "为当前项目提出一条具体、可执行的下一步建议，并简短说明依据。严格只返回 JSON：{\"suggestion\":\"...\",\"rationale\":\"...\"}。只能依据 Workspace Context 中当前项目的简介、真实公开 GitHub 最近提交、当前下一步和已记录任务；不得声称未提供的进度、完成状态、代码改动或期限。若资料缺失，不要用推测补全；建议优先使用动词描述一个可实际执行的动作，并避免重复当前下一步。",
+      message: [
+        "你正在为一个具体软件项目制定下一步行动，不要给通用项目管理建议。",
+        "先从 Workspace Context JSON 读取 project.description、project.currentNextStep、github.latestCommitMessage、github.committedAt 以及 tasks。当前数据仅限这个项目，不得判断成没有提交或没有任务；若任一关键信息实际缺失，直接返回资料不足的说明，不能补写假设。",
+        "围绕最近 Commit 实际涉及的功能或修复，结合项目简介和最相关的未完成任务，提出一条小而具体、可以验收的下一步。优先接续该提交的功能验证、边界检查或剩余工作；不要把 Commit 等同于已发布或已完成。",
+        "建议必须点名要操作的功能/对象、具体动作和可检查的结果。依据简短引用真实的 Commit 摘要和时间，并说明它如何关联简介或任务。若三类资料不能支持具体动作，返回资料不足，不生成候选建议。",
+        "禁止空泛建议或只要求创建任务，例如“创建一个任务”“继续推进”“进一步优化”“完善项目”；不得虚构测试结果、代码进度、已完成状态、发布状态、期限或任务。",
+        "严格只返回 JSON：{\"suggestion\":\"一条可执行行动\",\"rationale\":\"基于实际简介、Commit 摘要和时间、相关任务的简短依据\"}。如果资料不足，返回 {\"suggestion\":\"\",\"rationale\":\"资料不足：具体缺少项\"}。",
+      ].join("\n"),
       currentPage: "project-next-step",
       currentProject: { name: currentProject.name },
       relevantContext: { projectNextStep: context.context },
@@ -1413,6 +1400,11 @@ async function generateProjectNextStep(projectId) {
     if (result.provider !== "real") throw new Error("智谱服务没有返回真实模型结果；建议未生成。");
     const parsed = parseProjectNextStepResponse(result.message?.content);
     if (!workspaceActive || ui.projectNextStep?.requestId !== requestId) return;
+    if (parsed.insufficient) {
+      ui.projectNextStep = { projectId, requestId, busy: false, error: parsed.rationale, missing: context.missing, warning: githubResult.warning };
+      render();
+      return;
+    }
     const latestProject = projectById(projectId);
     const latestTasks = db.tasks.filter((task) => task.projectId === projectId);
     const latestContext = buildProjectNextStepContext({

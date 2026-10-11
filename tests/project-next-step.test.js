@@ -1,9 +1,35 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { buildProjectNextStepContext, parseProjectNextStepResponse } from "../src/ai/project-next-step.js";
+import worker from "../cloudflare/worker.js";
+import { buildProjectNextStepContext, parseProjectNextStepResponse, verifiedProjectGitHubCommit } from "../src/ai/project-next-step.js";
+import { chat, getAIStatus } from "../src/ai/service.js";
 
 const app = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
+
+function projectWithGitHubSnapshot() {
+  const sha = "abcdef0123456789abcdef0123456789abcdef01";
+  return {
+    name: "Daniel Workspace",
+    description: "Authenticated personal workspace for managing projects, tasks, decisions, and notes.",
+    status: "进行中",
+    stage: "V3.3",
+    next: "验证项目建议功能",
+    github: "https://github.com/daniel/Workspace",
+    githubData: {
+      repositoryName: "daniel/Workspace",
+      isPublic: true,
+      refreshedAt: new Date().toISOString(),
+      recentSevenDayCommitCount: 2,
+      latestCommit: {
+        sha: sha.slice(0, 7),
+        url: `https://github.com/daniel/Workspace/commit/${sha}`,
+        message: "Add project next-step suggestions",
+        committedAt: "2026-10-11T08:30:00Z",
+      },
+    },
+  };
+}
 
 test("project next-step context contains only bounded project, task and verified commit text", () => {
   const result = buildProjectNextStepContext({
@@ -32,10 +58,107 @@ test("missing project sources are explicit and an empty project does not trigger
   assert.deepEqual(result.context.github, { available: false });
 });
 
+test("partial project data stops generation instead of allowing a generic suggestion", () => {
+  const result = buildProjectNextStepContext({
+    project: { name: "Partial", description: "A short but real project brief" },
+    tasks: [{ title: "Verify the next release", status: "todo" }],
+  });
+  assert.equal(result.hasEvidence, false);
+  assert.deepEqual(result.missing, ["没有可验证的公开 GitHub 最近提交"]);
+});
+
+test("verifies the real GitHub commit when its URL uses full SHA and its snapshot stores seven characters", () => {
+  const project = projectWithGitHubSnapshot();
+  const commit = verifiedProjectGitHubCommit(project);
+  assert.equal(commit?.message, "Add project next-step suggestions");
+  assert.equal(commit?.committedAt, "2026-10-11T08:30:00Z");
+  assert.equal(commit?.fresh, true);
+
+  const context = buildProjectNextStepContext({
+    project,
+    tasks: [{ title: "Add focused suggestion regression coverage", status: "todo", priority: "高", due: "本周" }],
+    githubCommit: commit,
+    githubFresh: commit?.fresh,
+  });
+  assert.equal(context.hasEvidence, true);
+  assert.equal(context.context.github.latestCommitMessage, "Add project next-step suggestions");
+  assert.equal(context.context.github.committedAt, "2026-10-11T08:30:00Z");
+  assert.equal(context.context.project.description, project.description);
+  assert.equal(context.context.tasks[0].title, "Add focused suggestion regression coverage");
+});
+
+test("rejects a GitHub commit URL whose SHA does not match the snapshot", () => {
+  const project = projectWithGitHubSnapshot();
+  project.githubData.latestCommit.url = "https://github.com/daniel/Workspace/commit/1234567890123456789012345678901234567890";
+  assert.equal(verifiedProjectGitHubCommit(project), null);
+});
+
+test("project description, verified commit and tasks reach the configured GLM model request", async () => {
+  const project = projectWithGitHubSnapshot();
+  const task = { title: "Add focused suggestion regression coverage", status: "todo", priority: "高", due: "本周" };
+  const commit = verifiedProjectGitHubCommit(project);
+  const context = buildProjectNextStepContext({ project, tasks: [task], githubCommit: commit, githubFresh: true });
+  const workerUrl = "https://daniel-workspace-api.ai-investment-dashboard.workers.dev/api/chat";
+  const upstreamUrl = "https://glm.test/v4/chat/completions";
+  let upstreamRequest;
+  const previousFetch = globalThis.fetch;
+  const previousConfig = globalThis.DANIEL_AI_CONFIG;
+  globalThis.DANIEL_AI_CONFIG = { provider: "real", chatEndpoint: workerUrl, model: "glm-4-flash-250414" };
+  globalThis.fetch = async (input, init = {}) => {
+    if (String(input) === workerUrl) {
+      const headers = new Headers(init.headers);
+      headers.set("Origin", "https://workspace.danielxu.cn");
+      return worker.fetch(new Request(String(input), { ...init, headers }), {
+        AI_BASE_URL: "https://glm.test/v4",
+        AI_MODEL: "glm-4-flash-250414",
+        AI_API_KEY: "test-only-not-a-real-key",
+        ALLOWED_ORIGINS: "https://workspace.danielxu.cn",
+      });
+    }
+    assert.equal(String(input), upstreamUrl);
+    upstreamRequest = JSON.parse(init.body);
+    return new Response(JSON.stringify({
+      model: "glm-4-flash-250414",
+      choices: [{ message: { role: "assistant", content: '{"suggestion":"为项目建议功能补齐验收用例，并检查无任务/无提交时明确阻止生成。","rationale":"最近提交 Add project next-step suggestions（2026-10-11）；现有关联任务要求增加回归覆盖。"}' } }],
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+
+  try {
+    assert.equal(getAIStatus().mode, "real");
+    const result = await chat({
+      message: "请给出基于项目真实资料的下一步。",
+      currentPage: "project-next-step",
+      currentProject: { name: project.name },
+      relevantContext: { projectNextStep: context.context },
+      history: [],
+    }, workerUrl);
+    assert.equal(result.provider, "real");
+    assert.equal(result.model, "glm-4-flash-250414");
+    assert.equal(upstreamRequest.model, "glm-4-flash-250414");
+    assert.equal(upstreamRequest.messages[0].role, "system");
+    const contextMessage = upstreamRequest.messages.find((item) => item.content.startsWith("Workspace Context JSON"));
+    assert.ok(contextMessage);
+    const modelContext = JSON.parse(contextMessage.content.slice(contextMessage.content.indexOf("\n") + 1));
+    assert.equal(modelContext.currentPage, "project-next-step");
+    assert.equal(modelContext.currentProject.name, project.name);
+    const sent = modelContext.relevantContext.projectNextStep;
+    assert.equal(sent.project.description, project.description);
+    assert.equal(sent.github.latestCommitMessage, "Add project next-step suggestions");
+    assert.equal(sent.github.committedAt, "2026-10-11T08:30:00Z");
+    assert.equal(sent.tasks[0].title, task.title);
+    assert.equal(result.message.content.includes("为项目建议功能补齐验收用例"), true);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousConfig === undefined) delete globalThis.DANIEL_AI_CONFIG;
+    else globalThis.DANIEL_AI_CONFIG = previousConfig;
+  }
+});
+
 test("project next-step response accepts strict JSON or a fenced JSON block", () => {
   assert.deepEqual(parseProjectNextStepResponse('{"suggestion":"核对移动端布局","rationale":"项目简介要求适配移动端。"}'), {
     suggestion: "核对移动端布局",
     rationale: "项目简介要求适配移动端。",
+    insufficient: false,
   });
   assert.equal(parseProjectNextStepResponse('```json\n{"suggestion":"补齐验收步骤","rationale":"已有任务提到发布前检查。"}\n```').suggestion, "补齐验收步骤");
 });
@@ -43,6 +166,11 @@ test("project next-step response accepts strict JSON or a fenced JSON block", ()
 test("malformed or incomplete AI output is rejected", () => {
   assert.throws(() => parseProjectNextStepResponse("not json"), /JSON/);
   assert.throws(() => parseProjectNextStepResponse('{"suggestion":"写验收步骤"}'), /缺少/);
+  assert.deepEqual(parseProjectNextStepResponse('{"suggestion":"","rationale":"资料不足：没有关联任务。"}'), {
+    suggestion: "",
+    rationale: "资料不足：没有关联任务。",
+    insufficient: true,
+  });
 });
 
 test("generation and editing stay in page state; only the adopt action persists the project change", () => {
@@ -52,6 +180,9 @@ test("generation and editing stay in page state; only the adopt action persists 
 
   assert.match(generate, /getAIStatus\(\)\.mode !== "real"/);
   assert.match(generate, /result\.provider !== "real"/);
+  assert.match(generate, /currentPage: "project-next-step"/);
+  assert.match(generate, /relevantContext: \{ projectNextStep: context\.context \}/);
+  assert.match(generate, /禁止空泛建议/);
   assert.doesNotMatch(generate, /\bpersist\s*\(|saveCloudChanges\s*\(/);
   assert.match(input, /state\.suggestion = event\.target\.value\.slice\(0, 500\)/);
   assert.match(input, /button\.textContent = state\.adopted \? \(unchanged \? "已采纳" : "采纳修改"\)/);
