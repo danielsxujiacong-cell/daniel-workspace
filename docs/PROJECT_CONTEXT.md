@@ -72,7 +72,7 @@ Build a usable personal workspace that brings projects, notes, decisions, and ta
 
 ## Verification
 
-- V3.5-B.2: nine targeted GitHub App client/Worker tests pass; JS syntax checks and `git diff --check` pass. Worker health is live; unauthenticated status returns `401 github_session_required`. GitHub Pages serves pushed commit `2af0a01`, while cache-busted `workspace.danielxu.cn` still returns the V3.5-B.1 assets. EdgeOne console requires Tencent Cloud sign-in to trigger the existing production deployment, so signed-in private-repository acceptance remains pending.
+- V3.5-B.2: nine targeted GitHub App client/Worker tests pass; JS syntax checks and `git diff --check` pass. Worker health is live; unauthenticated status returns `401 github_session_required`. GitHub Pages and cache-busted `workspace.danielxu.cn` serve the updated app import and private API retry logic. Signed-in private-repository acceptance remains pending.
 - ESM syntax checks for app and AI modules; local Mock context verified through the UI; `git diff --check`.
 - Browser regression across project/knowledge/decision/task CRUD, search, page-context Mock AI, confirmation/reset flows, reload/reopen persistence, both themes, and mobile layout.
 - V2.2 browser regression: public GitHub refresh, cached snapshot display, failure fallback, dashboard recency, and GitHub-aware project Mock AI response.

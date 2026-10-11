@@ -4,7 +4,7 @@
 
 ## Status
 
-- **Stage:** V3.5-B.2 automatically retries private-repository reads after OAuth while Cloudflare KV propagates the installation mapping. Commit `2af0a01` is pushed and GitHub Pages serves it; `workspace.danielxu.cn` still serves the previous EdgeOne asset and needs that existing deployment republished before signed-in acceptance.
+- **Stage:** V3.5-B.2 automatically retries private-repository reads after OAuth while Cloudflare KV propagates the installation mapping. Commits `2af0a01` and `66ef8dc` are pushed; GitHub Pages and the EdgeOne-backed `workspace.danielxu.cn` now serve the updated client. Live signed-in private-repository acceptance remains pending.
 - **Last updated:** 2026-10-11
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
