@@ -4,7 +4,7 @@
 
 ## Status
 
-- **Stage:** V3.6 source and additive Supabase migration are complete. Signed-in UI save/read, second-device sync, and mobile acceptance remain the final manual checks.
+- **Stage:** V3.6 source and additive Supabase migration are live. Signed-in UI save/read, second-device sync, and mobile acceptance remain the final manual checks.
 - **Last updated:** 2026-10-11
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
