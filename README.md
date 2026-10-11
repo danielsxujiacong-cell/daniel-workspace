@@ -4,7 +4,7 @@
 
 ## Status
 
-- **Stage:** V3.5-A.1 Companion origin routing repair. Uses existing Companion scan/cache and GLM Worker; local Git metadata stays device-local, and private commit text is excluded from AI context.
+- **Stage:** V3.5-A.1 Companion origin routing repair; cache-busted EdgeOne assets verified. Uses existing Companion scan/cache and GLM Worker; local Git metadata stays device-local, and private commit text is excluded from AI context.
 - **Last updated:** 2026-10-11
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
