@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-11 · V3.5-B GitHub App 私有仓库云端同步
+
+- 为现有 Cloudflare Worker 增加 GitHub App 安装授权回调、一次性签名 state、Supabase 身份验证、用户隔离安装映射和仅 Contents/Metadata 读取的短期 installation token 流程。
+- 增加授权仓库列表与快照 API；首页卡片显示最近提交、提交时间、默认分支和近 7 天数量，AI 今日简报可采用已授权私有仓库的提交依据。
+- 私有快照只写入当前设备浏览器缓存，不进入现有 Supabase 云同步；公开 GitHub、Companion 和离线缓存路径保留。
+- 已创建 Cloudflare KV namespace；GitHub App 注册与 Worker Secrets 仍需账户所有者完成后才能启用私有仓库授权。
+
 ## 2026-10-11 · V3.5-A.1 修复线上 Companion 接入
 
 - 线上 `workspace.danielxu.cn` 未配置 Companion 扫描端点，且 Companion CORS 未允许该来源；现将精确域名加入前端路由与只读 API 来源白名单。

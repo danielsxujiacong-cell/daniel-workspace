@@ -9,7 +9,16 @@
   },
   "vars": {
     "ALLOWED_ORIGINS": "https://danielsxujiacong-cell.github.io,https://workspace.danielxu.cn,http://127.0.0.1:4174,http://localhost:4174",
+    "SUPABASE_URL": "https://vjqsorzsilxblufpdxxc.supabase.co",
+    "SUPABASE_ANON_KEY": "sb_publishable_SzoEakfquA7EbxILyhFnpg_lOhq20fg",
+    "WORKSPACE_USER_ID": "9dd41e63-bdbd-405c-8243-ebe7de99fcf9",
     "AI_BASE_URL": "https://open.bigmodel.cn/api/paas/v4/",
     "AI_MODEL": "glm-4-flash-250414"
+  },
+  "kv_namespaces": [
+    { "binding": "GITHUB_INSTALLATIONS", "id": "fac5ecf46a044bbc9fec1ebd61068992" }
+  ],
+  "secrets": {
+    "required": []
   }
 }

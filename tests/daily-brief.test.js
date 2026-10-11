@@ -92,3 +92,19 @@ test("daily brief accepts Companion metadata without sending private commit text
   assert.equal(older[0].localProgress.commitPeriod, "outsideWindow");
   assert.throws(() => parseDailyBriefResponse(JSON.stringify(answer), [project], older), /可验证项目依据/);
 });
+
+test("daily brief accepts a fresh private GitHub App snapshot as commit evidence", () => {
+  const privateProject = {
+    ...project,
+    githubData: {
+      source: "github-app", isPublic: false, repositoryName: "daniel/Workspace", defaultBranch: "main",
+      refreshedAt: "2026-10-11T08:00:00Z", recentSevenDayCommitCount: 1,
+      latestCommit: { sha, message: "Private workspace improvement", committedAt: "2026-10-11T07:50:00Z", url: `https://github.com/daniel/Workspace/commit/${sha}` },
+    },
+  };
+  const context = buildDailyBriefContext([privateProject], { now: Date.parse("2026-10-11T08:00:00Z") });
+  assert.equal(context[0].githubBranch, "main");
+  assert.equal(context[0].commitsLast24Hours[0].message, "Private workspace improvement");
+  const answer = JSON.stringify({ completed: [{ project: project.name, period: "last24Hours", text: "完善私人工作台", basis: "Private workspace improvement · 2026-10-11T07:50:00Z" }], recommendations: [], watch: [] });
+  assert.equal(parseDailyBriefResponse(answer, [privateProject], context).completed.length, 1);
+});

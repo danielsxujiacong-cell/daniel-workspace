@@ -308,6 +308,7 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 .project-card p { min-height: 34px; margin: 13px 0 15px; color: #a0a1aa; font-size: 10px; line-height: 1.65; }
 .project-card-bottom { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 11px; border-top: 1px solid var(--line-soft); color: #777984; font-size: 9px; }
 .project-card-github { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; color: var(--muted); font-size: 9px; }
+.github-app-notice { margin: -12px 0 18px; color: var(--muted); font-size: 11px; }
 .project-card-actions { display: flex; justify-content: space-between; gap: 8px; margin-top: 12px; }
 .project-pin-count { color: var(--muted); font-size: 10px; white-space: nowrap; }
 .project-pin-notice { margin: 10px 0; }

@@ -1,10 +1,10 @@
 # Daniel Workspace
 
-私人 AI 工作台 V3.5-A。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI；首页 3–5 个置顶项目卡片可显示已关联本机 Git 项目的最近 commit 摘要、提交时间、分支、未提交修改状态、Companion 来源与扫描时间。`workspace.danielxu.cn` 与 GitHub Pages 均可从本机 Companion 读取只读扫描。AI 今日简报在 Companion 在线时接收本机分支、提交时间及工作区状态元数据；私有提交说明、代码、路径和仓库 URL 不发送给 AI Worker。Companion 离线时简报继续使用云端项目与公开 GitHub 资料，云端功能保持可用。本地扫描仍只读，不改 Supabase 数据或同步机制。
+私人 AI 工作台 V3.5-B。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI；首页 3–5 个置顶项目卡片可显示 GitHub 最新 commit、提交时间、默认分支和近 7 天活动。公开仓库使用 GitHub Public API；私有仓库可选用服务端 GitHub App 只读授权。AI 今日简报仅在用户点击后使用关联项目的 GitHub 提交摘要及本机 Companion 元数据。本机私有提交说明、代码、路径和仓库 URL 不进入 AI 请求；授权 GitHub App 返回的仓库提交摘要会用于简报。断网或授权失效时保留浏览器上次成功快照，并继续展示 Companion/公开 GitHub 数据。不改 Supabase 数据表和云同步机制。
 
 ## Status
 
-- **Stage:** V3.5-A.1 Companion origin routing repair; cache-busted EdgeOne assets verified. Uses existing Companion scan/cache and GLM Worker; local Git metadata stays device-local, and private commit text is excluded from AI context.
+- **Stage:** V3.5-B GitHub App read-only integration implemented; app registration, Worker Secrets, and live browser authorization remain to be completed before private repositories are enabled.
 - **Last updated:** 2026-10-11
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -41,6 +41,15 @@ npm test
 `src/cloud/sync.js` 只上传 Task、Knowledge、Decision 和 Project 基础资料，并在每条记录上附加当前 `auth.uid()`。Project 的本机绝对路径、GitHub 只读快照、Companion 状态和扫描缓存不会发送到 Supabase。所有四张表启用 RLS，策略检查 `auth.uid() = user_id`；客户端继续使用现有 public publishable key，不含 service role key。
 
 用户于 2026-10-04 确认已在 Supabase 执行 [v2.6-cloud-sync.sql](supabase/v2.6-cloud-sync.sql) 并完成线上迁移。V2.6 最终验收中，Tasks 与 Knowledge 测试记录刷新后仍存在；用户要求保留 Knowledge 测试记录。Decisions 测试记录刷新后仍存在，用户随后确认永久删除；删除状态同步后再次刷新仍为 0 条。Projects 云端基础资料在 Companion 离线时仍可查看，本机 16 项缓存会标记为可能过期；最终页面检查时 Companion 在线。四张表的匿名 PostgREST 请求均返回 HTTP 401，RLS 隔离生效。登录重试与 Decisions 删除入口已部署，Pages 入口及版本化脚本可读取。另一台设备读取及第二个 Auth 用户的隔离测试尚未进行。不要自动再次迁移，也不要删除旧 `localStorage` 数据。
+
+## V3.5-B GitHub App 私有仓库只读
+
+- Worker 通过 `/api/github/connect` 生成 10 分钟签名 state 并跳转 GitHub App 安装页；GitHub App `Setup URL` 必须设为 `https://daniel-workspace-api.ai-investment-dashboard.workers.dev/api/github/callback`。由 GitHub 安装页选择授权仓库。
+- GitHub App 仅需 Repository permissions：`Contents: Read-only` 与 `Metadata: Read-only`；不需要 webhook 或写权限。安装后会进行一次用户授权，仅用于验证安装归属，得到的用户令牌立即丢弃。Worker 以 GitHub App 私钥生成短期 installation token，仅用于读取已选仓库。
+- GitHub App 两个回调地址：`Setup URL` 为 `https://daniel-workspace-api.ai-investment-dashboard.workers.dev/api/github/callback`；`Callback URL` 为 `https://daniel-workspace-api.ai-investment-dashboard.workers.dev/api/github/oauth/callback`。启用 GitHub App 的 user authorization callback URL。
+- Cloudflare Worker Secrets：`GITHUB_APP_ID`、`GITHUB_APP_SLUG`、`GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`GITHUB_APP_PRIVATE_KEY`（PKCS#8 PEM）和 `GITHUB_STATE_SECRET`。KV `GITHUB_INSTALLATIONS` 只保存已核验 Supabase 用户 ID 到 GitHub installation ID 的映射和短期一次性 state；GitHub 用户令牌只在回调中核验 installation 所属用户后丢弃，不保存。不要将任何 Secret 写入代码、`.dev.vars`、聊天或日志。
+- 项目 `github` 字段填入与安装授权仓库一致的 `https://github.com/{owner}/{repo}`。Worker 只返回匹配项目的仓库元数据和最近提交，首页缓存保存在当前设备浏览器；不写入 Supabase、不改变现有同步字段。AI 今日简报的显式生成请求可包含授权 GitHub App 提交摘要；本机 Companion 提交说明、代码、路径仍不会发送给 AI。
+- 公开仓库仍使用匿名 Public API；Companion 仍只读。本地离线或授权撤销时保留上次成功快照并提示状态。
 
 ## V2.7 智谱 GLM Assistant
 
