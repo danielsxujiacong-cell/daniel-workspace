@@ -4,7 +4,7 @@
 
 ## Status
 
-- **Stage:** V3.5-B.2 automatically retries the private-repository lookup after OAuth while Cloudflare KV propagates the installation mapping; existing installations still use direct OAuth and new installations fall back to the install flow. Live private-repository acceptance remains to be checked on the user's signed-in device.
+- **Stage:** V3.5-B.2 automatically retries private-repository reads after OAuth while Cloudflare KV propagates the installation mapping. Commit `2af0a01` is pushed and GitHub Pages serves it; `workspace.danielxu.cn` still serves the previous EdgeOne asset and needs that existing deployment republished before signed-in acceptance.
 - **Last updated:** 2026-10-11
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
