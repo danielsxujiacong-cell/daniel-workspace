@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import worker from "../cloudflare/worker.js";
-import { buildProjectNextStepContext, parseProjectNextStepResponse, verifiedProjectGitHubCommit } from "../src/ai/project-next-step.js";
+import { buildProjectNextStepContext, buildProjectNextStepPrompt, parseProjectNextStepResponse, verifiedProjectGitHubCommit } from "../src/ai/project-next-step.js";
 import { chat, getAIStatus } from "../src/ai/service.js";
 
 const app = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
@@ -87,6 +87,19 @@ test("verifies the real GitHub commit when its URL uses full SHA and its snapsho
   assert.equal(context.context.tasks[0].title, "Add focused suggestion regression coverage");
 });
 
+test("project description and verified recent commit are sufficient without associated tasks", () => {
+  const project = projectWithGitHubSnapshot();
+  const commit = verifiedProjectGitHubCommit(project);
+  const context = buildProjectNextStepContext({ project, tasks: [], githubCommit: commit, githubFresh: commit?.fresh });
+
+  assert.equal(context.hasEvidence, true);
+  assert.deepEqual(context.missing, ["当前项目没有关联任务"]);
+  assert.equal(context.context.tasks.length, 0);
+  assert.equal(context.context.github.latestCommitMessage, "Add project next-step suggestions");
+  assert.match(buildProjectNextStepPrompt(), /tasks 仅作补充，列表为空时绝不能仅因此返回资料不足/);
+  assert.match(buildProjectNextStepPrompt(), /紧扣最近 Commit 摘要所述的真实功能或修复/);
+});
+
 test("rejects a GitHub commit URL whose SHA does not match the snapshot", () => {
   const project = projectWithGitHubSnapshot();
   project.githubData.latestCommit.url = "https://github.com/daniel/Workspace/commit/1234567890123456789012345678901234567890";
@@ -154,6 +167,88 @@ test("project description, verified commit and tasks reach the configured GLM mo
   }
 });
 
+test("no-task context reaches GLM and its concrete JSON response parses successfully", async () => {
+  const project = projectWithGitHubSnapshot();
+  const commit = verifiedProjectGitHubCommit(project);
+  const context = buildProjectNextStepContext({ project, tasks: [], githubCommit: commit, githubFresh: true });
+  const workerUrl = "https://daniel-workspace-api.ai-investment-dashboard.workers.dev/api/chat";
+  const upstreamUrl = "https://glm.test/v4/chat/completions";
+  const previousFetch = globalThis.fetch;
+  const previousConfig = globalThis.DANIEL_AI_CONFIG;
+  globalThis.DANIEL_AI_CONFIG = { provider: "real", chatEndpoint: workerUrl, model: "glm-4-flash-250414" };
+  let upstreamRequest;
+  globalThis.fetch = async (input, init = {}) => {
+    if (String(input) === workerUrl) {
+      const headers = new Headers(init.headers);
+      headers.set("Origin", "https://workspace.danielxu.cn");
+      return worker.fetch(new Request(String(input), { ...init, headers }), {
+        AI_BASE_URL: "https://glm.test/v4",
+        AI_MODEL: "glm-4-flash-250414",
+        AI_API_KEY: "test-only-not-a-real-key",
+        ALLOWED_ORIGINS: "https://workspace.danielxu.cn",
+      });
+    }
+    assert.equal(String(input), upstreamUrl);
+    upstreamRequest = JSON.parse(init.body);
+    return new Response(JSON.stringify({
+      model: "glm-4-flash-250414",
+      choices: [{ message: { role: "assistant", content: '{"suggestion":"为项目建议功能增加一次无关联任务场景的回归验证，确认简介和最近提交仍能生成基于功能的可检查建议。","rationale":"最近提交 Add project next-step suggestions（2026-10-11T08:30:00Z）新增建议能力；项目简介定位于管理项目、任务和决策，因此验证该功能在没有关联任务时仍能给出有依据的建议。"}' } }],
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+
+  try {
+    const result = await chat({
+      message: buildProjectNextStepPrompt(),
+      currentPage: "project-next-step",
+      currentProject: { name: project.name },
+      relevantContext: { projectNextStep: context.context },
+      history: [],
+    });
+    assert.equal(result.provider, "real");
+    const contextMessage = upstreamRequest.messages.find((item) => item.content.startsWith("Workspace Context JSON"));
+    const modelContext = JSON.parse(contextMessage.content.slice(contextMessage.content.indexOf("\n") + 1));
+    const sent = modelContext.relevantContext.projectNextStep;
+    assert.equal(sent.project.description, project.description);
+    assert.equal(sent.github.latestCommitMessage, "Add project next-step suggestions");
+    assert.equal(sent.github.committedAt, "2026-10-11T08:30:00Z");
+    assert.deepEqual(sent.tasks, []);
+    assert.match(upstreamRequest.messages.at(-1).content, /tasks 仅作补充/);
+    assert.deepEqual(parseProjectNextStepResponse(result.message.content), {
+      suggestion: "为项目建议功能增加一次无关联任务场景的回归验证，确认简介和最近提交仍能生成基于功能的可检查建议。",
+      rationale: "最近提交 Add project next-step suggestions（2026-10-11T08:30:00Z）新增建议能力；项目简介定位于管理项目、任务和决策，因此验证该功能在没有关联任务时仍能给出有依据的建议。",
+      insufficient: false,
+    });
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousConfig === undefined) delete globalThis.DANIEL_AI_CONFIG;
+    else globalThis.DANIEL_AI_CONFIG = previousConfig;
+  }
+});
+
+test("configured Worker failures preserve the actual response message, code and status", async () => {
+  const workerUrl = "https://daniel-workspace-api.ai-investment-dashboard.workers.dev/api/chat";
+  const previousFetch = globalThis.fetch;
+  const previousConfig = globalThis.DANIEL_AI_CONFIG;
+  globalThis.DANIEL_AI_CONFIG = { provider: "real", chatEndpoint: workerUrl, model: "glm-4-flash-250414" };
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    error: { code: "ai_upstream_rejected", message: "Worker 返回的具体错误详情。" },
+    provider: "real",
+  }), { status: 502, headers: { "Content-Type": "application/json" } });
+
+  try {
+    await assert.rejects(chat({ message: "test", relevantContext: {} }), (error) => {
+      assert.equal(error.message, "Worker 返回的具体错误详情。");
+      assert.equal(error.code, "ai_upstream_rejected");
+      assert.equal(error.status, 502);
+      return true;
+    });
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousConfig === undefined) delete globalThis.DANIEL_AI_CONFIG;
+    else globalThis.DANIEL_AI_CONFIG = previousConfig;
+  }
+});
+
 test("project next-step response accepts strict JSON or a fenced JSON block", () => {
   assert.deepEqual(parseProjectNextStepResponse('{"suggestion":"核对移动端布局","rationale":"项目简介要求适配移动端。"}'), {
     suggestion: "核对移动端布局",
@@ -182,7 +277,10 @@ test("generation and editing stay in page state; only the adopt action persists 
   assert.match(generate, /result\.provider !== "real"/);
   assert.match(generate, /currentPage: "project-next-step"/);
   assert.match(generate, /relevantContext: \{ projectNextStep: context\.context \}/);
-  assert.match(generate, /禁止空泛建议/);
+  assert.match(generate, /message: buildProjectNextStepPrompt\(\)/);
+  assert.match(generate, /taskOnlyReason/);
+  assert.match(generate, /error\.message/);
+  assert.match(generate, /parseProjectNextStepResponse\(result\.message\?\.content\)/);
   assert.doesNotMatch(generate, /\bpersist\s*\(|saveCloudChanges\s*\(/);
   assert.match(input, /state\.suggestion = event\.target\.value\.slice\(0, 500\)/);
   assert.match(input, /button\.textContent = state\.adopted \? \(unchanged \? "已采纳" : "采纳修改"\)/);

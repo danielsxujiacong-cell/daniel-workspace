@@ -19,7 +19,7 @@ const {
 } = await import("./store.js");
 const { buildAssistantContext } = await import("./ai/context.js");
 const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = await import("./ai/service.js");
-const { buildProjectNextStepContext, parseProjectNextStepResponse, verifiedProjectGitHubCommit } = await import("./ai/project-next-step.js?v=3.3.1");
+const { buildProjectNextStepContext, buildProjectNextStepPrompt, parseProjectNextStepResponse, verifiedProjectGitHubCommit } = await import("./ai/project-next-step.js?v=3.3.2");
 const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = await import("./suggestions.js");
 const { fetchPublicGitHubRepository, GITHUB_CACHE_TTL_MS, isGitHubSnapshotFresh, parsePublicGitHubRepository } = await import("./github/public-api.js?v=3.2");
 const { buildCloudDashboardModel, buildLocalDashboardModel, compareLocalProjects, taskPriorityLabel } = await import("./dashboard.js");
@@ -1384,14 +1384,7 @@ async function generateProjectNextStep(projectId) {
       return;
     }
     const result = await chatWithAI({
-      message: [
-        "你正在为一个具体软件项目制定下一步行动，不要给通用项目管理建议。",
-        "先从 Workspace Context JSON 读取 project.description、project.currentNextStep、github.latestCommitMessage、github.committedAt 以及 tasks。当前数据仅限这个项目，不得判断成没有提交或没有任务；若任一关键信息实际缺失，直接返回资料不足的说明，不能补写假设。",
-        "围绕最近 Commit 实际涉及的功能或修复，结合项目简介和最相关的未完成任务，提出一条小而具体、可以验收的下一步。优先接续该提交的功能验证、边界检查或剩余工作；不要把 Commit 等同于已发布或已完成。",
-        "建议必须点名要操作的功能/对象、具体动作和可检查的结果。依据简短引用真实的 Commit 摘要和时间，并说明它如何关联简介或任务。若三类资料不能支持具体动作，返回资料不足，不生成候选建议。",
-        "禁止空泛建议或只要求创建任务，例如“创建一个任务”“继续推进”“进一步优化”“完善项目”；不得虚构测试结果、代码进度、已完成状态、发布状态、期限或任务。",
-        "严格只返回 JSON：{\"suggestion\":\"一条可执行行动\",\"rationale\":\"基于实际简介、Commit 摘要和时间、相关任务的简短依据\"}。如果资料不足，返回 {\"suggestion\":\"\",\"rationale\":\"资料不足：具体缺少项\"}。",
-      ].join("\n"),
+      message: buildProjectNextStepPrompt(),
       currentPage: "project-next-step",
       currentProject: { name: currentProject.name },
       relevantContext: { projectNextStep: context.context },
@@ -1401,6 +1394,12 @@ async function generateProjectNextStep(projectId) {
     const parsed = parseProjectNextStepResponse(result.message?.content);
     if (!workspaceActive || ui.projectNextStep?.requestId !== requestId) return;
     if (parsed.insufficient) {
+      const taskOnlyReason = !context.context.tasks.length
+        && /任务|待办/.test(parsed.rationale)
+        && !/(简介|提交|commit|摘要|时间|目标|功能)/i.test(parsed.rationale);
+      if (context.hasEvidence && taskOnlyReason) {
+        throw new Error("GLM 将缺少关联任务误判为资料不足；项目简介与有效 GitHub 最近提交已提供，请重新生成。");
+      }
       ui.projectNextStep = { projectId, requestId, busy: false, error: parsed.rationale, missing: context.missing, warning: githubResult.warning };
       render();
       return;
@@ -1433,7 +1432,9 @@ async function generateProjectNextStep(projectId) {
     ui.projectNextStep = {
       ...ui.projectNextStep,
       busy: false,
-      error: error?.code ? getAIErrorMessage(error) : (error?.message || "建议生成失败，请重试。"),
+      error: error?.message
+        ? `${error.message}${error.code ? `（${error.code}${error.status ? `，HTTP ${error.status}` : ""}）` : ""}`
+        : getAIErrorMessage(error),
     };
   }
   if (workspaceActive && ui.projectNextStep?.requestId === requestId) render();
