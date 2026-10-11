@@ -33,7 +33,7 @@ test("daily brief context separates verified commits from the last 24 hours and 
   assert.match(prompt, /1–7 天/);
   assert.match(prompt, /不要建议创建任务/);
   assert.match(prompt, /可验收结果/);
-  assert.match(prompt, /逐字引用提交摘要/);
+  assert.match(prompt, /逐字引用摘要和 ISO 时间/);
   const vagueNext = buildDailyBriefContext([{ ...project, next: "创建一个任务" }], { now });
   assert.equal(vagueNext[0].confirmedNextStep, "");
 });
@@ -53,4 +53,42 @@ test("daily brief parser enforces project grounding and item evidence", () => {
   assert.throws(() => parseDailyBriefResponse(JSON.stringify({ completed: [{ project: "Other", period: "last24Hours", text: "完成了", basis: "提交" }], recommendations: [], watch: [] }), [project], context), /可验证项目依据/);
   assert.throws(() => parseDailyBriefResponse("not JSON", [project]), /无法识别/);
   assert.throws(() => parseDailyBriefResponse(JSON.stringify({ completed: [], recommendations: [{ project: "Workspace", text: "创建一个任务", acceptance: "任务创建成功", basis: "旧 next_step" }], watch: [] }), [project], context), /可验证项目依据/);
+});
+
+test("daily brief accepts Companion metadata without sending private commit text or paths", () => {
+  const localProgressByProject = {
+    p1: {
+      branch: "feature/private-work",
+      clean: false,
+      committedAt: "2026-10-11T07:40:00Z",
+      scannedAt: "2026-10-11T08:00:00Z",
+      message: "PRIVATE COMMIT SUBJECT",
+      path: "D:\\private\\repo",
+      sha: "deadbeef",
+    },
+  };
+  const context = buildDailyBriefContext([project], { now: Date.parse("2026-10-11T08:00:00Z"), localProgressByProject });
+  assert.deepEqual(context[0].localProgress, {
+    branch: "feature/private-work",
+    clean: false,
+    committedAt: "2026-10-11T07:40:00Z",
+    commitPeriod: "last24Hours",
+    scannedAt: "2026-10-11T08:00:00Z",
+    source: "Local Companion",
+  });
+  assert.doesNotMatch(JSON.stringify(context), /PRIVATE COMMIT SUBJECT|D:\\private\\repo|deadbeef/);
+  const answer = {
+    completed: [{ project: "Workspace", period: "last24Hours", text: "本机出现新提交", basis: "本机 Companion · feature/private-work · 有未提交修改 · 2026-10-11T07:40:00Z · 2026-10-11T08:00:00Z" }],
+    recommendations: [],
+    watch: [],
+  };
+  const parsed = parseDailyBriefResponse(JSON.stringify(answer), [project], context);
+  assert.equal(parsed.completed.length, 1);
+  assert.match(buildDailyBriefPrompt(context), /不含提交说明、代码、路径或仓库 URL/);
+  const older = buildDailyBriefContext([project], {
+    now: Date.parse("2026-10-11T08:00:00Z"),
+    localProgressByProject: { p1: { ...localProgressByProject.p1, committedAt: "2026-10-01T08:00:00Z" } },
+  });
+  assert.equal(older[0].localProgress.commitPeriod, "outsideWindow");
+  assert.throws(() => parseDailyBriefResponse(JSON.stringify(answer), [project], older), /可验证项目依据/);
 });

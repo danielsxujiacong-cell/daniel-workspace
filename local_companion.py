@@ -220,7 +220,7 @@ def project_inventory() -> dict[str, object]:
 
 
 class Handler(SimpleHTTPRequestHandler):
-    server_version = "DanielWorkspaceLocal/2.4.1"
+    server_version = "DanielWorkspaceLocal/3.5-A"
 
     def log_message(self, _format: str, *_args: object) -> None:
         return

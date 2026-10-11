@@ -232,6 +232,18 @@ function localProjectForWorkspace(project) {
   return nameKey ? ui.localProjects.items.find((item) => normalizedName(item.name) === nameKey) || null : null;
 }
 
+function localProgressForWorkspace(project) {
+  const local = localProjectForWorkspace(project);
+  if (!local?.hasGit) return null;
+  return {
+    project: local,
+    committedAt: local.lastLocalCommit?.committedAt || "",
+    branch: local.branch || "",
+    clean: typeof local.clean === "boolean" ? local.clean : null,
+    scannedAt: ui.localProjects?.scannedAt || "",
+  };
+}
+
 function timeAgo(iso) {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "刚刚";
@@ -1116,6 +1128,7 @@ function renderDashboardFocusProjects(projects, tasks, dataAvailable) {
   const pinnedCount = countPinnedProjects(projects);
   const pinned = dataAvailable && ui.projectPinningAvailable === true ? getHomePinnedProjects(projects) : [];
   const cards = pinned.map((project) => {
+    const localProgress = localProgressForWorkspace(project);
     const projectTasks = tasks.filter((task) => task.projectId === project.id);
     const done = projectTasks.filter((task) => task.status === "done").length;
     const stage = typeof project.stage === "string" ? project.stage.trim() : "";
@@ -1128,7 +1141,11 @@ function renderDashboardFocusProjects(projects, tasks, dataAvailable) {
     const links = (url, label) => url
       ? `<a class="dashboard-project-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)} ${icon("external")}</a>`
       : `<span class="dashboard-project-link unavailable">${esc(label)} 未填写</span>`;
-    return `<article class="dashboard-focus-card"><div class="dashboard-focus-top"><span class="project-glyph">${esc(initials(project.name))}</span>${statusPill(project.status)}</div><button class="dashboard-focus-name" data-action="view-project" data-id="${esc(project.id)}">${esc(project.name)}</button>${hasStage ? `<div class="dashboard-project-detail"><small>当前阶段</small><span>${esc(stage)}</span></div>` : ""}${hasNext ? `<div class="dashboard-project-detail"><small>下一步</small><span>${esc(next)}</span></div>` : ""}${projectTasks.length ? `<div class="dashboard-progress-meta">关联任务完成 ${done}/${projectTasks.length}</div>` : ""}${renderDashboardGitHubActivity(project)}<div class="dashboard-project-links">${links(github, "GitHub")}${links(website, "线上网站")}</div><div class="dashboard-focus-actions"><button class="button quiet small" data-action="view-project" data-id="${esc(project.id)}">打开项目</button><button class="button quiet small" data-action="toggle-project-pin" data-id="${esc(project.id)}" ${pending ? "disabled aria-busy=\"true\"" : ""}>${pending ? "保存中…" : "取消置顶"}</button></div></article>`;
+    const localCommit = localProgress?.project.lastLocalCommit;
+    const localFreshness = ui.localProjectsStatus === "ready" ? `扫描于 ${formattedTimestamp(localProgress?.scannedAt)}` : `缓存于 ${formattedTimestamp(localProgress?.scannedAt)} · 可能过期`;
+    const localState = localProgress ? `本机 Companion · ${localProgress.project.branch || "分支未知"} · ${localProgress.project.clean === true ? "Clean" : localProgress.project.clean === false ? "有未提交修改" : "状态未知"} · ${localFreshness}` : "";
+    const localActivity = localProgress ? `<div class="dashboard-github-activity"><small class="dashboard-github-heading">本机最近 Commit · ${esc(localProgress.project.hasGit ? localProgress.project.name : "")}</small><span>${esc(localCommit?.message || "暂无 commit 摘要")}</span><small>${esc(localCommit?.committedAt ? formattedTimestamp(localCommit.committedAt) : "提交时间未知")} · ${esc(localState)}</small></div>` : "";
+    return `<article class="dashboard-focus-card"><div class="dashboard-focus-top"><span class="project-glyph">${esc(initials(project.name))}</span>${statusPill(project.status)}</div><button class="dashboard-focus-name" data-action="view-project" data-id="${esc(project.id)}">${esc(project.name)}</button>${hasStage ? `<div class="dashboard-project-detail"><small>当前阶段</small><span>${esc(stage)}</span></div>` : ""}${hasNext ? `<div class="dashboard-project-detail"><small>下一步</small><span>${esc(next)}</span></div>` : ""}${projectTasks.length ? `<div class="dashboard-progress-meta">关联任务完成 ${done}/${projectTasks.length}</div>` : ""}${renderDashboardGitHubActivity(project)}${localActivity}<div class="dashboard-project-links">${links(github, "GitHub")}${links(website, "线上网站")}</div><div class="dashboard-focus-actions"><button class="button quiet small" data-action="view-project" data-id="${esc(project.id)}">打开项目</button><button class="button quiet small" data-action="toggle-project-pin" data-id="${esc(project.id)}" ${pending ? "disabled aria-busy=\"true\"" : ""}>${pending ? "保存中…" : "取消置顶"}</button></div></article>`;
   }).join("");
   const empty = !dataAvailable
     ? dashboardUnavailableMessage()
@@ -1172,7 +1189,13 @@ async function generateDailyBrief() {
     if (publicProjectIds.length) await refreshGitHubData(publicProjectIds, { force: true, silent: true });
     if (!workspaceActive) return;
     projects = getHomePinnedProjects(db.projects).slice(0, 5);
-    const context = buildDailyBriefContext(projects);
+    const localProgressByProject = ui.localProjectsStatus === "ready"
+      ? Object.fromEntries(projects.map((project) => {
+        const progress = localProgressForWorkspace(project);
+        return progress ? [project.id, progress] : null;
+      }).filter(Boolean))
+      : {};
+    const context = buildDailyBriefContext(projects, { localProgressByProject });
     const result = await chatWithAI({
       message: buildDailyBriefPrompt(),
       currentPage: "home-daily-brief",
@@ -1203,8 +1226,9 @@ function renderDailyBrief() {
     : status === "error" ? `<p class="daily-brief-message error" role="alert">${esc(brief?.error || "简报生成失败，请重试。")}</p>`
       : status === "unavailable" ? `<p class="daily-brief-message" role="status">${esc(!cloudWorkspaceAvailable() ? dashboardUnavailableMessage() : "GLM 服务未配置为真实 API；为避免 Mock 内容，本次未生成简报。")}</p>`
         : status === "ready" ? sections.map(([title, items]) => `<section class="daily-brief-part"><h3>${title}</h3>${items?.length ? `<ul>${items.map((item) => `<li><strong>${esc(item.project)}</strong> · ${esc(item.text)}<small>依据：${esc(item.basis)}</small></li>`).join("")}</ul>` : `<p class="daily-brief-empty">资料不足，暂无法确认。</p>`}</section>`).join("")
-          : `<p class="daily-brief-message">仅在点击后，依据最多 5 个置顶项目的可验证提交、状态和已确认下一步生成；不会修改项目或任务。</p>`;
-  return `<section class="card card-pad daily-brief grid-span-12"><div class="card-header"><div><h2>AI 今日简报</h2><p class="minor">真实 GitHub 提交 · 项目状态 · 已确认下一步</p></div><button class="button primary small" data-action="generate-daily-brief" ${status === "loading" ? "disabled aria-busy=\"true\"" : ""}>${status === "loading" ? "生成中…" : status === "ready" ? "重新生成" : "生成简报"}</button></div><div class="daily-brief-content">${content}</div></section>`;
+    : `<p class="daily-brief-message">仅在点击后，依据最多 5 个置顶项目的可验证提交、状态和已确认下一步生成；Companion 在线时还会附带本机分支、提交时间与工作区状态元数据，不发送私有提交说明或代码。</p>`;
+  const localSource = ui.localProjectsStatus === "ready" ? ` · 本机 Companion 元数据已刷新 ${formattedTimestamp(ui.localProjects?.scannedAt)}` : "";
+  return `<section class="card card-pad daily-brief grid-span-12"><div class="card-header"><div><h2>AI 今日简报</h2><p class="minor">真实 GitHub 提交 · 项目状态 · 已确认下一步${esc(localSource)}</p></div><button class="button primary small" data-action="generate-daily-brief" ${status === "loading" ? "disabled aria-busy=\"true\"" : ""}>${status === "loading" ? "生成中…" : status === "ready" ? "重新生成" : "生成简报"}</button></div><div class="daily-brief-content">${content}</div></section>`;
 }
 
 function renderDashboardSuggestion(today, suggestion) {
