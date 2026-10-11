@@ -29,7 +29,7 @@ test("visitor UI has no imports or private data and service interfaces", () => {
 
 test("public entry loads only the gate module", () => {
   const scripts = [...index.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map((match) => match[1]);
-  assert.deepEqual(scripts, ["./src/auth/gate.js"]);
+  assert.deepEqual(scripts, ["./src/auth/gate.js?v=3.3.0"]);
 });
 
 test("private login still signs in, verifies the user, and checks the allowlist before opening app", () => {
@@ -40,7 +40,7 @@ test("private login still signs in, verifies the user, and checks the allowlist 
   const allowlistAt = loginFlow.indexOf("isAllowedUser(user)");
   const workspaceAt = loginFlow.indexOf("enterWorkspace(user)");
   assert.ok(signInAt >= 0 && signInAt < getUserAt && getUserAt < allowlistAt && allowlistAt < workspaceAt);
-  assert.match(gate, /async function enterWorkspace\(user\)\s*\{\s*if \(workspaceVisible\) return;\s*if \(!isAllowedUser\(user\)\) throw new Error\("Unauthorized user"\);[\s\S]*?import\("\.\.\/app\.js"\)/);
+  assert.match(gate, /async function enterWorkspace\(user\)\s*\{\s*if \(workspaceVisible\) return;\s*if \(!isAllowedUser\(user\)\) throw new Error\("Unauthorized user"\);[\s\S]*?import\("\.\.\/app\.js\?v=3\.3\.0"\)/);
 
   const sessionRestore = gate.slice(gate.indexOf("async function boot"), gate.indexOf("async function startGuestDemo"));
   const getSessionAt = sessionRestore.indexOf("authClient.auth.getSession()");

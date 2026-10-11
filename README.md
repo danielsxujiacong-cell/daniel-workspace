@@ -1,11 +1,11 @@
 # Daniel Workspace
 
-私人 AI 工作台 V3.2。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI；私人 Home 只展示 3–5 个手动置顶项目，其他项目保留在 Projects。项目卡只显示真实填写的阶段、下一步和关联任务完成数；没有数据时省略对应行。卡片突出公开 GitHub 最近提交的摘要、时间和 Commit 链接，并以最近 7 天提交数作为辅助信息；GitHub 和线上网站入口仅接受 HTTP/HTTPS。GitHub 快照保存在当前设备并缓存 1 小时；手动刷新可立即读取，私有或仅本地项目显示简短的暂不可读状态。访客首页仍以「企业 AI 自动化工作台」定位展示异常处理价值，并通过 TK-1001 说明异常发现、固定规则、SOP、决策与完成的闭环。私人模式不提供演示数据重置；共享数据层拒绝重置，云端写入路径拒绝内置 Mock 记录。访客内容明确标注为规则驱动的模拟数据，不调用真实 AI 或代表真实企业案例；访客重置仍只影响当前页面内存，不读取 Supabase 配置或会话，也不连接 Companion、Codex 或 AI。
+私人 AI 工作台 V3.3。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI；私人 Home 只展示 3–5 个手动置顶项目，其他项目保留在 Projects。项目详情新增「AI 建议下一步」，结合项目简介、可验证的公开 GitHub 最近提交和关联任务，经现有 GLM Worker 生成建议与依据；生成和编辑仅保留在当前页面，只有点击「采纳为下一步」才通过既有项目同步写入 `project.next`。缺少资料会明确提示，不回退到本地 Mock，不声称未记录的进度；访客演示仍与私人模式隔离。项目卡只显示真实填写的阶段、下一步和关联任务完成数；没有数据时省略对应行。卡片突出公开 GitHub 最近提交的摘要、时间和 Commit 链接，并以最近 7 天提交数作为辅助信息；GitHub 和线上网站入口仅接受 HTTP/HTTPS。GitHub 快照保存在当前设备并缓存 1 小时；手动刷新可立即读取，私有或仅本地项目显示简短的暂不可读状态。访客首页仍以「企业 AI 自动化工作台」定位展示异常处理价值，并通过 TK-1001 说明异常发现、固定规则、SOP、决策与完成的闭环。私人模式不提供演示数据重置；共享数据层拒绝重置，云端写入路径拒绝内置 Mock 记录。访客内容明确标注为规则驱动的模拟数据，不调用真实 AI 或代表真实企业案例；访客重置仍只影响当前页面内存，不读取 Supabase 配置或会话，也不连接 Companion、Codex 或 AI。
 
 ## Status
 
-- **Stage:** V3.2 Step 2-C.1 Home pinned project card presentation. Step 2-B was accepted with Supabase sync working, 29 projects, and 5 pinned projects. Home reads public commit activity only; GitHub snapshots remain in the device-local cloud cache and are excluded from Supabase writes.
-- **Last updated:** 2026-10-10
+- **Stage:** V3.3 Step 2-D.1 project AI next-step suggestion. After the V3.2 cleanup, private Workspace contains 26 real projects and 5 pinned projects; the feature uses the existing GLM Worker and existing `project.next` sync field, with no schema or sync changes.
+- **Last updated:** 2026-10-11
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
 ## Quick start

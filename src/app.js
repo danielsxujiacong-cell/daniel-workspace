@@ -19,6 +19,7 @@ const {
 } = await import("./store.js");
 const { buildAssistantContext } = await import("./ai/context.js");
 const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = await import("./ai/service.js");
+const { buildProjectNextStepContext, parseProjectNextStepResponse } = await import("./ai/project-next-step.js");
 const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = await import("./suggestions.js");
 const { fetchPublicGitHubRepository, GITHUB_CACHE_TTL_MS, isGitHubSnapshotFresh, parsePublicGitHubRepository } = await import("./github/public-api.js?v=3.2");
 const { buildCloudDashboardModel, buildLocalDashboardModel, compareLocalProjects, taskPriorityLabel } = await import("./dashboard.js");
@@ -84,6 +85,7 @@ const ui = {
   dashboardSuggestion: null,
   dashboardSuggestionKey: "",
   dashboardSuggestionStatus: "idle",
+  projectNextStep: null,
   createdSuggestionKeys: [],
   codex: null,
   assistantOpen: false,
@@ -487,6 +489,7 @@ export function clearPrivateWorkspace() {
   ui.dashboardSuggestion = null;
   ui.dashboardSuggestionKey = "";
   ui.dashboardSuggestionStatus = "idle";
+  ui.projectNextStep = null;
   ui.createdSuggestionKeys = [];
   ui.codex = null;
   ui.chat = [];
@@ -1284,6 +1287,192 @@ function knowledgeContent(item) {
   return href ? `<a class="knowledge-external" href="${esc(href)}" target="_blank" rel="noreferrer">${esc(href)} ${icon("external")}</a>` : esc(item.content);
 }
 
+function verifiedProjectGitHubCommit(project) {
+  const repository = parsePublicGitHubRepository(project?.github);
+  const snapshot = project?.githubData;
+  const commit = snapshot?.latestCommit;
+  if (!repository || snapshot?.isPublic !== true
+    || String(snapshot.repositoryName || "").toLowerCase() !== repository.fullName.toLowerCase()
+    || !/^[a-f0-9]{7,40}$/i.test(commit?.sha || "")
+    || !String(commit?.message || "").trim()
+    || !Number.isFinite(new Date(commit?.committedAt || "").getTime())
+    || commit?.url !== `${repository.url}/commit/${commit.sha}`
+    || !Number.isFinite(new Date(snapshot.refreshedAt || "").getTime())) return null;
+  return {
+    repositoryName: repository.fullName,
+    message: commit.message,
+    committedAt: commit.committedAt,
+    refreshedAt: snapshot.refreshedAt,
+    fresh: isGitHubSnapshotFresh(snapshot),
+  };
+}
+
+function projectNextStepContext(project, tasks) {
+  const githubCommit = verifiedProjectGitHubCommit(project);
+  return buildProjectNextStepContext({ project, tasks, githubCommit, githubFresh: githubCommit?.fresh === true });
+}
+
+function renderProjectNextStep(project, tasks) {
+  const current = projectNextStepContext(project, tasks);
+  const state = ui.projectNextStep?.projectId === project.id ? ui.projectNextStep : null;
+  const aiReady = getAIStatus().mode === "real";
+  const stale = Boolean(state?.suggestion && state.contextKey !== current.contextKey);
+  const cloudReady = cloudSyncEnabled && ui.cloud.status === "synced" && !cloudSyncRunning && !cloudSyncTimer && navigator.onLine !== false;
+  const githubSource = current.context.github.available
+    ? `${current.context.github.repositoryName} · ${current.context.github.latestCommitMessage}${current.context.github.committedAt ? ` · ${formattedTimestamp(current.context.github.committedAt)}` : ""}${current.context.github.snapshotFresh ? " · 最近刷新" : " · 快照可能过期"}`
+    : parsePublicGitHubRepository(project.github) ? "尚无可验证的公开 GitHub 最近提交" : "未配置有效的公开 GitHub 仓库";
+  const missing = [...current.missing, ...(state?.warning ? [state.warning] : [])];
+  return `<section class="card card-pad project-next-step" aria-labelledby="project-next-step-title">
+    <div class="project-next-step-head"><div><h3 id="project-next-step-title">AI 建议下一步</h3><p>结合项目简介、公开 GitHub 最近提交和关联任务。生成或编辑只是草稿，只有点击采纳才会保存到项目。</p></div><button class="button quiet small" data-action="generate-project-next-step" data-id="${esc(project.id)}" ${state?.busy || !aiReady ? "disabled" : ""}>${state?.busy ? "正在生成…" : state?.suggestion ? "重新生成" : "生成建议"}</button></div>
+    <div class="project-next-step-sources"><span>项目简介：${project.description?.trim() ? "已提供" : "缺失"}</span><span>GitHub：${esc(githubSource)}</span><span>关联任务：${tasks.length} 条</span></div>
+    ${missing.length ? `<p class="project-next-step-missing" role="status">资料提示：${esc(missing.join("；"))}。建议只依据当前可用资料，不代表未记录的进度。</p>` : ""}
+    ${!aiReady ? `<p class="project-next-step-error" role="status">智谱 API 当前未配置；此功能不会改用本地 Mock 生成建议。</p>` : ""}
+    ${state?.error ? `<p class="project-next-step-error" role="alert">${esc(state.error)}</p>` : ""}
+    ${state?.suggestion ? `<label class="project-next-step-label" for="project-next-step-draft">建议内容（可编辑）</label><textarea id="project-next-step-draft" maxlength="500" rows="3" ${state.busy ? "disabled" : ""}>${esc(state.suggestion)}</textarea><div class="project-next-step-rationale"><strong>依据</strong><span>${esc(state.rationale || "请检查建议依据后再采纳。")}</span></div>
+      ${stale ? `<p class="project-next-step-missing" role="status">项目资料或关联任务在生成后有变化，请重新生成后再采纳。</p>` : ""}
+      <div class="project-next-step-footer">${state.adopted ? `<span class="project-next-step-saved" role="status">已采纳到项目资料；云端状态请查看页面同步指示。</span>` : !cloudReady ? `<span class="project-next-step-missing" role="status">云端同步就绪后才能采纳。</span>` : ""}<button class="button primary small" data-action="adopt-project-next-step" data-id="${esc(project.id)}" ${state.busy || stale || !cloudReady || !state.suggestion.trim() || state.suggestion.trim() === state.adoptedText ? "disabled" : ""}>${state.adopted ? (state.suggestion.trim() === state.adoptedText ? "已采纳" : "采纳修改") : "采纳为下一步"}</button></div>` : ""}
+  </section>`;
+}
+
+async function refreshProjectNextStepGitHub(project) {
+  const repository = parsePublicGitHubRepository(project.github);
+  const cached = verifiedProjectGitHubCommit(project);
+  if (!repository) return { commit: null, warning: "未关联有效的公开 GitHub 仓库。" };
+  if (cached?.fresh) return { commit: cached, warning: "" };
+  if (ui.githubRefreshing) return {
+    commit: cached,
+    warning: cached ? "GitHub 正在刷新，暂使用上次真实快照；请留意快照时间。" : "GitHub 正在刷新，当前没有可用的最近提交。",
+  };
+
+  const githubUrl = project.github;
+  ui.githubRefreshing = true;
+  ui.githubRefreshStatus[project.id] = "loading";
+  try {
+    const snapshot = await fetchPublicGitHubRepository(githubUrl);
+    const current = projectById(project.id);
+    if (!workspaceActive || !current || current.github !== githubUrl) return { commit: null, warning: "项目 GitHub 地址已变化，请重新生成建议。" };
+    current.githubData = snapshot;
+    ui.githubRefreshStatus[project.id] = "connected";
+    delete ui.githubRefreshAttemptAt[project.id];
+    saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt, ui.projectPinningAvailable);
+    return { commit: verifiedProjectGitHubCommit(current), warning: "" };
+  } catch {
+    ui.githubRefreshAttemptAt[project.id] = Date.now();
+    ui.githubRefreshStatus[project.id] = "error";
+    return {
+      commit: cached,
+      warning: cached ? "无法刷新 GitHub；使用上次真实快照，可能不是最新提交。" : "无法从公开 GitHub 获取最近提交，此来源未提供给 AI。",
+    };
+  } finally {
+    ui.githubRefreshing = false;
+  }
+}
+
+async function generateProjectNextStep(projectId) {
+  const project = projectById(projectId);
+  if (!project || !workspaceActive) return;
+  if (getAIStatus().mode !== "real") {
+    ui.projectNextStep = { projectId, error: "智谱 API 当前未配置；此功能不会使用本地 Mock。" };
+    render();
+    return;
+  }
+  if (!cloudSyncEnabled || ui.cloud.status !== "synced") {
+    ui.projectNextStep = { projectId, error: "请先连接并完成私人云端同步，再生成建议。" };
+    render();
+    return;
+  }
+
+  const requestId = uid("next-step");
+  const prior = ui.projectNextStep?.projectId === projectId ? ui.projectNextStep : null;
+  ui.projectNextStep = { ...prior, projectId, requestId, busy: true, error: "", warning: "" };
+  render();
+  try {
+    const githubResult = await refreshProjectNextStepGitHub(project);
+    if (!workspaceActive || ui.projectNextStep?.requestId !== requestId) return;
+    const currentProject = projectById(projectId);
+    if (!currentProject) throw new Error("项目已不存在，请返回 Projects 后重试。");
+    const tasks = db.tasks.filter((task) => task.projectId === projectId);
+    const context = buildProjectNextStepContext({
+      project: currentProject,
+      tasks,
+      githubCommit: githubResult.commit,
+      githubFresh: githubResult.commit?.fresh === true,
+    });
+    if (!context.hasEvidence) {
+      ui.projectNextStep = { projectId, requestId, busy: false, error: "资料不足，无法生成可靠建议。请补充项目简介、关联任务或可读取的公开 GitHub 提交。", missing: context.missing, warning: githubResult.warning };
+      render();
+      return;
+    }
+    const result = await chatWithAI({
+      message: "为当前项目提出一条具体、可执行的下一步建议，并简短说明依据。严格只返回 JSON：{\"suggestion\":\"...\",\"rationale\":\"...\"}。只能依据 Workspace Context 中当前项目的简介、真实公开 GitHub 最近提交、当前下一步和已记录任务；不得声称未提供的进度、完成状态、代码改动或期限。若资料缺失，不要用推测补全；建议优先使用动词描述一个可实际执行的动作，并避免重复当前下一步。",
+      currentPage: "project-next-step",
+      currentProject: { name: currentProject.name },
+      relevantContext: { projectNextStep: context.context },
+      history: [],
+    });
+    if (result.provider !== "real") throw new Error("智谱服务没有返回真实模型结果；建议未生成。");
+    const parsed = parseProjectNextStepResponse(result.message?.content);
+    if (!workspaceActive || ui.projectNextStep?.requestId !== requestId) return;
+    const latestProject = projectById(projectId);
+    const latestTasks = db.tasks.filter((task) => task.projectId === projectId);
+    const latestContext = buildProjectNextStepContext({
+      project: latestProject,
+      tasks: latestTasks,
+      githubCommit: verifiedProjectGitHubCommit(latestProject),
+      githubFresh: verifiedProjectGitHubCommit(latestProject)?.fresh === true,
+    });
+    if (context.contextKey !== latestContext.contextKey) throw new Error("项目或关联任务在生成期间发生变化，请重新生成建议。");
+    ui.projectNextStep = {
+      projectId,
+      requestId,
+      busy: false,
+      suggestion: parsed.suggestion,
+      rationale: parsed.rationale,
+      contextKey: context.contextKey,
+      missing: context.missing,
+      warning: githubResult.warning,
+      model: result.model,
+      adopted: false,
+      adoptedText: "",
+      error: "",
+    };
+  } catch (error) {
+    if (!workspaceActive || ui.projectNextStep?.requestId !== requestId) return;
+    ui.projectNextStep = {
+      ...ui.projectNextStep,
+      busy: false,
+      error: error?.code ? getAIErrorMessage(error) : (error?.message || "建议生成失败，请重试。"),
+    };
+  }
+  if (workspaceActive && ui.projectNextStep?.requestId === requestId) render();
+}
+
+function adoptProjectNextStep(projectId) {
+  const state = ui.projectNextStep;
+  const project = projectById(projectId);
+  if (!project || !state || state.projectId !== projectId || state.busy || !state.suggestion?.trim()) return;
+  if (!cloudSyncEnabled || ui.cloud.status !== "synced" || cloudSyncRunning || cloudSyncTimer || navigator.onLine === false) {
+    toast("请等私人云端同步就绪后再采纳建议");
+    return;
+  }
+  const tasks = db.tasks.filter((task) => task.projectId === projectId);
+  const current = projectNextStepContext(project, tasks);
+  if (current.contextKey !== state.contextKey) {
+    ui.projectNextStep = { ...state, error: "项目资料或关联任务在建议生成后发生变化，请重新生成后再采纳。" };
+    render();
+    return;
+  }
+  const next = state.suggestion.trim().slice(0, 500);
+  if (!next || next === state.adoptedText) return;
+  project.next = next;
+  project.updatedAt = new Date().toISOString();
+  const adoptedContext = projectNextStepContext(project, tasks);
+  ui.projectNextStep = { ...state, contextKey: adoptedContext.contextKey, adopted: true, adoptedText: next, error: "" };
+  persist();
+  render();
+  toast("已采纳为项目下一步，正在同步到云端");
+}
+
 function renderProjectDetail() {
   const project = projectById(ui.projectId);
   if (!project) return `<div class="page-heading"><div><h1>找不到这个项目</h1><p>它可能已经被删除。</p></div><button class="button" data-page="projects">${icon("back")} 返回项目</button></div>`;
@@ -1296,6 +1485,7 @@ function renderProjectDetail() {
   return `<div class="detail-topline"><button class="icon-button" data-page="projects" aria-label="返回项目">${icon("back")}</button><span>Projects</span>${icon("chevron")}<span>${esc(project.name)}</span></div>
     <section class="card detail-hero"><div class="detail-hero-head"><div class="detail-hero-copy">${statusPill(project.status)}<h2 style="margin-top:11px">${esc(project.name)}</h2><p>${esc(project.description || "还没有项目简介。")}</p></div><div class="detail-actions"><button class="button" data-action="edit-project" data-id="${esc(project.id)}">${icon("edit")} 编辑项目</button><button class="button quiet danger" data-action="delete-project" data-id="${esc(project.id)}">${icon("trash")} 删除</button></div></div><div class="detail-links">${github ? `<a class="detail-link" href="${esc(github)}" target="_blank" rel="noreferrer">${icon("external")} GitHub</a>` : ""}${live ? `<a class="detail-link" href="${esc(live)}" target="_blank" rel="noreferrer">${icon("external")} 在线网址</a>` : ""}</div></section>
     <div class="detail-meta-grid"><div class="card meta-card"><div class="meta-label">当前阶段</div><div class="meta-value">${esc(project.stage || "未设置")}</div></div><div class="card meta-card"><div class="meta-label">下一步</div><div class="meta-value">${esc(project.next || "待补充")}</div></div><div class="card meta-card"><div class="meta-label">进度概览</div><div class="meta-value">${tasks.filter((task) => task.status === "done").length} / ${tasks.length} 项任务完成</div></div></div>
+    ${renderProjectNextStep(project, tasks)}
     ${project.notes ? `<section class="card card-pad project-notes"><div class="meta-label">云端手工备注</div><p>${esc(project.notes)}</p></section>` : ""}
     ${renderGitHubDetails(project)}
     ${renderLocalProjectDetails(localProject)}
@@ -1936,6 +2126,8 @@ function handleAction(action, element, sourceEvent) {
     render();
   }
   if (action === "open-create-project") openModal("project");
+  if (action === "generate-project-next-step") { void generateProjectNextStep(id); return; }
+  if (action === "adopt-project-next-step") { adoptProjectNextStep(id); return; }
   if (action === "preview-local-project-sync") openLocalProjectSyncPreview();
   if (action === "retry-cloud-sync") void initializeCloudSync();
   if (action === "migrate-legacy-data") void migrateLegacyData();
@@ -2097,6 +2289,21 @@ app.addEventListener("keydown", (event) => {
 });
 
 app.addEventListener("input", (event) => {
+  if (event.target.id === "project-next-step-draft" && ui.projectNextStep?.projectId === ui.projectId) {
+    const state = ui.projectNextStep;
+    state.suggestion = event.target.value.slice(0, 500);
+    const section = event.target.closest(".project-next-step");
+    const button = section?.querySelector('[data-action="adopt-project-next-step"]');
+    if (button) {
+      const unchanged = state.suggestion.trim() === state.adoptedText;
+      const project = projectById(ui.projectId);
+      const current = project ? projectNextStepContext(project, db.tasks.filter((task) => task.projectId === project.id)) : null;
+      const stale = !current || current.contextKey !== state.contextKey;
+      const cloudReady = cloudSyncEnabled && ui.cloud.status === "synced" && !cloudSyncRunning && !cloudSyncTimer && navigator.onLine !== false;
+      button.disabled = state.busy || stale || !cloudReady || !state.suggestion.trim() || unchanged;
+      button.textContent = state.adopted ? (unchanged ? "已采纳" : "采纳修改") : "采纳为下一步";
+    }
+  }
   if (event.target.id === "global-search") {
     ui.query = event.target.value;
     ui.searchOpen = true;
