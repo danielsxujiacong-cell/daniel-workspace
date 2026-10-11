@@ -1182,7 +1182,7 @@ async function generateDailyBrief() {
     });
     if (!workspaceActive) return;
     if (result.provider !== "real") throw new Error("真实 GLM 服务不可用；未使用 Mock 简报，请检查 AI 配置后重试。");
-    ui.dailyBrief = parseDailyBriefResponse(result.message.content, projects);
+    ui.dailyBrief = parseDailyBriefResponse(result.message.content, projects, context);
     ui.dailyBriefStatus = "ready";
   } catch (error) {
     ui.dailyBrief = { error: error?.code ? getAIErrorMessage(error) : error?.message || getAIErrorMessage(error) };

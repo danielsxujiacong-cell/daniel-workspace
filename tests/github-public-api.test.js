@@ -66,6 +66,8 @@ test("counts all commits in the last seven days and uses no GitHub credentials",
   assert.equal(snapshot.latestCommit.url, `https://github.com/acme/workspace/commit/${recentCommits[0].sha}`);
   assert.equal(snapshot.latestCommit.committedAt, recentCommits[0].commit.committer.date);
   assert.equal(snapshot.recentSevenDayCommitCount, 101);
+  assert.equal(snapshot.recentCommits.length, 20);
+  assert.equal(snapshot.recentCommits[0].message, "最新摘要");
   assert.equal(snapshot.isPublic, true);
   assert.equal(snapshot.refreshedAt, new Date(now).toISOString());
   assert.equal(requests.length, 3);

@@ -112,14 +112,20 @@ export async function fetchPublicGitHubRepository(githubUrl, { now = Date.now() 
 
     let recentCommitCount = 0;
     let latest = null;
+    const recentCommits = [];
     let page = 1;
     let commits = firstRecentPage;
     while (commits.length) {
       if (!latest) latest = commits[0];
-      recentCommitCount += commits.filter((commit) => {
+      const withinSevenDays = commits.filter((commit) => {
         const timestamp = new Date(commitDate(commit)).getTime();
         return Number.isFinite(timestamp) && timestamp >= now - GITHUB_ACTIVITY_WINDOW_MS;
-      }).length;
+      });
+      recentCommitCount += withinSevenDays.length;
+      for (const commit of withinSevenDays) {
+        if (recentCommits.length >= 20) break;
+        recentCommits.push(commitSummary(commit, repository));
+      }
       if (commits.length < 100) break;
       page += 1;
       commits = await getCommitPage(`${base}/commits?per_page=100&since=${encodeURIComponent(new Date(now - GITHUB_ACTIVITY_WINDOW_MS).toISOString())}&page=${page}`, controller.signal);
@@ -150,6 +156,7 @@ export async function fetchPublicGitHubRepository(githubUrl, { now = Date.now() 
       defaultBranch: typeof repo.default_branch === "string" ? repo.default_branch : "",
       updatedAt: typeof repo.updated_at === "string" ? repo.updated_at : "",
       latestCommit: commitSummary(latest, repository),
+      recentCommits,
       recentSevenDayCommitCount: recentCommitCount,
       pagesUrl,
       pagesUrlEstimated,

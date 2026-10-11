@@ -1,10 +1,10 @@
 # Daniel Workspace
 
-私人 AI 工作台 V3.4 Step 1。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI；私人 Home 只展示 3–5 个手动置顶项目，其他项目保留在 Projects：首页新增按需生成的「AI 今日简报」，使用真实 GLM，依据置顶项目的已验证公开 GitHub 最近提交、状态和已确认下一步，输出最近完成、1–3 条今日建议和关注问题；每条须关联项目并说明依据，资料不足时说明，不修改项目或任务。项目详情新增「AI 建议下一步」，使用项目简介和可验证的公开 GitHub 最近提交作为生成依据，关联任务（如有）仅作补充，经现有 GLM Worker 生成具体建议与依据；生成和编辑仅保留在当前页面，只有点击「采纳为下一步」才通过既有项目同步写入 `project.next`。缺少资料会明确提示，不回退到本地 Mock，不声称未记录的进度；访客演示仍与私人模式隔离。项目卡只显示真实填写的阶段、下一步和关联任务完成数；没有数据时省略对应行。卡片突出公开 GitHub 最近提交的摘要、时间和 Commit 链接，并以最近 7 天提交数作为辅助信息；GitHub 和线上网站入口仅接受 HTTP/HTTPS。GitHub 快照保存在当前设备并缓存 1 小时；手动刷新可立即读取，私有或仅本地项目显示简短的暂不可读状态。访客首页仍以「企业 AI 自动化工作台」定位展示异常处理价值，并通过 TK-1001 说明异常发现、固定规则、SOP、决策与完成的闭环。私人模式不提供演示数据重置；共享数据层拒绝重置，云端写入路径拒绝内置 Mock 记录。访客内容明确标注为规则驱动的模拟数据，不调用真实 AI 或代表真实企业案例；访客重置仍只影响当前页面内存，不读取 Supabase 配置或会话，也不连接 Companion、Codex 或 AI。
+私人 AI 工作台 V3.4.1。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI；私人 Home 只展示 3–5 个手动置顶项目，其他项目保留在 Projects：首页新增按需生成的「AI 今日简报」，使用真实 GLM，依据置顶项目的已验证公开 GitHub 最近提交、状态和已确认下一步，输出最近完成、1–3 条今日建议和关注问题；每条须关联项目并说明依据，优先分析过去 24 小时提交，并将过去 1–7 天提交明确标为补充；建议须结合真实开发变化、提供可验收结果，不复述空泛 next_step。资料不足时说明，不修改项目或任务。项目详情新增「AI 建议下一步」，使用项目简介和可验证的公开 GitHub 最近提交作为生成依据，关联任务（如有）仅作补充，经现有 GLM Worker 生成具体建议与依据；生成和编辑仅保留在当前页面，只有点击「采纳为下一步」才通过既有项目同步写入 `project.next`。缺少资料会明确提示，不回退到本地 Mock，不声称未记录的进度；访客演示仍与私人模式隔离。项目卡只显示真实填写的阶段、下一步和关联任务完成数；没有数据时省略对应行。卡片突出公开 GitHub 最近提交的摘要、时间和 Commit 链接，并以最近 7 天提交数作为辅助信息；GitHub 和线上网站入口仅接受 HTTP/HTTPS。GitHub 快照保存在当前设备并缓存 1 小时；手动刷新可立即读取，私有或仅本地项目显示简短的暂不可读状态。访客首页仍以「企业 AI 自动化工作台」定位展示异常处理价值，并通过 TK-1001 说明异常发现、固定规则、SOP、决策与完成的闭环。私人模式不提供演示数据重置；共享数据层拒绝重置，云端写入路径拒绝内置 Mock 记录。访客内容明确标注为规则驱动的模拟数据，不调用真实 AI 或代表真实企业案例；访客重置仍只影响当前页面内存，不读取 Supabase 配置或会话，也不连接 Companion、Codex 或 AI。
 
 ## Status
 
-- **Stage:** V3.4 Step 1 AI daily brief. After the V3.2 cleanup, private Workspace contains 26 real projects and 5 pinned projects; the feature uses the existing GLM Worker and existing `project.next` sync field, with no schema or sync changes.
+- **Stage:** V3.4.1 daily brief quality improvements. After the V3.2 cleanup, private Workspace contains 26 real projects and 5 pinned projects; the feature uses the existing GLM Worker and existing `project.next` sync field, with no schema or sync changes.
 - **Last updated:** 2026-10-11
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
