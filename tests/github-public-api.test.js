@@ -3,24 +3,14 @@ import assert from "node:assert/strict";
 import {
   GITHUB_ACTIVITY_WINDOW_MS,
   GITHUB_CACHE_TTL_MS,
+  fetchPublicGitHubRepositories,
   fetchPublicGitHubRepository,
   isGitHubSnapshotFresh,
   parsePublicGitHubRepository,
 } from "../src/github/public-api.js";
 
 const now = Date.parse("2026-10-10T12:00:00.000Z");
-
-function commit(sha, committedAt, message = "提交摘要\n详细说明") {
-  return {
-    sha,
-    html_url: `https://github.com/acme/workspace/commit/${sha}`,
-    commit: { message, committer: { date: committedAt }, author: { date: committedAt } },
-  };
-}
-
-function response(body, status = 200) {
-  return { ok: status >= 200 && status < 300, status, json: async () => body };
-}
+const auth = { client: { auth: { getSession: async () => ({ data: { session: { access_token: "workspace-session" } }, error: null }) } } };
 
 function stubFetch(t, handler) {
   const original = globalThis.fetch;
@@ -28,14 +18,22 @@ function stubFetch(t, handler) {
   t.after(() => { globalThis.fetch = original; });
 }
 
-const publicRepository = {
-  private: false,
-  visibility: "public",
-  full_name: "acme/workspace",
-  html_url: "https://github.com/acme/workspace",
-  default_branch: "main",
-  updated_at: "2026-10-10T11:00:00.000Z",
-  has_pages: false,
+const snapshot = {
+  repositoryName: "acme/workspace",
+  repositoryUrl: "https://github.com/acme/workspace",
+  defaultBranch: "main",
+  updatedAt: "2026-10-10T11:00:00.000Z",
+  latestCommit: {
+    sha: "abcdef0",
+    message: "最新摘要",
+    url: "https://github.com/acme/workspace/commit/abcdef0123456789abcdef0123456789abcdef01",
+    committedAt: "2026-10-10T11:00:00.000Z",
+  },
+  recentCommits: [],
+  recentSevenDayCommitCount: 101,
+  pagesUrl: "",
+  isPublic: true,
+  refreshedAt: new Date(now).toISOString(),
 };
 
 test("parses only GitHub HTTPS repository URLs", () => {
@@ -44,70 +42,53 @@ test("parses only GitHub HTTPS repository URLs", () => {
   assert.equal(parsePublicGitHubRepository("https://notgithub.com/acme/workspace"), null);
 });
 
-test("counts all commits in the last seven days and uses no GitHub credentials", async (t) => {
-  const recentCommits = Array.from({ length: 100 }, (_, index) => commit(
-    `${index.toString(16).padStart(2, "0")}${"a".repeat(38)}`,
-    new Date(now - index * 60_000).toISOString(),
-    index === 0 ? "最新摘要\n后续说明" : `提交 ${index}`,
-  ));
-  const finalCommit = commit(`${"f".repeat(40)}`, new Date(now - GITHUB_ACTIVITY_WINDOW_MS).toISOString());
+test("sends public repository reads through the authenticated Worker, never the phone/browser GitHub API", async (t) => {
   const requests = [];
   stubFetch(t, async (url, options) => {
     requests.push({ url: new URL(url), options });
-    if (new URL(url).pathname === "/repos/acme/workspace") return response(publicRepository);
-    if (new URL(url).searchParams.get("page") === "1") return response(recentCommits);
-    if (new URL(url).searchParams.get("page") === "2") return response([finalCommit]);
-    assert.fail(`Unexpected GitHub request: ${url}`);
+    return Response.json({ snapshots: [snapshot], errors: [] });
   });
 
-  const snapshot = await fetchPublicGitHubRepository("https://github.com/acme/workspace", { now });
-  assert.equal(snapshot.latestCommit.message, "最新摘要");
-  assert.equal(snapshot.latestCommit.sha, recentCommits[0].sha.slice(0, 7));
-  assert.equal(snapshot.latestCommit.url, `https://github.com/acme/workspace/commit/${recentCommits[0].sha}`);
-  assert.equal(snapshot.latestCommit.committedAt, recentCommits[0].commit.committer.date);
-  assert.equal(snapshot.recentSevenDayCommitCount, 101);
-  assert.equal(snapshot.recentCommits.length, 20);
-  assert.equal(snapshot.recentCommits[0].message, "最新摘要");
-  assert.equal(snapshot.isPublic, true);
-  assert.equal(snapshot.refreshedAt, new Date(now).toISOString());
-  assert.equal(requests.length, 3);
-  for (const { url, options } of requests) {
-    assert.equal(url.origin, "https://api.github.com");
-    if (url.pathname.endsWith("/commits")) {
-      assert.equal(url.searchParams.get("since"), new Date(now - GITHUB_ACTIVITY_WINDOW_MS).toISOString());
-    }
-    assert.equal(options.credentials, "omit");
-    assert.equal(options.headers.Authorization, undefined);
-    assert.equal(options.referrerPolicy, "no-referrer");
-  }
+  const result = await fetchPublicGitHubRepositories([
+    "https://github.com/acme/workspace",
+    "https://github.com/acme/workspace.git",
+  ], auth);
+
+  assert.equal(requests.length, 1);
+  const [{ url, options }] = requests;
+  assert.equal(url.origin, "https://daniel-workspace-api.ai-investment-dashboard.workers.dev");
+  assert.equal(url.pathname, "/api/github/public-snapshots");
+  assert.equal(url.origin === "https://api.github.com", false);
+  assert.equal(options.method, "POST");
+  assert.equal(options.headers.Authorization, "Bearer workspace-session");
+  assert.equal(options.headers["Content-Type"], "application/json");
+  assert.deepEqual(JSON.parse(options.body), { repositories: [{ fullName: "acme/workspace" }] });
+  assert.equal(options.credentials, "omit");
+  assert.equal(options.cache, "no-store");
+  assert.equal(options.referrerPolicy, "no-referrer");
+  assert.deepEqual(result.snapshots, [snapshot]);
+  assert.equal(result.errors.length, 0);
 });
 
-test("shows the latest older commit when there were no commits in the seven-day window", async (t) => {
-  const oldCommit = commit("b".repeat(40), new Date(now - GITHUB_ACTIVITY_WINDOW_MS - 1000).toISOString(), "旧提交");
-  stubFetch(t, async (url) => {
-    const parsed = new URL(url);
-    if (parsed.pathname === "/repos/acme/workspace") return response(publicRepository);
-    if (parsed.searchParams.has("since")) return response([]);
-    if (parsed.searchParams.get("per_page") === "1") return response([oldCommit]);
-    assert.fail(`Unexpected GitHub request: ${url}`);
-  });
+test("surfaces a sanitized upstream HTTP status from the Worker", async (t) => {
+  stubFetch(t, async () => Response.json({
+    snapshots: [],
+    errors: [{ fullName: "acme/workspace", code: "github_upstream_error", httpStatus: 403, message: "GitHub public repository metadata read HTTP 403: rate limit exceeded" }],
+  }));
 
-  const snapshot = await fetchPublicGitHubRepository("https://github.com/acme/workspace", { now });
-  assert.equal(snapshot.latestCommit.message, "旧提交");
-  assert.equal(snapshot.recentSevenDayCommitCount, 0);
+  await assert.rejects(
+    fetchPublicGitHubRepository("https://github.com/acme/workspace", { auth }),
+    (error) => error.status === 403 && error.upstreamStatus === 403 && /HTTP 403/.test(error.message),
+  );
 });
 
-test("treats inaccessible private repositories as unavailable", async (t) => {
-  stubFetch(t, async () => response({ message: "Not Found" }, 404));
-  await assert.rejects(fetchPublicGitHubRepository("https://github.com/acme/private", { now }), (error) => error.status === 404);
-});
-
-test("uses a one-hour cache boundary", () => {
+test("preserves the one-hour snapshot cache boundary", () => {
   assert.equal(GITHUB_CACHE_TTL_MS, 60 * 60 * 1000);
-  const snapshot = (refreshedAt) => ({ refreshedAt, recentSevenDayCommitCount: 0 });
-  assert.equal(isGitHubSnapshotFresh(snapshot(new Date(now - GITHUB_CACHE_TTL_MS + 1).toISOString()), now), true);
-  assert.equal(isGitHubSnapshotFresh(snapshot(new Date(now - GITHUB_CACHE_TTL_MS).toISOString()), now), false);
-  assert.equal(isGitHubSnapshotFresh(snapshot(new Date(now + 1).toISOString()), now), false);
-  assert.equal(isGitHubSnapshotFresh(snapshot("invalid"), now), false);
+  assert.equal(GITHUB_ACTIVITY_WINDOW_MS, 7 * 24 * 60 * 60 * 1000);
+  const fresh = (refreshedAt) => ({ refreshedAt, recentSevenDayCommitCount: 0 });
+  assert.equal(isGitHubSnapshotFresh(fresh(new Date(now - GITHUB_CACHE_TTL_MS + 1).toISOString()), now), true);
+  assert.equal(isGitHubSnapshotFresh(fresh(new Date(now - GITHUB_CACHE_TTL_MS).toISOString()), now), false);
+  assert.equal(isGitHubSnapshotFresh(fresh(new Date(now + 1).toISOString()), now), false);
+  assert.equal(isGitHubSnapshotFresh(fresh("invalid"), now), false);
   assert.equal(isGitHubSnapshotFresh({ refreshedAt: new Date(now).toISOString() }, now), false);
 });

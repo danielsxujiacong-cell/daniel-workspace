@@ -93,7 +93,7 @@ async function appJwt(env) {
 async function githubApi(path, token, options = {}) {
   return fetch(`https://api.github.com${path}`, {
     ...options,
-    headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${token}`, "User-Agent": "Daniel-Workspace-GitHub-App-Reader/3.5", "X-GitHub-Api-Version": "2022-11-28", ...(options.headers || {}) },
+    headers: { Accept: "application/vnd.github+json", ...(token ? { Authorization: `Bearer ${token}` } : {}), "User-Agent": "Daniel-Workspace-GitHub-App-Reader/3.5", "X-GitHub-Api-Version": "2022-11-28", ...(options.headers || {}) },
     signal: AbortSignal.timeout(12_000),
   });
 }
@@ -179,6 +179,178 @@ async function listAppAuthorizedRepositories(env, { includeTokens = false } = {}
     }
   }
   return repositories;
+}
+
+async function createPublicReadToken(env) {
+  if (!env.GITHUB_APP_ID || !env.GITHUB_APP_PRIVATE_KEY) return null;
+  try {
+    const jwt = await appJwt(env);
+    const installations = await findAppInstallations(jwt, env);
+    return installations.length ? await createInstallationToken(installations[0].id, jwt) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function publicGitHubJson(path, token, operation, { allowEmpty = false } = {}) {
+  let response = await githubApi(path, token);
+  if (!response.ok && token && [401, 403, 404].includes(response.status)) {
+    response = await githubApi(path, null);
+  }
+  if (allowEmpty && response.status === 409) return [];
+  if (!response.ok) throw await githubUpstreamFailure(response, operation);
+  return response.json();
+}
+
+function publicCommit(commit, fullName) {
+  const rawSha = typeof commit?.sha === "string" && /^[a-f0-9]{7,40}$/i.test(commit.sha) ? commit.sha : "";
+  const committedAt = commit?.commit?.committer?.date || commit?.commit?.author?.date || "";
+  if (!rawSha || !Number.isFinite(Date.parse(committedAt))) return null;
+  return {
+    sha: rawSha.slice(0, 7),
+    message: typeof commit.commit?.message === "string" ? commit.commit.message.split(/\r?\n/, 1)[0].slice(0, 240) : "",
+    url: `https://github.com/${fullName}/commit/${rawSha}`,
+    committedAt,
+  };
+}
+
+function estimatedPublicPagesUrl(owner, repository) {
+  const userSite = repository.toLowerCase() === `${owner.toLowerCase()}.github.io`;
+  return `https://${owner.toLowerCase()}.github.io/${userSite ? "" : `${encodeURIComponent(repository)}/`}`;
+}
+
+async function readPublicGitHubSnapshot(fullName, token) {
+  const [owner, repository] = fullName.split("/");
+  const encoded = `${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`;
+  const repo = await publicGitHubJson(`/repos/${encoded}`, token, "GitHub public repository metadata read");
+  if (repo?.private !== false || repo?.visibility === "private" || repo?.full_name?.toLowerCase() !== fullName.toLowerCase()) {
+    const error = new Error("当前只支持读取公开仓库。");
+    error.code = "github_public_repository_required";
+    error.upstreamStatus = 404;
+    error.upstreamOperation = "GitHub public repository metadata read";
+    error.upstreamMessage = "Repository is not public or does not exist.";
+    throw error;
+  }
+
+  const now = Date.now();
+  const since = new Date(now - 7 * 86400_000).toISOString();
+  const recentCommits = [];
+  let recentSevenDayCommitCount = 0;
+  let latest = null;
+  let page = 1;
+  let commits = await publicGitHubJson(
+    `/repos/${encoded}/commits?per_page=100&since=${encodeURIComponent(since)}&page=${page}`,
+    token,
+    "GitHub recent commits read",
+    { allowEmpty: true },
+  );
+  if (!Array.isArray(commits)) throw new Error("github_invalid_public_commit_response");
+  while (commits.length) {
+    if (!latest) latest = commits[0];
+    const withinWindow = commits.filter((commit) => {
+      const date = Date.parse(commit?.commit?.committer?.date || commit?.commit?.author?.date || "");
+      return Number.isFinite(date) && date >= now - 7 * 86400_000;
+    });
+    recentSevenDayCommitCount += withinWindow.length;
+    for (const commit of withinWindow) {
+      if (recentCommits.length >= 20) break;
+      const summary = publicCommit(commit, repo.full_name);
+      if (summary?.message) recentCommits.push(summary);
+    }
+    if (commits.length < 100 || page >= 100) break;
+    page += 1;
+    commits = await publicGitHubJson(
+      `/repos/${encoded}/commits?per_page=100&since=${encodeURIComponent(since)}&page=${page}`,
+      token,
+      "GitHub recent commits read",
+      { allowEmpty: true },
+    );
+    if (!Array.isArray(commits)) throw new Error("github_invalid_public_commit_response");
+  }
+  if (!latest) {
+    const latestCommits = await publicGitHubJson(`/repos/${encoded}/commits?per_page=1`, token, "GitHub latest commit read", { allowEmpty: true });
+    if (!Array.isArray(latestCommits)) throw new Error("github_invalid_public_commit_response");
+    latest = latestCommits[0] || null;
+  }
+
+  let pagesUrl = "";
+  let pagesUrlEstimated = false;
+  if (repo.has_pages) {
+    try {
+      const pages = await publicGitHubJson(`/repos/${encoded}/pages`, token, "GitHub Pages configuration read");
+      if (typeof pages?.html_url === "string") {
+        const parsed = new URL(pages.html_url);
+        if (parsed.protocol === "https:") pagesUrl = parsed.href;
+      }
+    } catch (error) {
+      if (error?.upstreamStatus !== 404) throw error;
+    }
+    if (!pagesUrl) {
+      pagesUrl = estimatedPublicPagesUrl(owner, repo.name || repository);
+      pagesUrlEstimated = true;
+    }
+  }
+
+  return {
+    repositoryName: repo.full_name,
+    repositoryUrl: `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`,
+    defaultBranch: typeof repo.default_branch === "string" ? repo.default_branch : "",
+    updatedAt: typeof repo.updated_at === "string" ? repo.updated_at : "",
+    latestCommit: publicCommit(latest, repo.full_name),
+    recentCommits,
+    recentSevenDayCommitCount,
+    recentSevenDayCommitCountTruncated: page >= 100,
+    pagesUrl,
+    pagesUrlEstimated,
+    isPublic: true,
+    refreshedAt: new Date(now).toISOString(),
+  };
+}
+
+function publicRepositoryError(fullName, error) {
+  const httpStatus = Number.isInteger(error?.upstreamStatus) ? error.upstreamStatus : null;
+  const upstreamMessage = httpStatus ? sanitizeGitHubMessage(error?.upstreamMessage) : null;
+  return {
+    fullName,
+    code: error?.code || "github_unavailable",
+    ...(httpStatus ? { httpStatus, operation: error?.upstreamOperation || "GitHub API", upstreamMessage } : {}),
+    message: httpStatus
+      ? `${error?.upstreamOperation || "GitHub API"} HTTP ${httpStatus}: ${upstreamMessage}`
+      : "公开 GitHub 仓库读取失败，请稍后重试。",
+  };
+}
+
+async function publicGitHubRoute(request, env) {
+  const user = await authenticateWorkspace(request, env);
+  if (!user) return githubError(request, env, 401, "github_session_required", "Workspace 登录已失效，请重新登录后重试。");
+  if (request.method !== "POST") return githubError(request, env, 405, "github_method_not_allowed", "仅支持公开仓库只读请求。");
+
+  let body;
+  try { body = await request.json(); } catch { return githubError(request, env, 400, "github_invalid_request", "请求格式无效。"); }
+  if (!Array.isArray(body?.repositories) || body.repositories.length > 30) {
+    return githubError(request, env, 400, "github_invalid_request", "每次最多读取 30 个公开仓库。");
+  }
+  const requested = [];
+  for (const item of body.repositories) {
+    if (!/^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9_.-]{1,100}$/.test(item?.fullName || "")) {
+      return githubError(request, env, 400, "github_invalid_repository", "仓库名称格式无效。");
+    }
+    if (!requested.some((name) => name.toLowerCase() === item.fullName.toLowerCase())) requested.push(item.fullName);
+  }
+
+  const token = await createPublicReadToken(env);
+  const snapshots = [];
+  const errors = [];
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(3, requested.length) }, async () => {
+    while (nextIndex < requested.length) {
+      const fullName = requested[nextIndex++];
+      try { snapshots.push(await readPublicGitHubSnapshot(fullName, token)); }
+      catch (error) { errors.push(publicRepositoryError(fullName, error)); }
+    }
+  });
+  await Promise.all(workers);
+  return jsonResponse(request, env, { snapshots, errors });
 }
 
 async function githubRoute(request, env, url) {
@@ -443,6 +615,7 @@ export default {
     const url = new URL(request.url);
     if (!corsHeaders(request, env)) return new Response(null, { status: 403, headers: { "Cache-Control": "no-store" } });
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(request, env) });
+    if (url.pathname === "/api/github/public-snapshots") return publicGitHubRoute(request, env);
     if (url.pathname.startsWith("/api/github/")) return githubRoute(request, env, url);
     if (request.method === "GET" && url.pathname === "/health") {
       return jsonResponse(request, env, { ok: true, provider: "智谱 BigModel", model: env.AI_MODEL || "glm-4-flash-250414", configured: Boolean(env.AI_API_KEY) });

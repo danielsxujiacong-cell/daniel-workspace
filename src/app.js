@@ -21,10 +21,10 @@ const { buildAssistantContext } = await import("./ai/context.js");
 const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = await import("./ai/service.js?v=3.4.2");
 const { buildProjectNextStepContext, buildProjectNextStepPrompt, parseProjectNextStepResponse, verifiedProjectGitHubCommit } = await import("./ai/project-next-step.js?v=3.3.2");
 const { buildDailyBriefContext, buildDailyBriefPrompt, parseDailyBriefResponse } = await import("./ai/daily-brief.js?v=3.5-b");
-const { fetchPrivateGitHubSnapshots, listPrivateGitHubRepositories } = await import("./github/private-api.js?v=3.5-b.3");
+const { fetchPrivateGitHubSnapshots, listPrivateGitHubRepositories } = await import("./github/private-api.js?v=3.5-b.4");
 const { localScanEndpointFor, shouldRenderDashboardGitHubActivity } = await import("./local-companion.js?v=3.5-a.2");
 const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = await import("./suggestions.js");
-const { fetchPublicGitHubRepository, GITHUB_CACHE_TTL_MS, isGitHubSnapshotFresh, parsePublicGitHubRepository } = await import("./github/public-api.js?v=3.2");
+const { fetchPublicGitHubRepositories, fetchPublicGitHubRepository, GITHUB_CACHE_TTL_MS, isGitHubSnapshotFresh, parsePublicGitHubRepository } = await import("./github/public-api.js?v=3.5-b.4");
 const { buildCloudDashboardModel, buildLocalDashboardModel, compareLocalProjects, taskPriorityLabel } = await import("./dashboard.js");
 const {
   countPinnedProjects,
@@ -44,7 +44,7 @@ const {
   saveCloudChanges,
   setCloudProjectPinned,
 } = await import("./cloud/sync.js");
-  const { APP_VERSION } = await import("./version.js?v=3.5-b.3");
+  const { APP_VERSION } = await import("./version.js?v=3.5-b.4");
 
 const app = document.querySelector("#app");
 let legacyData = loadData();
@@ -1418,7 +1418,7 @@ async function refreshProjectNextStepGitHub(project) {
   ui.githubRefreshing = true;
   ui.githubRefreshStatus[project.id] = "loading";
   try {
-    const snapshot = await fetchPublicGitHubRepository(githubUrl);
+    const snapshot = await fetchPublicGitHubRepository(githubUrl, { auth: workspaceAuth });
     const current = projectById(project.id);
     if (!workspaceActive || !current || current.github !== githubUrl) return { commit: null, warning: "项目 GitHub 地址已变化，请重新生成建议。" };
     current.githubData = snapshot;
@@ -2025,20 +2025,32 @@ async function refreshGitHubData(projectIds = null, { force = true, silent = fal
   candidates.forEach(({ project }) => { ui.githubRefreshStatus[project.id] = "loading"; });
   render();
 
-  const results = await Promise.all(candidates.map(async ({ project, githubUrl }) => {
-    try {
-      const snapshot = await fetchPublicGitHubRepository(githubUrl);
+  let response = { snapshots: [], errors: [] };
+  let requestError = null;
+  try {
+    response = await fetchPublicGitHubRepositories(candidates.map(({ githubUrl }) => githubUrl), workspaceAuth);
+  } catch (error) {
+    requestError = error;
+  }
+  const snapshotsByName = new Map((response.snapshots || []).map((snapshot) => [snapshot.repositoryName.toLowerCase(), snapshot]));
+  const errorsByName = new Map((response.errors || []).map((error) => [error.fullName.toLowerCase(), error]));
+  const failures = [];
+  const results = candidates.map(({ project, githubUrl, repository }) => {
+    const snapshot = snapshotsByName.get(repository.fullName.toLowerCase());
+    if (snapshot) {
       const currentProject = projectById(project.id);
       if (currentProject?.github === githubUrl) currentProject.githubData = snapshot;
       ui.githubRefreshStatus[project.id] = "connected";
       delete ui.githubRefreshAttemptAt[project.id];
       return "success";
-    } catch (error) {
-      ui.githubRefreshAttemptAt[project.id] = Date.now();
-      ui.githubRefreshStatus[project.id] = error?.status === 404 ? "unavailable" : "error";
-      return "error";
     }
-  }));
+    const error = errorsByName.get(repository.fullName.toLowerCase());
+    const status = error?.httpStatus || requestError?.upstreamStatus || requestError?.status;
+    failures.push({ error, status });
+    ui.githubRefreshAttemptAt[project.id] = Date.now();
+    ui.githubRefreshStatus[project.id] = status === 404 ? "unavailable" : "error";
+    return "error";
+  });
 
   ui.githubRefreshing = false;
   const successCount = results.filter((result) => result === "success").length;
@@ -2046,8 +2058,10 @@ async function refreshGitHubData(projectIds = null, { force = true, silent = fal
   if (successCount) saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt, ui.projectPinningAvailable);
   render();
   if (silent) return;
-  if (errorCount && successCount) toast(`已更新 ${successCount} 个仓库；${errorCount} 个请求失败，已有数据已保留`);
-  else if (errorCount) toast("GitHub 请求失败，已有数据已保留");
+  const failedStatus = failures.find((failure) => failure.status)?.status;
+  const statusLabel = failedStatus ? `（HTTP ${failedStatus}）` : "";
+  if (errorCount && successCount) toast(`已更新 ${successCount} 个仓库；${errorCount} 个请求失败${statusLabel}，已有数据已保留`);
+  else if (errorCount) toast(`GitHub 请求失败${statusLabel}，已有数据已保留`);
   else toast(`GitHub 数据已更新（${successCount} 个仓库）`);
 }
 

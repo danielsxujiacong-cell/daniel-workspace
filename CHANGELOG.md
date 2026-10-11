@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-11 · V3.5-B.4 将公开 GitHub 读取统一到 Worker
+
+- 公开仓库刷新改由登录后的 Workspace 调用 Cloudflare Worker，再由 Worker 使用 GitHub App installation token 读取；不再让手机或电脑浏览器直连 GitHub REST API。
+- 当安装令牌无法读取某个公开仓库时，Worker 会回退到自身的公开 API 读取；先校验仓库为公开仓库，错误返回脱敏上游 HTTP 状态。
+- 保留浏览器快照失败回退、私有 GitHub App 授权和本地 Companion；不修改 Supabase。
+
 ## 2026-10-11 · V3.5-B.3 改用 GitHub App 安装令牌读取私有仓库
 
 - 移除 GitHub 用户 OAuth 跳转、回调和 KV 安装映射依赖；Workspace 只允许指定的 Supabase 用户请求私有仓库 API。
