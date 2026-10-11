@@ -211,3 +211,7 @@
 
 - Delivered the Daniel Workspace V1 MVP with Dashboard, project details, Knowledge inbox, decision history, tasks, global search, contextual Mock AI, activity timeline, and local demo-data reset.
 - Added localStorage persistence and responsive dark UI; no external AI/API or backend is required.
+
+## 2026-10-11 · V3.4 Step 1
+
+- 首页新增按需生成的 AI 今日简报，调用现有真实 GLM Worker，按三部分呈现置顶项目的提交进展、具体建议和关注项；每项要求关联项目并给出资料依据。资料不足或 GLM 失败时明确提示，不使用 Mock，也不写入项目或任务。

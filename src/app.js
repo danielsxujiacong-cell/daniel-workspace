@@ -20,6 +20,7 @@ const {
 const { buildAssistantContext } = await import("./ai/context.js");
 const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = await import("./ai/service.js");
 const { buildProjectNextStepContext, buildProjectNextStepPrompt, parseProjectNextStepResponse, verifiedProjectGitHubCommit } = await import("./ai/project-next-step.js?v=3.3.2");
+const { buildDailyBriefContext, buildDailyBriefPrompt, parseDailyBriefResponse } = await import("./ai/daily-brief.js?v=3.4.0");
 const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = await import("./suggestions.js");
 const { fetchPublicGitHubRepository, GITHUB_CACHE_TTL_MS, isGitHubSnapshotFresh, parsePublicGitHubRepository } = await import("./github/public-api.js?v=3.2");
 const { buildCloudDashboardModel, buildLocalDashboardModel, compareLocalProjects, taskPriorityLabel } = await import("./dashboard.js");
@@ -85,6 +86,8 @@ const ui = {
   dashboardSuggestion: null,
   dashboardSuggestionKey: "",
   dashboardSuggestionStatus: "idle",
+  dailyBrief: null,
+  dailyBriefStatus: "idle",
   projectNextStep: null,
   createdSuggestionKeys: [],
   codex: null,
@@ -1146,6 +1149,64 @@ function renderDashboardSections(model, dataAvailable) {
   return `<section class="card card-pad grid-span-12"><div class="card-header"><h2>优先待办</h2><button class="button quiet small" data-action="dashboard-stat" data-target-page="tasks" data-filter="todo">全部未完成任务 ${icon("arrow")}</button></div><div class="dashboard-alert-list">${taskRows}</div></section>`;
 }
 
+async function generateDailyBrief() {
+  if (ui.dailyBriefStatus === "loading") return;
+  if (!workspaceActive || !cloudWorkspaceAvailable()) {
+    ui.dailyBrief = null;
+    ui.dailyBriefStatus = "unavailable";
+    render();
+    return;
+  }
+  if (getAIStatus().mode !== "real") {
+    ui.dailyBrief = null;
+    ui.dailyBriefStatus = "unavailable";
+    render();
+    return;
+  }
+  let projects = getHomePinnedProjects(db.projects).slice(0, 5);
+  ui.dailyBriefStatus = "loading";
+  ui.dailyBrief = null;
+  render();
+  try {
+    const publicProjectIds = projects.filter((project) => parsePublicGitHubRepository(project.github)).map((project) => project.id);
+    if (publicProjectIds.length) await refreshGitHubData(publicProjectIds, { force: true, silent: true });
+    if (!workspaceActive) return;
+    projects = getHomePinnedProjects(db.projects).slice(0, 5);
+    const context = buildDailyBriefContext(projects);
+    const result = await chatWithAI({
+      message: buildDailyBriefPrompt(context),
+      currentPage: "home-daily-brief",
+      currentProject: null,
+      relevantContext: { dailyBriefProjects: context },
+      history: [],
+    });
+    if (!workspaceActive) return;
+    if (result.provider !== "real") throw new Error("真实 GLM 服务不可用；未使用 Mock 简报，请检查 AI 配置后重试。");
+    ui.dailyBrief = parseDailyBriefResponse(result.message.content, projects);
+    ui.dailyBriefStatus = "ready";
+  } catch (error) {
+    ui.dailyBrief = { error: error?.code ? getAIErrorMessage(error) : error?.message || getAIErrorMessage(error) };
+    ui.dailyBriefStatus = "error";
+  }
+  render();
+}
+
+function renderDailyBrief() {
+  const brief = ui.dailyBrief;
+  const status = ui.dailyBriefStatus;
+  const sections = [
+    ["最近完成了什么", brief?.completed],
+    ["今天推荐做的事", brief?.recommendations],
+    ["需要关注的问题", brief?.watch],
+  ];
+  const content = status === "loading" ? `<p class="daily-brief-message" role="status">正在请求 GLM 整理置顶项目资料…</p>`
+    : status === "error" ? `<p class="daily-brief-message error" role="alert">${esc(brief?.error || "简报生成失败，请重试。")}</p>`
+      : status === "unavailable" ? `<p class="daily-brief-message" role="status">${esc(!cloudWorkspaceAvailable() ? dashboardUnavailableMessage() : "GLM 服务未配置为真实 API；为避免 Mock 内容，本次未生成简报。")}</p>`
+        : status === "ready" ? sections.map(([title, items]) => `<section class="daily-brief-part"><h3>${title}</h3>${items?.length ? `<ul>${items.map((item) => `<li><strong>${esc(item.project)}</strong> · ${esc(item.text)}<small>依据：${esc(item.basis)}</small></li>`).join("")}</ul>` : `<p class="daily-brief-empty">资料不足，暂无法确认。</p>`}</section>`).join("")
+          : `<p class="daily-brief-message">仅在点击后，依据最多 5 个置顶项目的可验证提交、状态和已确认下一步生成；不会修改项目或任务。</p>`;
+  return `<section class="card card-pad daily-brief grid-span-12"><div class="card-header"><div><h2>AI 今日简报</h2><p class="minor">真实 GitHub 提交 · 项目状态 · 已确认下一步</p></div><button class="button primary small" data-action="generate-daily-brief" ${status === "loading" ? "disabled aria-busy=\"true\"" : ""}>${status === "loading" ? "生成中…" : status === "ready" ? "重新生成" : "生成简报"}</button></div><div class="daily-brief-content">${content}</div></section>`;
+}
+
 function renderDashboardSuggestion(today, suggestion) {
   if (!today || !suggestion) return "";
   if (today.projectId && !db.projects.some((project) => project.id === today.projectId && project.isPinned === true)) return "";
@@ -1171,7 +1232,7 @@ function renderDashboard() {
   const values = dataAvailable ? counts : { projects: "—", activeProjects: "—", openTasks: "—", doneTasks: "—" };
   const stats = `<div class="dashboard-stat-row">${dashboardStatCard("全部项目", values.projects, "projects", "all", "查看所有项目")}${dashboardStatCard("进行中", values.activeProjects, "projects", "active", "查看进行中项目")}${dashboardStatCard("未完成任务", values.openTasks, "tasks", "todo", "查看未完成任务")}${dashboardStatCard("已完成任务", values.doneTasks, "tasks", "done", "查看已完成任务")}</div>`;
   return `<div class="dashboard-home"><div class="page-heading"><div><div class="eyebrow">${formattedDate()} · ${dataAvailable ? "当前账号资料" : "Supabase 云端资料"}</div><h1>今天继续什么？</h1><p>先看正在推进的项目，再确认今天要完成的任务。</p></div><div class="heading-actions"><button class="button primary" data-action="open-create-task">${icon("plus")} 新建任务</button></div></div>
-    ${stats}<div class="dashboard-grid">${renderDashboardFocusProjects(projects, tasks, dataAvailable)}${renderDashboardSections(cloudModel, dataAvailable)}${renderDashboardSuggestion(today, suggestion)}</div>
+    ${stats}<div class="dashboard-grid">${renderDashboardFocusProjects(projects, tasks, dataAvailable)}${renderDailyBrief()}${renderDashboardSections(cloudModel, dataAvailable)}${renderDashboardSuggestion(today, suggestion)}</div>
     <div class="companion-secondary-status" role="status">本机 Companion：${esc(localStatus)}${ui.localProjectsStatus === "ready" ? ` · <button class="text-button" data-action="refresh-local-projects">重新扫描</button>` : ""} · 仅增强本机 Git 与文件状态。</div></div>`;
 }
 
@@ -2120,6 +2181,7 @@ function handleAction(action, element, sourceEvent) {
   }
   if (action === "open-create-project") openModal("project");
   if (action === "generate-project-next-step") { void generateProjectNextStep(id); return; }
+  if (action === "generate-daily-brief") { void generateDailyBrief(); return; }
   if (action === "adopt-project-next-step") { adoptProjectNextStep(id); return; }
   if (action === "preview-local-project-sync") openLocalProjectSyncPreview();
   if (action === "retry-cloud-sync") void initializeCloudSync();
