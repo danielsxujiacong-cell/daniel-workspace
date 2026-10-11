@@ -113,6 +113,26 @@ function timestamp(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function normalizedCommitMessage(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
+
+export function chooseRecentCommit(remoteCommit, localCommit) {
+  if (!remoteCommit) return localCommit ? { ...localCommit, source: "本机" } : null;
+  if (!localCommit) return { ...remoteCommit, source: "GitHub" };
+
+  const remoteSha = String(remoteCommit.sha || "").toLocaleLowerCase();
+  const localSha = String(localCommit.sha || "").toLocaleLowerCase();
+  const sameCommit = remoteSha && localSha
+    ? remoteSha.startsWith(localSha) || localSha.startsWith(remoteSha)
+    : normalizedCommitMessage(remoteCommit.message) === normalizedCommitMessage(localCommit.message);
+  if (sameCommit) return { ...remoteCommit, source: "GitHub" };
+
+  return timestamp(localCommit.committedAt) > timestamp(remoteCommit.committedAt)
+    ? { ...localCommit, source: "本机" }
+    : { ...remoteCommit, source: "GitHub" };
+}
+
 function latestTimestamp(...values) {
   return Math.max(0, ...values.map(timestamp));
 }

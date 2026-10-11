@@ -641,6 +641,71 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 [data-theme="light"] .nav-item:hover { color: #282d37; background: #e7eaf0; }
 [data-theme="light"] .nav-item.active { color: #292744; background: #e5e3f2; }
 [data-theme="light"] .nav-item .icon, [data-theme="light"] .nav-count { color: #737b88; }
+
+.nav-more-wrap { position: relative; min-width: 0; }
+.nav-more-glyph { width: 16px; color: #777985; font-size: 17px; font-weight: 700; line-height: 10px; text-align: center; }
+.nav-item.active .nav-more-glyph { color: var(--accent); }
+.nav-more-menu { position: absolute; z-index: 35; top: calc(100% + 5px); right: 0; left: 0; display: grid; gap: 3px; padding: 5px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); box-shadow: 0 12px 35px #0008; }
+.nav-more-menu[hidden] { display: none; }
+.project-view-switch { display: flex; gap: 5px; margin: -5px 0 18px; padding: 3px; width: fit-content; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
+.projects-heading { margin-bottom: 14px; }
+.projects-heading h1 { margin: 0; }
+.project-actions { flex-wrap: wrap; margin-bottom: 12px; }
+.github-refresh-feedback { margin: -4px 0 12px; color: var(--yellow); font-size: 11px; }
+.local-project-section > .section-title { margin-bottom: 12px; }
+.local-project-section > .section-title h2 { margin: 0; font-size: 13px; }
+.local-project-row { grid-template-columns: minmax(0, 1fr) auto; }
+.local-project-row .local-project-main { min-width: 0; }
+.local-project-row .local-project-main h3 { margin: 0 0 5px; }
+.local-project-link { color: var(--muted); font-size: 10px; }
+.dashboard-ai-summary { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.dashboard-ai-summary > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px; color: var(--text); cursor: pointer; list-style: none; }
+.dashboard-ai-summary > summary::-webkit-details-marker { display: none; }
+.dashboard-ai-summary > summary > span { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
+.dashboard-ai-summary > summary .icon { color: var(--accent); }
+.dashboard-ai-summary > summary > small { color: var(--muted); font-size: 10px; }
+.dashboard-ai-summary[open] > summary { border-bottom: 1px solid var(--line); }
+.dashboard-ai-summary-content { display: grid; gap: 12px; padding: 12px; }
+.dashboard-ai-summary-content > :first-child { margin-top: 0; }
+.dashboard-ai-summary-content .grid-span-12 { grid-column: auto; }
+.dashboard-ai-suggestion { padding: 14px; }
+.dashboard-ai-suggestion p { margin-bottom: 8px; }
+.dashboard-progress-list { display: grid; }
+.dashboard-progress-item { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--line-soft); }
+.dashboard-progress-item:first-child { padding-top: 0; }
+.dashboard-progress-item:last-child { padding-bottom: 0; border-bottom: 0; }
+.dashboard-progress-item > div { min-width: 0; }
+.dashboard-progress-item strong { font-size: 11px; }
+.dashboard-progress-item p { margin: 4px 0; color: var(--text); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.dashboard-progress-item small { color: var(--muted); font-size: 9px; }
+.dashboard-progress-item > a, .dashboard-progress-item > button { flex: 0 0 auto; }
+.dashboard-project-description { margin: 3px 0 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.project-recent-progress { margin: 0 0 14px; }
+.project-recent-progress p { margin: 7px 0 5px; font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
+.project-recent-progress small { color: var(--muted); font-size: 9px; }
+.project-recent-progress a { color: var(--accent-strong); }
+.technical-details { margin: 0 0 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.technical-details > summary { padding: 13px 15px; color: var(--muted); font-size: 11px; cursor: pointer; }
+.technical-details[open] > summary { border-bottom: 1px solid var(--line); }
+.technical-details-content { display: grid; gap: 10px; padding: 12px; }
+.technical-details-content .card { margin: 0; }
+.local-path-detail .meta-value { margin-top: 7px; overflow-wrap: anywhere; font-size: 11px; }
+.empty-page { min-height: min(58vh, 460px); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 30px 16px; color: var(--muted); text-align: center; }
+.empty-page p { margin: 0; font-size: 13px; }
+
+@media (max-width: 720px) {
+  .nav-more-menu { top: auto; right: 0; bottom: calc(100% + 8px); left: auto; }
+  .project-view-switch { margin-bottom: 14px; }
+  .local-project-section > .section-title { align-items: flex-start; flex-direction: column; }
+  .local-project-section > .section-title .heading-actions { width: 100%; flex-wrap: wrap; }
+  .local-project-section > .section-title .button { flex: 1; }
+  .project-work-logs > .card-header > .heading-actions { width: 100%; }
+  .project-work-logs > .card-header > .heading-actions .button { flex: 1; }
+  .dashboard-ai-summary > summary { align-items: flex-start; flex-direction: column; gap: 5px; padding: 13px; }
+  .dashboard-ai-summary-content { padding: 9px; }
+  .dashboard-progress-item { align-items: flex-start; }
+  .empty-page { min-height: 48vh; }
+}
 [data-theme="light"] .workspace-mini { background: #f7f8fa; }
 [data-theme="light"] .avatar, [data-theme="light"] .top-avatar { color: #514b87; background: #e7e5f3; }
 [data-theme="light"] .icon-button { color: #707785; }

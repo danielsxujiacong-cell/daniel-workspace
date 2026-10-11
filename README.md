@@ -1,10 +1,10 @@
 # Daniel Workspace
 
-私人 AI 工作台 V3.6。登录用户使用现有 Supabase 云同步、本机 Companion 和私人 AI；项目详情可新增/编辑跨设备工作记录，首页支持有证据的 AI 今日简报和按需每周总结。首页 3–5 个置顶项目卡片可显示 GitHub 最新 commit、提交时间、默认分支和近 7 天活动。公开仓库由 Cloudflare Worker 读取 GitHub Public API；私有仓库使用服务端 GitHub App 只读授权。本机私有提交说明、代码、路径和仓库 URL 不进入 AI 请求；授权 GitHub App 返回的仓库提交摘要会用于简报。断网或授权失效时保留浏览器上次成功快照，并继续展示 Companion/公开 GitHub 数据。
+私人 AI 工作台 V3.7。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI。首页按重点项目、最近进展和待办排列；AI 今日简报、每周总结与下一步建议收进默认折叠的「AI 总结」。Projects 默认展示云端项目，本机扫描单独切换；项目技术状态默认折叠，工作记录表单按需展开。
 
 ## Status
 
-- **Stage:** V3.6 source and additive Supabase migration are live. Signed-in UI save/read, second-device sync, and mobile acceptance remain the final manual checks.
+- **Stage:** V3.7 UI reduction; existing Supabase migration and data flow remain unchanged. Signed-in UI and mobile acceptance are recorded in [HANDOFF](docs/HANDOFF.md).
 - **Last updated:** 2026-10-11
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
