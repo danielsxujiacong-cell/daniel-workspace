@@ -71,7 +71,7 @@ export function parseDailyBriefResponse(content, projects, context = buildDailyB
       const project = text(item?.project, 120);
       const detail = text(item?.text, 300);
       const basis = text(item?.basis, 300);
-      if (!allowed.has(project) || !detail || !basis) throw new Error("简报条目缺少有效项目或依据，请重试。");
+      if (!allowed.has(project) || !detail || !basis) return null;
       const projectEvidence = context.find((entry) => entry.name === project);
       if (key === "completed") {
         const period = item?.period;
@@ -97,9 +97,13 @@ export function parseDailyBriefResponse(content, projects, context = buildDailyB
       return { project, text: detail, basis };
     }).filter(Boolean);
   };
-  return {
+  const brief = {
     completed: section("completed", 5),
     recommendations: section("recommendations", 3),
     watch: section("watch", 5),
   };
+  if (!brief.completed.length && !brief.recommendations.length && !brief.watch.length) {
+    throw new Error("GLM 未返回带有可验证项目依据的简报内容，请重试。");
+  }
+  return brief;
 }
