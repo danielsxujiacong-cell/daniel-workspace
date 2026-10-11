@@ -21,6 +21,7 @@ const { buildAssistantContext } = await import("./ai/context.js");
 const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = await import("./ai/service.js?v=3.4.2");
 const { buildProjectNextStepContext, buildProjectNextStepPrompt, parseProjectNextStepResponse, verifiedProjectGitHubCommit } = await import("./ai/project-next-step.js?v=3.3.2");
 const { buildDailyBriefContext, buildDailyBriefPrompt, parseDailyBriefResponse } = await import("./ai/daily-brief.js?v=3.5-a");
+const { localScanEndpointFor, shouldRenderDashboardGitHubActivity } = await import("./local-companion.js?v=3.5-a.2");
 const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = await import("./suggestions.js");
 const { fetchPublicGitHubRepository, GITHUB_CACHE_TTL_MS, isGitHubSnapshotFresh, parsePublicGitHubRepository } = await import("./github/public-api.js?v=3.2");
 const { buildCloudDashboardModel, buildLocalDashboardModel, compareLocalProjects, taskPriorityLabel } = await import("./dashboard.js");
@@ -60,7 +61,7 @@ let cloudInitializationRunning = false;
 let workspaceDataRevision = 0;
 let migrationState = loadCloudMigrationState(workspaceAuth.userId);
 let scanCache = loadLocalScanCache();
-const localScanEndpoint = getLocalScanEndpoint();
+const localScanEndpoint = localScanEndpointFor(window.location);
 let workspaceActive = true;
 let activeLocalScanController = null;
 const ui = {
@@ -108,15 +109,6 @@ const ui = {
 };
 
 const colorScheme = window.matchMedia("(prefers-color-scheme: light)");
-
-function getLocalScanEndpoint() {
-  const hostname = window.location.hostname.toLowerCase();
-  if (hostname === "localhost" || hostname === "127.0.0.1") return "/api/local-projects";
-  if (hostname === "danielsxujiacong-cell.github.io" && /^\/daniel-workspace(?:\/|$)/.test(window.location.pathname)) {
-    return "http://127.0.0.1:4174/api/local-projects";
-  }
-  return null;
-}
 
 function applyTheme() {
   const preference = db.settings?.theme || "system";
@@ -1095,10 +1087,11 @@ function dashboardStatCard(label, value, page, filter, description) {
   return `<button class="dashboard-stat-card" data-action="dashboard-stat" data-target-page="${page}" data-filter="${filter}" aria-label="${esc(`${label}：${value}，${description}`)}"><span class="dashboard-stat-label">${esc(label)}</span><strong>${value}</strong><span class="dashboard-stat-link">${esc(description)} ${icon("chevron")}</span></button>`;
 }
 
-function renderDashboardGitHubActivity(project) {
+function renderDashboardGitHubActivity(project, hasLocalProgress = false) {
   const repository = parsePublicGitHubRepository(project.github);
   const requestStatus = ui.githubRefreshStatus[project.id];
   const snapshot = project.githubData;
+  if (!shouldRenderDashboardGitHubActivity({ hasLocalProgress, hasRepository: Boolean(repository), hasSnapshot: Boolean(snapshot), requestStatus })) return "";
   if (!repository) {
     return `<div class="dashboard-github-activity unavailable"><small>GitHub 动态</small><span>私有/本地暂不可读</span></div>`;
   }
@@ -1145,7 +1138,7 @@ function renderDashboardFocusProjects(projects, tasks, dataAvailable) {
     const localFreshness = ui.localProjectsStatus === "ready" ? `扫描于 ${formattedTimestamp(localProgress?.scannedAt)}` : `缓存于 ${formattedTimestamp(localProgress?.scannedAt)} · 可能过期`;
     const localState = localProgress ? `本机 Companion · ${localProgress.project.branch || "分支未知"} · ${localProgress.project.clean === true ? "Clean" : localProgress.project.clean === false ? "有未提交修改" : "状态未知"} · ${localFreshness}` : "";
     const localActivity = localProgress ? `<div class="dashboard-github-activity"><small class="dashboard-github-heading">本机最近 Commit · ${esc(localProgress.project.hasGit ? localProgress.project.name : "")}</small><span>${esc(localCommit?.message || "暂无 commit 摘要")}</span><small>${esc(localCommit?.committedAt ? formattedTimestamp(localCommit.committedAt) : "提交时间未知")} · ${esc(localState)}</small></div>` : "";
-    return `<article class="dashboard-focus-card"><div class="dashboard-focus-top"><span class="project-glyph">${esc(initials(project.name))}</span>${statusPill(project.status)}</div><button class="dashboard-focus-name" data-action="view-project" data-id="${esc(project.id)}">${esc(project.name)}</button>${hasStage ? `<div class="dashboard-project-detail"><small>当前阶段</small><span>${esc(stage)}</span></div>` : ""}${hasNext ? `<div class="dashboard-project-detail"><small>下一步</small><span>${esc(next)}</span></div>` : ""}${projectTasks.length ? `<div class="dashboard-progress-meta">关联任务完成 ${done}/${projectTasks.length}</div>` : ""}${renderDashboardGitHubActivity(project)}${localActivity}<div class="dashboard-project-links">${links(github, "GitHub")}${links(website, "线上网站")}</div><div class="dashboard-focus-actions"><button class="button quiet small" data-action="view-project" data-id="${esc(project.id)}">打开项目</button><button class="button quiet small" data-action="toggle-project-pin" data-id="${esc(project.id)}" ${pending ? "disabled aria-busy=\"true\"" : ""}>${pending ? "保存中…" : "取消置顶"}</button></div></article>`;
+    return `<article class="dashboard-focus-card"><div class="dashboard-focus-top"><span class="project-glyph">${esc(initials(project.name))}</span>${statusPill(project.status)}</div><button class="dashboard-focus-name" data-action="view-project" data-id="${esc(project.id)}">${esc(project.name)}</button>${hasStage ? `<div class="dashboard-project-detail"><small>当前阶段</small><span>${esc(stage)}</span></div>` : ""}${hasNext ? `<div class="dashboard-project-detail"><small>下一步</small><span>${esc(next)}</span></div>` : ""}${projectTasks.length ? `<div class="dashboard-progress-meta">关联任务完成 ${done}/${projectTasks.length}</div>` : ""}${renderDashboardGitHubActivity(project, Boolean(localProgress))}${localActivity}<div class="dashboard-project-links">${links(github, "GitHub")}${links(website, "线上网站")}</div><div class="dashboard-focus-actions"><button class="button quiet small" data-action="view-project" data-id="${esc(project.id)}">打开项目</button><button class="button quiet small" data-action="toggle-project-pin" data-id="${esc(project.id)}" ${pending ? "disabled aria-busy=\"true\"" : ""}>${pending ? "保存中…" : "取消置顶"}</button></div></article>`;
   }).join("");
   const empty = !dataAvailable
     ? dashboardUnavailableMessage()

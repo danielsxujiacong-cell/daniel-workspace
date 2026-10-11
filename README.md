@@ -1,10 +1,10 @@
 # Daniel Workspace
 
-私人 AI 工作台 V3.5-A。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI；首页 3–5 个置顶项目卡片可显示已关联本机 Git 项目的最近 commit 摘要、提交时间、分支、未提交修改状态、Companion 来源与扫描时间。AI 今日简报在 Companion 在线时接收本机分支、提交时间及工作区状态元数据；私有提交说明、代码、路径和仓库 URL 不发送给 AI Worker。Companion 离线时简报继续使用云端项目与公开 GitHub 资料，云端功能保持可用。本地扫描仍只读，不改 Supabase 数据或同步机制。
+私人 AI 工作台 V3.5-A。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI；首页 3–5 个置顶项目卡片可显示已关联本机 Git 项目的最近 commit 摘要、提交时间、分支、未提交修改状态、Companion 来源与扫描时间。`workspace.danielxu.cn` 与 GitHub Pages 均可从本机 Companion 读取只读扫描。AI 今日简报在 Companion 在线时接收本机分支、提交时间及工作区状态元数据；私有提交说明、代码、路径和仓库 URL 不发送给 AI Worker。Companion 离线时简报继续使用云端项目与公开 GitHub 资料，云端功能保持可用。本地扫描仍只读，不改 Supabase 数据或同步机制。
 
 ## Status
 
-- **Stage:** V3.5-A local project development progress integration. Uses existing Companion scan/cache and GLM Worker; local Git metadata stays device-local, and private commit text is excluded from AI context.
+- **Stage:** V3.5-A.1 Companion origin routing repair. Uses existing Companion scan/cache and GLM Worker; local Git metadata stays device-local, and private commit text is excluded from AI context.
 - **Last updated:** 2026-10-11
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -99,7 +99,7 @@ node .\node_modules\wrangler\bin\wrangler.js secret put AI_API_KEY --config .\cl
 
 `python local_companion.py` 仅绑定 `127.0.0.1:4174`，服务页面静态资源和 `GET /api/local-projects`。扫描范围固定为 `D:\_Codex project`；隐藏目录、Git 元数据和常见依赖/构建/缓存目录不会作为项目或修改时间来源。Git 状态命令仅读取本地数据，并设置 `GIT_OPTIONAL_LOCKS=0`；companion 不执行 fetch、pull、commit、push、checkout 或其他网络/写操作。`origin/main` 和 ahead/behind 使用本地已有引用，不保证它刚与 GitHub 同步。
 
-文档扫描只检查根目录和 `docs/` 中 README、HANDOFF、PROJECT_STATUS、TODO、PROJECT_CONTEXT、CHANGELOG 文件名是否存在，不读取正文。扫描不会写入扫描到的项目。V2.4 为跨次比较保存一份轻量基线；V2.4.1 另在当前浏览器的独立 localStorage 项中保留上次成功扫描，以便 Companion 暂时离线时显示旧数据并标记“数据可能不是最新”。缓存只在当前浏览器来源内使用，不跨设备同步。Companion 仅绑定 `127.0.0.1:4174`；API 保持只读 GET，并只允许工作台的 GitHub Pages 来源跨源读取。
+文档扫描只检查根目录和 `docs/` 中 README、HANDOFF、PROJECT_STATUS、TODO、PROJECT_CONTEXT、CHANGELOG 文件名是否存在，不读取正文。扫描不会写入扫描到的项目。V2.4 为跨次比较保存一份轻量基线；V2.4.1 另在当前浏览器的独立 localStorage 项中保留上次成功扫描，以便 Companion 暂时离线时显示旧数据并标记“数据可能不是最新”。缓存只在当前浏览器来源内使用，不跨设备同步。Companion 仅绑定 `127.0.0.1:4174`；API 保持只读 GET，并只允许工作台的 GitHub Pages 和 `workspace.danielxu.cn` 来源跨源读取。
 
 不支持私有仓库授权、GitHub 写操作/自动化、扫描 `D:\` 全盘、文档正文解析、PDF/网页自动解析或真实 AI 服务。V2.6 云同步不包含实时协作和 Companion 本地状态。
 

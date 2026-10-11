@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-11 · V3.5-A.1 修复线上 Companion 接入
+
+- 线上 `workspace.danielxu.cn` 未配置 Companion 扫描端点，且 Companion CORS 未允许该来源；现将精确域名加入前端路由与只读 API 来源白名单。
+- 首页存在已关联的本机 Git 数据时，隐藏无缓存的 GitHub“暂不可读”占位，突出 Companion 的 commit 与状态。
+- 本机预检从 HTTP 403 修复为 204，定向扫描 GET 返回 200；未改 Supabase 或同步机制。
+
 ## 2026-10-11 · V3.5-A 接入本机项目开发进展
 
 - 首页置顶项目卡片在名称、GitHub 远端或本机路径关联成功时显示 Companion 提供的最近 Commit 摘要、时间、分支和未提交修改状态，并标注来源与扫描时间。

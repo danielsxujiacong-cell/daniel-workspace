@@ -21,7 +21,10 @@ APP_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = Path(r"D:\_Codex project")
 HOST = "127.0.0.1"
 PORT = 4174
-ALLOWED_CROSS_ORIGIN = {"https://danielsxujiacong-cell.github.io"}
+ALLOWED_CROSS_ORIGIN = {
+    "https://danielsxujiacong-cell.github.io",
+    "https://workspace.danielxu.cn",
+}
 IGNORED_DIRS = {
     ".git", "node_modules", ".venv", "venv", "env", "dist", "build",
     "coverage", ".next", ".cache", "cache", "outputs", "logs",
