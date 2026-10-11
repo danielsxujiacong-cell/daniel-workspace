@@ -5,28 +5,24 @@ import worker from "../cloudflare/worker.js";
 
 const origin = "https://workspace.danielxu.cn";
 const uid = "9dd41e63-bdbd-405c-8243-ebe7de99fcf9";
-const store = new Map();
+const installationToken = "ghs_private_installation_token_for_test";
 const b64 = (bytes) => Buffer.from(bytes).toString("base64");
+const fromB64Url = (value) => Buffer.from(value.replace(/-/g, "+").replace(/_/g, "/"), "base64");
 
 async function testEnv() {
   const pair = await webcrypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
   const privateKey = await webcrypto.subtle.exportKey("pkcs8", pair.privateKey);
+  const publicKey = await webcrypto.subtle.exportKey("spki", pair.publicKey);
   return {
-    ALLOWED_ORIGINS: origin,
-    SUPABASE_URL: "https://auth.example.test",
-    SUPABASE_ANON_KEY: "public-test-key",
-    GITHUB_APP_ID: "12345",
-    GITHUB_APP_SLUG: "daniel-workspace-readonly",
-    GITHUB_CLIENT_ID: "Iv1.testclient",
-    GITHUB_CLIENT_SECRET: "test-client-secret",
-    GITHUB_APP_PRIVATE_KEY: `-----BEGIN PRIVATE KEY-----\n${b64(privateKey)}\n-----END PRIVATE KEY-----`,
-    GITHUB_STATE_SECRET: "test-state-secret-with-enough-entropy-for-hmac",
-    WORKSPACE_USER_ID: uid,
-    GITHUB_INSTALLATIONS: {
-      get: async (key) => store.get(key) || null,
-      put: async (key, value) => store.set(key, value),
-      delete: async (key) => store.delete(key),
+    env: {
+      ALLOWED_ORIGINS: origin,
+      SUPABASE_URL: "https://auth.example.test",
+      SUPABASE_ANON_KEY: "public-test-key",
+      WORKSPACE_USER_ID: uid,
+      GITHUB_APP_ID: "12345",
+      GITHUB_APP_PRIVATE_KEY: `-----BEGIN PRIVATE KEY-----\n${b64(privateKey)}\n-----END PRIVATE KEY-----`,
     },
+    publicKey,
   };
 }
 
@@ -38,114 +34,108 @@ function req(path, { method = "GET", token = "valid-session", body } = {}) {
   });
 }
 
-test("GitHub App routes require configured service and a validated Supabase user", async () => {
-  const response = await worker.fetch(req("/api/github/status"), { ALLOWED_ORIGINS: origin });
-  assert.equal(response.status, 503);
-  const env = await testEnv();
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (url) => String(url).includes("/auth/v1/user") ? new Response("{}", { status: 401 }) : new Response("unexpected", { status: 500 });
-  try {
-    const unauthorized = await worker.fetch(req("/api/github/status"), env);
-    assert.equal(unauthorized.status, 401);
-    assert.equal((await unauthorized.json()).error.code, "github_session_required");
-  } finally { globalThis.fetch = originalFetch; }
-});
+function verifyAppJwt(jwt, publicKey) {
+  const [headerPart, payloadPart, signaturePart] = jwt.split(".");
+  const header = JSON.parse(fromB64Url(headerPart));
+  const payload = JSON.parse(fromB64Url(payloadPart));
+  return webcrypto.subtle.importKey("spki", publicKey, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"])
+    .then((key) => webcrypto.subtle.verify("RSASSA-PKCS1-v1_5", key, fromB64Url(signaturePart), new TextEncoder().encode(`${headerPart}.${payloadPart}`)))
+    .then((valid) => ({ header, payload, valid }));
+}
 
-test("GitHub installation cannot be bound to Workspace unless the signed-in GitHub user can access it", async () => {
-  const env = await testEnv();
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (input) => {
-    const url = String(input);
-    if (url.includes("/auth/v1/user")) return Response.json({ id: uid });
-    if (url === "https://github.com/login/oauth/access_token") return Response.json({ access_token: "one-time-user-token" });
-    if (url.includes("/user/installations")) return Response.json({ installations: [{ id: 111111, app_id: 12345 }] });
-    return new Response("unexpected", { status: 500 });
-  };
-  try {
-    const connect = await worker.fetch(req("/api/github/connect", { method: "POST", body: { returnOrigin: origin } }), env);
-    const oauthUrl = new URL((await connect.json()).url);
-    const state = oauthUrl.searchParams.get("state");
-    const setup = await worker.fetch(new Request(`https://worker.example/api/github/callback?setup_action=install&installation_id=987654&state=${encodeURIComponent(state)}`), env);
-    const verifiedOauthUrl = new URL(setup.headers.get("Location"));
-    const verification = await worker.fetch(new Request(`https://worker.example/api/github/oauth/callback?code=one-time-code&state=${encodeURIComponent(verifiedOauthUrl.searchParams.get("state"))}`), env);
-    assert.equal(verification.status, 403);
-    assert.equal(await env.GITHUB_INSTALLATIONS.get(`user:${uid}`), null);
-  } finally { globalThis.fetch = originalFetch; }
-});
-
-test("GitHub App connects an existing installation through OAuth and reads private repository metadata only", async () => {
-  const env = await testEnv();
+test("GitHub App routes fail closed unless the validated Supabase user is the sole Workspace user", async () => {
+  const { env } = await testEnv();
   const originalFetch = globalThis.fetch;
   const calls = [];
-  globalThis.fetch = async (input, init = {}) => {
-    const url = String(input);
-    calls.push({ url, method: init.method || "GET" });
-    if (url.includes("/auth/v1/user")) return Response.json({ id: uid });
-    if (url === "https://github.com/login/oauth/access_token") return Response.json({ access_token: "one-time-user-token" });
-    if (url.includes("/user/installations")) return Response.json({ installations: [{ id: 987654, app_id: 12345 }] });
-    if (url.includes("/access_tokens")) return Response.json({ token: "short-lived-install-token" });
-    if (url.includes("/installation/repositories")) return Response.json({ repositories: [{ full_name: "acme/private-workspace", name: "private-workspace", owner: { login: "acme" }, private: true, default_branch: "main", html_url: "https://github.com/acme/private-workspace" }] });
-    if (url.endsWith("/repos/acme/private-workspace")) return Response.json({ full_name: "acme/private-workspace", private: true, default_branch: "main", pushed_at: "2026-10-11T08:00:00Z", html_url: "https://github.com/acme/private-workspace" });
-    if (url.includes("/repos/acme/private-workspace/commits")) return Response.json([{ sha: "abcdef0123456789", commit: { message: "Improve private dashboard", committer: { date: "2026-10-11T08:00:00Z" } } }]);
-    return new Response("unexpected", { status: 500 });
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return String(url).includes("/auth/v1/user") ? Response.json({ id: "another-user" }) : new Response("unexpected", { status: 500 });
   };
   try {
-    const connect = await worker.fetch(req("/api/github/connect", { method: "POST", body: { returnOrigin: origin, returnPath: "/daniel-workspace/#home" } }), env);
-    assert.equal(connect.status, 200);
-    const authorizeUrl = new URL((await connect.json()).url);
-    assert.equal(authorizeUrl.origin, "https://github.com");
-    assert.equal(authorizeUrl.pathname, "/login/oauth/authorize");
-    assert.equal(authorizeUrl.searchParams.get("redirect_uri"), "https://worker.example/api/github/oauth/callback");
-    const payloadPart = authorizeUrl.searchParams.get("state").split(".")[0];
-    const payload = JSON.parse(Buffer.from(payloadPart.replace(/-/g, "+").replace(/_/g, "/"), "base64url").toString());
-    assert.equal(await env.GITHUB_INSTALLATIONS.get(`state:${payload.nonce}`), uid);
-    const oauthCallback = await worker.fetch(new Request(`https://worker.example/api/github/oauth/callback?code=one-time-code&state=${encodeURIComponent(authorizeUrl.searchParams.get("state"))}`), env);
-    assert.equal(oauthCallback.status, 302);
-    assert.equal(new URL(oauthCallback.headers.get("Location")).searchParams.get("github_app"), "connected");
-    assert.equal(await env.GITHUB_INSTALLATIONS.get(`user:${uid}`), "987654");
-    const status = await worker.fetch(req("/api/github/status"), env);
-    assert.deepEqual(await status.json(), { connected: true });
-    assert.equal([...store.values()].includes("one-time-user-token"), false);
-
-    const repos = await worker.fetch(req("/api/github/repositories"), env);
-    assert.equal(repos.status, 200);
-    assert.deepEqual((await repos.json()).repositories.map((repo) => repo.fullName), ["acme/private-workspace"]);
-    const snapshots = await worker.fetch(req("/api/github/snapshots", { method: "POST", body: { repositories: [{ fullName: "acme/private-workspace" }] } }), env);
-    assert.equal(snapshots.status, 200);
-    const item = (await snapshots.json()).snapshots[0];
-    assert.equal(item.source, "github-app");
-    assert.equal(item.isPublic, false);
-    assert.equal(item.defaultBranch, "main");
-    assert.equal(item.latestCommit.message, "Improve private dashboard");
-    assert.equal(item.recentSevenDayCommitCount, 1);
-    assert.ok(calls.every((call) => call.method !== "PUT" && call.method !== "PATCH" && call.method !== "DELETE"));
+    const response = await worker.fetch(req("/api/github/repositories"), env);
+    assert.equal(response.status, 401);
+    assert.equal((await response.json()).error.code, "github_session_required");
+    assert.equal(calls.filter((url) => url.includes("api.github.com")).length, 0);
+    const unset = { ...env, WORKSPACE_USER_ID: "" };
+    const missingAllowlist = await worker.fetch(req("/api/github/repositories"), unset);
+    assert.equal(missingAllowlist.status, 503);
   } finally { globalThis.fetch = originalFetch; }
 });
 
-test("GitHub App still installs a new installation before returning to Workspace", async () => {
-  const env = await testEnv();
+test("installation-token reads list authorized private repositories and return the actual latest commit without exposing tokens", async () => {
+  const { env, publicKey } = await testEnv();
   const originalFetch = globalThis.fetch;
-  let installed = false;
-  globalThis.fetch = async (input) => {
+  const calls = [];
+  const privateRepos = ["acme/private-one", "acme/private-two", "acme/private-three"];
+  globalThis.fetch = async (input, init = {}) => {
     const url = String(input);
+    calls.push({ url, method: init.method || "GET", authorization: new Headers(init.headers).get("Authorization"), userAgent: new Headers(init.headers).get("User-Agent"), body: init.body });
     if (url.includes("/auth/v1/user")) return Response.json({ id: uid });
-    if (url === "https://github.com/login/oauth/access_token") return Response.json({ access_token: "one-time-user-token" });
-    if (url.includes("/user/installations")) return Response.json({ installations: installed ? [{ id: 7654321, app_id: 12345 }] : [] });
+    if (url.includes("/app/installations?")) return Response.json([{ id: 987654, app_id: 12345 }]);
+    if (url.includes("/access_tokens")) return Response.json({ token: installationToken });
+    if (url.includes("/installation/repositories")) return Response.json({ repositories: privateRepos.map((fullName) => ({ full_name: fullName, name: fullName.split("/")[1], owner: { login: "acme" }, private: true, default_branch: "main", html_url: `https://github.com/${fullName}` })) });
+    if (url.endsWith("/repos/acme/private-one")) return Response.json({ full_name: "acme/private-one", private: true, size: 2, default_branch: "main", pushed_at: "2026-10-11T08:00:00Z", html_url: "https://github.com/acme/private-one" });
+    if (url.includes("/repos/acme/private-one/commits")) return Response.json([{ sha: "abcdef0123456789abcdef0123456789abcdef01", commit: { message: "Fix authenticated repository reads\nDetails", committer: { date: "2026-10-11T08:00:00Z" } } }]);
     return new Response("unexpected", { status: 500 });
   };
   try {
-    const connect = await worker.fetch(req("/api/github/connect", { method: "POST", body: { returnOrigin: origin } }), env);
-    const authorizeUrl = new URL((await connect.json()).url);
-    const firstCallback = await worker.fetch(new Request(`https://worker.example/api/github/oauth/callback?code=first-code&state=${encodeURIComponent(authorizeUrl.searchParams.get("state"))}`), env);
-    const installUrl = new URL(firstCallback.headers.get("Location"));
-    assert.equal(installUrl.origin, "https://github.com");
-    assert.equal(installUrl.pathname, "/apps/daniel-workspace-readonly/installations/new");
-    const setup = await worker.fetch(new Request(`https://worker.example/api/github/callback?setup_action=install&installation_id=7654321&state=${encodeURIComponent(installUrl.searchParams.get("state"))}`), env);
-    const finalAuthorizeUrl = new URL(setup.headers.get("Location"));
-    assert.equal(finalAuthorizeUrl.pathname, "/login/oauth/authorize");
-    installed = true;
-    const finalCallback = await worker.fetch(new Request(`https://worker.example/api/github/oauth/callback?code=second-code&state=${encodeURIComponent(finalAuthorizeUrl.searchParams.get("state"))}`), env);
-    assert.equal(new URL(finalCallback.headers.get("Location")).searchParams.get("github_app"), "connected");
-    assert.equal(await env.GITHUB_INSTALLATIONS.get(`user:${uid}`), "7654321");
+    const repositoriesResponse = await worker.fetch(req("/api/github/repositories"), env);
+    assert.equal(repositoriesResponse.status, 200);
+    const repositories = await repositoriesResponse.json();
+    assert.deepEqual(repositories.repositories.map((repo) => repo.fullName), privateRepos);
+    assert.equal(JSON.stringify(repositories).includes(installationToken), false);
+
+    const appRequest = calls.find((call) => call.url.includes("/app/installations?"));
+    assert.equal(appRequest.userAgent, "Daniel-Workspace-GitHub-App-Reader/3.5");
+    const appJwt = appRequest.authorization.replace(/^Bearer\s+/i, "");
+    const verified = await verifyAppJwt(appJwt, publicKey);
+    assert.equal(verified.valid, true);
+    assert.equal(verified.header.alg, "RS256");
+    assert.equal(verified.payload.iss, "12345");
+    const tokenRequest = calls.find((call) => call.url.includes("/access_tokens"));
+    assert.equal(tokenRequest.method, "POST");
+    assert.deepEqual(JSON.parse(tokenRequest.body), {});
+    const repoList = calls.find((call) => call.url.includes("/installation/repositories"));
+    assert.equal(repoList.authorization, `Bearer ${installationToken}`);
+
+    const snapshotsResponse = await worker.fetch(req("/api/github/snapshots", { method: "POST", body: { repositories: [{ fullName: "acme/private-one" }] } }), env);
+    assert.equal(snapshotsResponse.status, 200);
+    const snapshots = await snapshotsResponse.json();
+    assert.equal(snapshots.snapshots[0].latestCommit.message, "Fix authenticated repository reads");
+    assert.equal(snapshots.snapshots[0].latestCommit.sha, "abcdef0");
+    assert.equal(snapshots.snapshots[0].defaultBranch, "main");
+    assert.equal(snapshots.snapshots[0].isPublic, false);
+    assert.equal(JSON.stringify(snapshots).includes(installationToken), false);
+    const writes = calls.filter((call) => ["PUT", "PATCH", "DELETE"].includes(call.method));
+    assert.deepEqual(writes, []);
+    assert.ok(calls.filter((call) => call.url.includes("api.github.com")).every((call) => call.method === "GET" || call.url.includes("/access_tokens")));
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("GitHub upstream HTTP failures are reported with a redacted status and message", async () => {
+  const { env } = await testEnv();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    if (String(input).includes("/auth/v1/user")) return Response.json({ id: uid });
+    return Response.json({ message: "Resource not accessible by integration: Bearer ghs_secret_value_never_return_this" }, { status: 403 });
+  };
+  try {
+    const response = await worker.fetch(req("/api/github/repositories"), env);
+    assert.equal(response.status, 502);
+    const payload = await response.json();
+    assert.equal(payload.error.httpStatus, 403);
+    assert.match(payload.error.message, /GitHub App installation lookup HTTP 403/);
+    assert.equal(JSON.stringify(payload).includes("ghs_secret_value"), false);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("only GitHub App installations and repository reads are used; OAuth callback routes are gone", async () => {
+  const { env } = await testEnv();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => String(url).includes("/auth/v1/user") ? Response.json({ id: uid }) : new Response("unexpected", { status: 500 });
+  try {
+    const response = await worker.fetch(req("/api/github/oauth/callback?code=unused"), env);
+    assert.equal(response.status, 404);
+    assert.equal((await response.json()).error.code, "not_found");
   } finally { globalThis.fetch = originalFetch; }
 });

@@ -4,7 +4,7 @@
 
 ## Status
 
-- **Stage:** V3.5-B.2 automatically retries private-repository reads after OAuth while Cloudflare KV propagates the installation mapping. Commits `2af0a01` and `66ef8dc` are pushed; GitHub Pages and the EdgeOne-backed `workspace.danielxu.cn` now serve the updated client. Live signed-in private-repository acceptance remains pending.
+- **Stage:** V3.5-B.3 reads private repositories through GitHub App installation tokens generated inside the Cloudflare Worker. The live Worker has returned all 3 authorized repositories and the latest private commit to the designated signed-in Workspace user. Companion-offline acceptance remains for the user.
 - **Last updated:** 2026-10-11
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -44,13 +44,12 @@ npm test
 
 ## V3.5-B GitHub App 私有仓库只读
 
-- Worker 通过 `/api/github/connect` 生成 10 分钟签名 state 并直接发起 GitHub 用户身份授权，因此已安装的 App 不会停在安装管理页。若当前 GitHub 账号尚无该 App 安装，Worker 再跳转至安装页；`Setup URL` 必须设为 `https://daniel-workspace-api.ai-investment-dashboard.workers.dev/api/github/callback`，安装后继续 OAuth 核验。
-- GitHub App 仅需 Repository permissions：`Contents: Read-only` 与 `Metadata: Read-only`；不需要 webhook 或写权限。安装后会进行一次用户授权，仅用于验证安装归属，得到的用户令牌立即丢弃。Worker 以 GitHub App 私钥生成短期 installation token，仅用于读取已选仓库。
-- GitHub App 两个回调地址：`Setup URL` 为 `https://daniel-workspace-api.ai-investment-dashboard.workers.dev/api/github/callback`；`Callback URL` 为 `https://daniel-workspace-api.ai-investment-dashboard.workers.dev/api/github/oauth/callback`。安装和仓库范围更新回调都会继续进入用户身份核验；OAuth 用户令牌只用于确认安装归属，随后丢弃。
-- OAuth 会话不使用 Worker Cookie：Workspace API 请求显式携带 Supabase Bearer 会话并省略 Cookie；两段 GitHub 回调通过签名、一次性 state 关联回已验证用户。KV 对此前不存在的 `user:{id}` 键可能保留负缓存，OAuth 成功回跳后客户端会自动重试仓库列表和快照最多约 65 秒，等待安装映射传播。
-- Cloudflare Worker Secrets：`GITHUB_APP_ID`、`GITHUB_APP_SLUG`、`GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`GITHUB_APP_PRIVATE_KEY`（PKCS#8 PEM）；随机 `GITHUB_STATE_SECRET` 已由服务端生成。KV `GITHUB_INSTALLATIONS` 只保存已核验 Supabase 用户 ID 到 GitHub installation ID 的映射和短期一次性 state；GitHub 用户令牌只在回调中核验 installation 所属用户后丢弃，不保存。不要将任何 Secret 写入代码、`.dev.vars`、聊天或日志。
-- 项目 `github` 字段填入与安装授权仓库一致的 `https://github.com/{owner}/{repo}`。Worker 只返回匹配项目的仓库元数据和最近提交，首页缓存保存在当前设备浏览器；不写入 Supabase、不改变现有同步字段。AI 今日简报的显式生成请求可包含授权 GitHub App 提交摘要；本机 Companion 提交说明、代码、路径仍不会发送给 AI。
-- 公开仓库仍使用匿名 Public API；Companion 仍只读。本地离线或授权撤销时保留上次成功快照并提示状态。
+- Workspace 的 `/api/github/*` 请求必须携带 Supabase Bearer 会话。Worker 通过 Supabase Auth `get user` API 验证会话，并要求 UUID 与唯一 `WORKSPACE_USER_ID` 完全相同；缺少或不匹配时拒绝访问。
+- Worker 使用 `GITHUB_APP_ID` 和 `GITHUB_APP_PRIVATE_KEY` 在服务端签署短期 App JWT，签发安装令牌后只读取该安装授权的仓库。令牌只留在 Worker 内存中，不返回浏览器；前端仅传入仓库名，Worker 会再次校验仓库确实在 App 安装范围内。
+- 此读取路径不发起 GitHub 用户 OAuth 跳转，也不依赖安装映射 KV。GitHub App 只需现有 `Contents: Read-only` 与 `Metadata: Read-only` 权限。Cloudflare 另需现有 `SUPABASE_URL`、publishable key 和精确 `WORKSPACE_USER_ID` 配置；不要将 Secret 写入代码、`.dev.vars`、聊天或日志。
+- Projects 的“刷新私有仓库”直接请求 Worker 并显示授权仓库数及读取状态。仓库快照留在当前浏览器，不写 Supabase；AI 简报只在用户点击后使用已关联的提交摘要。本机 Companion 提交说明、代码、路径不会发送给 AI。
+- Worker 为 GitHub API 请求设置固定 `User-Agent`。上游读取失败时，返回真实 HTTP 状态和经过脱敏、截断的错误说明；安装令牌、App JWT 和私钥不进入响应。
+- 公开仓库仍使用匿名 Public API；Companion 仍只读。本地离线或 GitHub 读取失败时保留上次成功快照并提示状态。
 
 ## V2.7 智谱 GLM Assistant
 

@@ -1,7 +1,4 @@
 const WORKER_BASE = "https://daniel-workspace-api.ai-investment-dashboard.workers.dev";
-const INSTALLATION_RETRY_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000, 10_000, 10_000, 10_000, 10_000, 10_000];
-
-function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 async function request(path, auth, { method = "GET", body } = {}) {
   const { data, error } = await auth.client.auth.getSession();
@@ -20,44 +17,20 @@ async function request(path, auth, { method = "GET", body } = {}) {
     const failure = new Error(result?.error?.message || `GitHub Worker 请求失败（HTTP ${response.status}）。`);
     failure.code = result?.error?.code || "github_unavailable";
     failure.status = response.status;
+    failure.upstreamStatus = result?.error?.httpStatus;
     throw failure;
   }
   return result;
 }
 
-async function requestWithInstallationRetry(path, auth, requestOptions, { retryOnNotConnected = false, waitBeforeRetry = wait } = {}) {
-  let attempt = 0;
-  while (true) {
-    try { return await request(path, auth, requestOptions); }
-    catch (error) {
-      const delay = INSTALLATION_RETRY_DELAYS_MS[attempt];
-      if (!retryOnNotConnected || error?.code !== "github_not_connected" || delay === undefined) throw error;
-      await waitBeforeRetry(delay);
-      attempt += 1;
-    }
-  }
-}
-
-export async function beginGitHubAppConnection(auth) {
-  const result = await request("/api/github/connect", auth, { method: "POST", body: { returnOrigin: location.origin, returnPath: `${location.pathname}${location.search}${location.hash}` } });
-  let authorizationUrl;
-  try { authorizationUrl = new URL(result.url); } catch { throw new Error("GitHub App 授权地址无效。"); }
-  if (authorizationUrl.origin !== "https://github.com" || authorizationUrl.pathname !== "/login/oauth/authorize") throw new Error("GitHub App 授权地址无效。");
-  location.assign(result.url);
-}
-
-export async function getPrivateGitHubStatus(auth) {
+export function getPrivateGitHubStatus(auth) {
   return request("/api/github/status", auth);
 }
 
-export async function listPrivateGitHubRepositories(auth, retryOptions = {}) {
-  return requestWithInstallationRetry("/api/github/repositories", auth, {}, retryOptions);
+export function listPrivateGitHubRepositories(auth) {
+  return request("/api/github/repositories", auth);
 }
 
-export async function fetchPrivateGitHubSnapshots(auth, repositories, retryOptions = {}) {
-  return requestWithInstallationRetry("/api/github/snapshots", auth, { method: "POST", body: { repositories } }, retryOptions);
-}
-
-export async function disconnectGitHubApp(auth) {
-  return request("/api/github/disconnect", auth, { method: "POST", body: {} });
+export function fetchPrivateGitHubSnapshots(auth, repositories) {
+  return request("/api/github/snapshots", auth, { method: "POST", body: { repositories } });
 }

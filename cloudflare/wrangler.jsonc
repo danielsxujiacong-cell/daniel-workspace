@@ -15,9 +15,6 @@
     "AI_BASE_URL": "https://open.bigmodel.cn/api/paas/v4/",
     "AI_MODEL": "glm-4-flash-250414"
   },
-  "kv_namespaces": [
-    { "binding": "GITHUB_INSTALLATIONS", "id": "fac5ecf46a044bbc9fec1ebd61068992" }
-  ],
   "secrets": {
     "required": []
   }

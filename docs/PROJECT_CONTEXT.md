@@ -68,11 +68,11 @@ Build a usable personal workspace that brings projects, notes, decisions, and ta
 | 2026-10-09 | Add the TK-1001 deterministic rule/SOP/Decision/completion workflow only inside the mounted visitor session | Demonstrate an operational handoff while keeping guest actions ephemeral and separate from private account data |
 | 2026-10-10 | Present the guest route as a clearly labelled, fixed-rule enterprise automation demo with a five-step TK-1001 preview | Help visitors understand product value quickly without implying real AI reasoning or customer deployment |
 | 2026-10-11 | Keep project AI next-step generation as an in-memory draft and adopt only into the existing `project.next` field | Reuse the authenticated GLM Worker and sync path without changing schema or writing before user intent |
-| 2026-10-11 | Treat a missing Workers KV installation mapping immediately after OAuth as a transient propagation result | Retry private repository reads after successful OAuth instead of showing a false disconnected state; keep Supabase Bearer auth and avoid cookies or schema changes |
+| 2026-10-11 | Use GitHub App installation tokens for private reads; require the exact allowlisted Workspace user at every Worker endpoint | Remove the end-user OAuth and KV mapping flow; keep installation tokens in Worker memory, revalidate requested repositories against App authorization, and preserve the existing Supabase schema and sync boundary |
 
 ## Verification
 
-- V3.5-B.2: nine targeted GitHub App client/Worker tests pass; JS syntax checks and `git diff --check` pass. Worker health is live; unauthenticated status returns `401 github_session_required`. GitHub Pages and cache-busted `workspace.danielxu.cn` serve the updated app import and private API retry logic. Signed-in private-repository acceptance remains pending.
+- V3.5-B.3: the live Worker now uses an App JWT and short-lived installation tokens, with fixed GitHub `User-Agent` and sanitized upstream diagnostics. A signed-in Workspace session read 3 authorized repositories and latest private commit `docs: record V3.5-B.2 deployment status` (`0926e3c…`). Seven focused client/Worker tests and changed-file syntax checks pass. The user should finish acceptance with Local Companion stopped; no Supabase schema/data or GitHub permissions changed.
 - ESM syntax checks for app and AI modules; local Mock context verified through the UI; `git diff --check`.
 - Browser regression across project/knowledge/decision/task CRUD, search, page-context Mock AI, confirmation/reset flows, reload/reopen persistence, both themes, and mobile layout.
 - V2.2 browser regression: public GitHub refresh, cached snapshot display, failure fallback, dashboard recency, and GitHub-aware project Mock AI response.

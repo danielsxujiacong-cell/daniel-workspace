@@ -21,7 +21,7 @@ const { buildAssistantContext } = await import("./ai/context.js");
 const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = await import("./ai/service.js?v=3.4.2");
 const { buildProjectNextStepContext, buildProjectNextStepPrompt, parseProjectNextStepResponse, verifiedProjectGitHubCommit } = await import("./ai/project-next-step.js?v=3.3.2");
 const { buildDailyBriefContext, buildDailyBriefPrompt, parseDailyBriefResponse } = await import("./ai/daily-brief.js?v=3.5-b");
-const { beginGitHubAppConnection, fetchPrivateGitHubSnapshots, getPrivateGitHubStatus, listPrivateGitHubRepositories } = await import("./github/private-api.js?v=3.5-b.2");
+const { fetchPrivateGitHubSnapshots, listPrivateGitHubRepositories } = await import("./github/private-api.js?v=3.5-b.3");
 const { localScanEndpointFor, shouldRenderDashboardGitHubActivity } = await import("./local-companion.js?v=3.5-a.2");
 const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = await import("./suggestions.js");
 const { fetchPublicGitHubRepository, GITHUB_CACHE_TTL_MS, isGitHubSnapshotFresh, parsePublicGitHubRepository } = await import("./github/public-api.js?v=3.2");
@@ -44,7 +44,7 @@ const {
   saveCloudChanges,
   setCloudProjectPinned,
 } = await import("./cloud/sync.js");
-  const { APP_VERSION } = await import("./version.js?v=3.5-b.1");
+  const { APP_VERSION } = await import("./version.js?v=3.5-b.3");
 
 const app = document.querySelector("#app");
 let legacyData = loadData();
@@ -1286,8 +1286,8 @@ function renderProjects() {
     const gitClass = !item.hasGit || item.clean === false ? "warning" : item.clean === true ? "ok" : "";
     return `<article class="card local-project-row"><div class="local-project-main"><h3>${esc(item.name)}</h3><code>${esc(item.path)}</code><span class="local-project-link">${linked ? `工作台项目：${esc(linked.name)}` : repository ? `<a href="${esc(repository)}" target="_blank" rel="noreferrer">${esc(repository.replace("https://github.com/", ""))}</a>` : "未关联工作台项目"}</span></div><div class="local-project-meta"><span class="local-state ${gitClass}">${esc(gitLabel)}</span><span>分支 ${esc(item.branch || (item.hasGit ? "未知" : "—"))}</span><span>${esc(localAheadBehind(item))}</span></div><button class="button small" data-action="view-local-project" data-id="${esc(item.id)}">查看状态 ${icon("chevron")}</button></article>`;
   }).join("")}</div>` : ui.localProjects ? `<div class="card empty-state">扫描目录中没有发现本地项目。</div>` : `<div class="card local-companion-notice"><strong>${ui.localProjectsStatus === "loading" ? "正在读取本地项目" : "尚未连接本地 Companion"}</strong><p>请确认开机 Companion 已启动，或在本机项目目录运行 <code>python local_companion.py</code>，然后重新扫描。GitHub Pages 通过允许的跨源请求尝试访问本机 127.0.0.1:4174。</p></div>`}</section>`;
-  return `<div class="page-heading"><div><div class="eyebrow">工作空间</div><h1>Projects</h1><p>云端保存项目基础资料；本机 Git 状态由当前设备的 Companion 提供。</p></div><div class="heading-actions"><span class="github-overview-status">${esc(connectionLabel)}</span><button class="button" data-action="github-app-connect" ${ui.githubAppStatus === "connecting" ? "disabled aria-busy=\"true\"" : ""}>${ui.githubAppStatus === "connecting" ? "正在确认授权…" : ui.githubAppStatus === "connected" ? "刷新私有仓库" : "连接 GitHub App"}</button><button class="button" data-action="refresh-github" ${ui.githubRefreshing ? "disabled aria-busy=\"true\"" : ""}>${icon("reset")} 刷新公开仓库</button><button class="button primary" data-action="open-create-project">${icon("plus")} 新建项目</button></div></div>
-    <p class="github-app-notice" role="status">${ui.githubAppStatus === "connected" ? `GitHub App 已授权 · ${ui.githubAppRepositoryCount || "已选仓库"} 个可读仓库；仅匹配到项目卡片的仓库会同步快照。${ui.githubAppMessage ? ` ${esc(ui.githubAppMessage)}` : ""}` : `私有仓库可通过 GitHub App 授权只读访问。凭据保存在 Worker；选择仓库由 GitHub 安装页管理。${ui.githubAppMessage ? ` ${esc(ui.githubAppMessage)}` : ""}`}</p>
+  return `<div class="page-heading"><div><div class="eyebrow">工作空间</div><h1>Projects</h1><p>云端保存项目基础资料；本机 Git 状态由当前设备的 Companion 提供。</p></div><div class="heading-actions"><span class="github-overview-status">${esc(connectionLabel)}</span><button class="button" data-action="github-app-connect" ${ui.githubAppStatus === "connecting" ? "disabled aria-busy=\"true\"" : ""}>${ui.githubAppStatus === "connecting" ? "正在读取授权仓库…" : "刷新私有仓库"}</button><button class="button" data-action="refresh-github" ${ui.githubRefreshing ? "disabled aria-busy=\"true\"" : ""}>${icon("reset")} 刷新公开仓库</button><button class="button primary" data-action="open-create-project">${icon("plus")} 新建项目</button></div></div>
+    <p class="github-app-notice" role="status">${ui.githubAppStatus === "connected" ? `GitHub App 只读连接 · ${ui.githubAppRepositoryCount || "已授权"} 个仓库；Worker 使用短期 installation token 读取，私钥和 Token 不进入浏览器。${ui.githubAppMessage ? ` ${esc(ui.githubAppMessage)}` : ""}` : `Worker 使用 GitHub App installation token 只读读取已授权仓库；只接受当前登录的 Workspace 用户。${ui.githubAppMessage ? ` ${esc(ui.githubAppMessage)}` : ""}`}</p>
     <div class="section-title cloud-project-heading"><div><h2>云端项目资料</h2><p>项目资料随账号同步；首页建议置顶 3–5 个项目，最多 5 个。</p></div><span class="project-pin-count">首页置顶 ${pinnedProjectCount}/${MAX_HOME_PROJECT_PINS}</span></div>
     ${ui.projectPinningAvailable === false ? `<p class="cloud-notice-error project-pin-notice" role="status">跨设备置顶尚未启用。请先在 Supabase 执行 <code>supabase/v3.1-b-project-pinning.sql</code>。</p>` : ""}
     <div class="toolbar"><div class="filter-list">${[["all", "全部项目"], ["active", "进行中"]].map(([filter, label]) => `<button class="filter-button ${ui.projectFilter === filter ? "active" : ""}" data-action="filter-projects" data-filter="${filter}">${label}${filter === "active" && cloudWorkspaceAvailable() ? ` · ${cloudProjects.filter((project) => project.status === "进行中").length}` : ""}</button>`).join("")}</div><span class="muted">${cloudWorkspaceAvailable() ? `${projects.length} 个项目` : esc(dashboardUnavailableMessage())}</span></div>
@@ -2051,18 +2051,14 @@ async function refreshGitHubData(projectIds = null, { force = true, silent = fal
   else toast(`GitHub 数据已更新（${successCount} 个仓库）`);
 }
 
-async function refreshPrivateGitHubData(projects = db.projects, { silent = false, waitForInstallation = false } = {}) {
+async function refreshPrivateGitHubData(projects = db.projects, { silent = false } = {}) {
   if (!workspaceActive) return;
   if (navigator.onLine === false) { ui.githubAppStatus = "offline"; ui.githubAppMessage = "当前设备离线，显示上次成功的浏览器快照。"; if (!silent) render(); return; }
-  const hasCachedPrivateSnapshot = projects.some((project) => project.githubData?.source === "github-app");
-  const retryOptions = { retryOnNotConnected: waitForInstallation || hasCachedPrivateSnapshot };
-  if (waitForInstallation) {
-    ui.githubAppStatus = "connecting";
-    ui.githubAppMessage = "GitHub 身份授权已完成，正在等待 Worker 安装记录同步。";
-    if (!silent) render();
-  }
+  ui.githubAppStatus = "connecting";
+  ui.githubAppMessage = "正在通过 Worker 请求 GitHub App installation token 并读取授权仓库…";
+  if (!silent) render();
   try {
-    const result = await listPrivateGitHubRepositories(workspaceAuth, retryOptions);
+    const result = await listPrivateGitHubRepositories(workspaceAuth);
     const repositories = Array.isArray(result.repositories) ? result.repositories : [];
     ui.githubAppRepositories = repositories;
     ui.githubAppStatus = "connected";
@@ -2070,8 +2066,8 @@ async function refreshPrivateGitHubData(projects = db.projects, { silent = false
     const byName = new Map(repositories.map((repo) => [repo.fullName.toLowerCase(), repo]));
     const matches = projects.map((project) => ({ project, repo: parsePublicGitHubRepository(project.github) }))
       .filter(({ repo }) => repo && byName.has(repo.fullName.toLowerCase()));
-    if (!matches.length) { ui.githubAppMessage = repositories.length ? "请在项目资料中填写与已授权仓库一致的 GitHub 地址。" : "GitHub App 当前未授权任何仓库。"; if (!silent) render(); return; }
-    const snapshots = await fetchPrivateGitHubSnapshots(workspaceAuth, matches.map(({ repo }) => ({ fullName: repo.fullName })), retryOptions);
+    if (!matches.length) { ui.githubAppMessage = repositories.length ? "授权读取成功；请在项目资料中填写与 GitHub 仓库一致的地址。" : "GitHub App 当前未授权任何仓库。"; if (!silent) render(); return; }
+    const snapshots = await fetchPrivateGitHubSnapshots(workspaceAuth, matches.map(({ repo }) => ({ fullName: repo.fullName })));
     let changed = false;
     for (const snapshot of snapshots.snapshots || []) {
       const match = matches.find(({ repo }) => repo.fullName.toLowerCase() === snapshot.fullName.toLowerCase());
@@ -2081,28 +2077,12 @@ async function refreshPrivateGitHubData(projects = db.projects, { silent = false
     if (changed) saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt, ui.projectPinningAvailable);
     ui.githubAppMessage = `私有仓库快照已更新 ${snapshots.snapshots?.length || 0} 个。`;
   } catch (error) {
-    if (error?.code === "github_not_connected" && waitForInstallation) {
-      ui.githubAppStatus = "error";
-      ui.githubAppMessage = "GitHub 授权已完成，但 Cloudflare 安装记录尚未传播到当前区域；已自动重试约 65 秒。稍后刷新私有仓库即可继续，不必重新授权。";
-    } else {
-      if (["github_not_connected", "github_authorization_expired"].includes(error?.code)) ui.githubAppStatus = "disconnected";
-      else if (error?.code === "github_not_configured") ui.githubAppStatus = "unavailable";
-      ui.githubAppMessage = error?.message || "GitHub 私有仓库暂不可用；保留上次成功快照并继续使用公开 GitHub 和 Companion。";
-    }
+    if (error?.code === "github_not_connected") ui.githubAppStatus = "disconnected";
+    else if (error?.code === "github_not_configured") ui.githubAppStatus = "unavailable";
+    else ui.githubAppStatus = "error";
+    ui.githubAppMessage = error?.message || "GitHub 私有仓库读取失败；保留上次成功快照并继续使用公开 GitHub 和 Companion。";
   }
   if (!silent && workspaceActive) render();
-}
-
-async function connectGitHubApp() {
-  try {
-    const status = await getPrivateGitHubStatus(workspaceAuth);
-    if (status.connected) await refreshPrivateGitHubData();
-    else await beginGitHubAppConnection(workspaceAuth);
-  } catch (error) {
-    ui.githubAppStatus = error?.code === "github_not_configured" ? "unavailable" : "error";
-    ui.githubAppMessage = error?.message || "GitHub App 连接失败。";
-    render();
-  }
 }
 
 async function refreshLocalProjects() {
@@ -2389,7 +2369,7 @@ function handleAction(action, element, sourceEvent) {
   }
   if (action === "refresh-github") refreshGitHubData(id || null);
   if (action === "refresh-home-github") { const pinned = getHomePinnedProjects(db.projects); void (async () => { await refreshPrivateGitHubData(pinned, { silent: true }); const privateNames = new Set((ui.githubAppRepositories || []).map((repo) => repo.fullName.toLowerCase())); const publicIds = pinned.filter((project) => { const repo = parsePublicGitHubRepository(project.github); return repo && !privateNames.has(repo.fullName.toLowerCase()) && project.githubData?.source !== "github-app"; }).map((project) => project.id); if (publicIds.length) await refreshGitHubData(publicIds); else render(); })(); }
-  if (action === "github-app-connect") { void connectGitHubApp(); return; }
+  if (action === "github-app-connect") { void refreshPrivateGitHubData(); return; }
   if (action === "refresh-local-projects") refreshLocalProjects();
 }
 
@@ -2496,8 +2476,7 @@ if (initialLocalProjectRoute) {
   if (["home", "projects", "knowledge", "decisions", "tasks"].includes(initialPage)) ui.page = initialPage;
 }
 
-const githubAppCallback = new URLSearchParams(location.search).get("github_app");
-if (githubAppCallback) {
+if (new URLSearchParams(location.search).has("github_app")) {
   const cleanUrl = new URL(location.href);
   cleanUrl.searchParams.delete("github_app");
   history.replaceState(null, "", cleanUrl);
@@ -2505,13 +2484,4 @@ if (githubAppCallback) {
 render();
 void initializeCloudSync();
 if (localScanEndpoint) refreshLocalProjects();
-if (githubAppCallback === "connected") void refreshPrivateGitHubData(db.projects, { waitForInstallation: true });
-else if (githubAppCallback) {
-  ui.githubAppStatus = "error";
-  ui.githubAppMessage = githubAppCallback === "denied"
-    ? "你取消了 GitHub 身份授权；可以重新连接。"
-    : githubAppCallback === "multiple_installations"
-      ? "此 GitHub 账号可访问多个该 App 安装；为避免绑定错误，Worker 未自动选择。"
-      : "GitHub 身份核验未完成；请重新连接并确认使用已安装该 App 的 GitHub 账号。";
-  render();
-} else void refreshPrivateGitHubData(db.projects, { silent: true });
+void refreshPrivateGitHubData(db.projects, { silent: true });

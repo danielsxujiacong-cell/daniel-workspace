@@ -49,7 +49,6 @@ function errorResponse(request, env, status, code, message) {
 }
 
 const githubError = (request, env, status, code, message) => jsonResponse(request, env, { error: { code, message } }, status);
-const redirectNoStore = (url) => new Response(null, { status: 302, headers: { Location: url, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
 const encoder = new TextEncoder();
 
 function base64Url(bytes) {
@@ -60,33 +59,6 @@ function base64Url(bytes) {
 
 function base64UrlText(value) { return base64Url(encoder.encode(value)); }
 
-function fromBase64Url(value) {
-  const padded = value.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((value.length + 3) % 4);
-  return Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
-}
-
-async function hmacKey(env) {
-  if (!env.GITHUB_STATE_SECRET) throw new Error("github_not_configured");
-  return crypto.subtle.importKey("raw", encoder.encode(env.GITHUB_STATE_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
-}
-
-async function signedState(payload, env) {
-  const body = base64UrlText(JSON.stringify(payload));
-  const signature = await crypto.subtle.sign("HMAC", await hmacKey(env), encoder.encode(body));
-  return `${body}.${base64Url(new Uint8Array(signature))}`;
-}
-
-async function readSignedState(value, env) {
-  if (typeof value !== "string" || value.length > 2_048) return null;
-  const [body, signature, extra] = value.split(".");
-  if (!body || !signature || extra) return null;
-  const valid = await crypto.subtle.verify("HMAC", await hmacKey(env), fromBase64Url(signature), encoder.encode(body));
-  if (!valid) return null;
-  try {
-    const parsed = JSON.parse(new TextDecoder().decode(fromBase64Url(body)));
-    return parsed?.exp > Date.now() && typeof parsed?.userId === "string" ? parsed : null;
-  } catch { return null; }
-}
 
 async function authenticateWorkspace(request, env) {
   const token = request.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];
@@ -98,39 +70,15 @@ async function authenticateWorkspace(request, env) {
     });
     if (!response.ok) return null;
     const user = await response.json();
-    return typeof user?.id === "string" && (!env.WORKSPACE_USER_ID || user.id === env.WORKSPACE_USER_ID)
-      ? { id: user.id, token } : null;
+    return typeof user?.id === "string" && typeof env.WORKSPACE_USER_ID === "string" && env.WORKSPACE_USER_ID.length > 0 && user.id === env.WORKSPACE_USER_ID
+      ? { id: user.id } : null;
   } catch { return null; }
 }
 
 function githubConfigured(env) {
-  return Boolean(env.GITHUB_APP_ID && env.GITHUB_APP_SLUG && env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET && env.GITHUB_APP_PRIVATE_KEY && env.GITHUB_STATE_SECRET && env.GITHUB_INSTALLATIONS);
+  return Boolean(env.GITHUB_APP_ID && env.GITHUB_APP_PRIVATE_KEY && env.SUPABASE_URL && env.SUPABASE_ANON_KEY && env.WORKSPACE_USER_ID);
 }
 
-function githubOAuthUrl(state, env, origin) {
-  const authorize = new URL("https://github.com/login/oauth/authorize");
-  authorize.searchParams.set("client_id", env.GITHUB_CLIENT_ID);
-  authorize.searchParams.set("redirect_uri", `${origin}/api/github/oauth/callback`);
-  authorize.searchParams.set("state", state);
-  return authorize.href;
-}
-
-function githubInstallUrl(state, env) {
-  const installUrl = new URL(`https://github.com/apps/${encodeURIComponent(env.GITHUB_APP_SLUG)}/installations/new`);
-  installUrl.searchParams.set("state", state);
-  return installUrl.href;
-}
-
-function githubWorkspaceReturn(state, result) {
-  const returnUrl = new URL(state.returnPath || "/", state.returnOrigin);
-  returnUrl.searchParams.set("github_app", result);
-  return returnUrl.href;
-}
-
-async function installationFor(user, env) {
-  if (!env.GITHUB_INSTALLATIONS) return "";
-  return await env.GITHUB_INSTALLATIONS.get(`user:${user.id}`) || "";
-}
 
 async function appJwt(env) {
   const pem = env.GITHUB_APP_PRIVATE_KEY.replace(/\\n/g, "\n");
@@ -145,126 +93,144 @@ async function appJwt(env) {
 async function githubApi(path, token, options = {}) {
   return fetch(`https://api.github.com${path}`, {
     ...options,
-    headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${token}`, "X-GitHub-Api-Version": "2022-11-28", ...(options.headers || {}) },
+    headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${token}`, "User-Agent": "Daniel-Workspace-GitHub-App-Reader/3.5", "X-GitHub-Api-Version": "2022-11-28", ...(options.headers || {}) },
     signal: AbortSignal.timeout(12_000),
   });
 }
 
-async function installationToken(installationId, env) {
-  const jwt = await appJwt(env);
+
+function sanitizeGitHubMessage(value) {
+  return String(value || "GitHub 未提供错误说明")
+    .replace(/Bearer\s+[^\s,"']+/gi, "Bearer [redacted]")
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]{12,}\b/g, "[redacted]")
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[redacted private key]")
+    .replace(/[\r\n\t]+/g, " ")
+    .slice(0, 180);
+}
+
+async function githubUpstreamFailure(response, operation) {
+  const body = await response.clone().text().catch(() => "");
+  let payload = {};
+  try { payload = JSON.parse(body); } catch { /* Preserve a bounded plain-text diagnostic below. */ }
+  const error = new Error(operation);
+  error.upstreamStatus = response.status;
+  error.upstreamOperation = operation;
+  error.upstreamMessage = sanitizeGitHubMessage(payload?.message || body.replace(/<[^>]*>/g, " ").replace(/\s+/g, " "));
+  error.code = "github_upstream_error";
+  return error;
+}
+
+function githubFailure(request, env, error) {
+  const httpStatus = Number.isInteger(error?.upstreamStatus) ? error.upstreamStatus : null;
+  const upstreamMessage = httpStatus ? sanitizeGitHubMessage(error.upstreamMessage) : null;
+  const message = httpStatus
+    ? `${error?.upstreamOperation || "GitHub API"} HTTP ${httpStatus}: ${upstreamMessage}`
+    : error?.code === "github_not_connected"
+      ? "此 GitHub App 当前没有可读取的安装。请在 GitHub App 的安装设置中确认仓库范围。"
+      : "GitHub 私有仓库读取失败。请重试。";
+  return jsonResponse(request, env, {
+    error: {
+      code: error?.code || "github_unavailable",
+      message,
+      ...(httpStatus ? { httpStatus, upstreamMessage, operation: error?.upstreamOperation || "GitHub API" } : {}),
+    },
+  }, error?.code === "github_not_connected" ? 404 : 502);
+}
+
+async function findAppInstallations(jwt, env) {
+  const response = await githubApi("/app/installations?per_page=100", jwt);
+  if (!response.ok) throw await githubUpstreamFailure(response, "GitHub App installation lookup");
+  const payload = await response.json();
+  if (!Array.isArray(payload)) throw new Error("github_invalid_installation_response");
+  const installations = payload.filter((item) => String(item?.app_id) === String(env.GITHUB_APP_ID) && /^\d{1,20}$/.test(String(item?.id || "")));
+  if (!installations.length) {
+    const error = new Error("github_not_connected");
+    error.code = "github_not_connected";
+    throw error;
+  }
+  if (installations.length > 20) throw new Error("github_too_many_installations");
+  return installations;
+}
+
+async function createInstallationToken(installationId, jwt) {
   const response = await githubApi(`/app/installations/${encodeURIComponent(installationId)}/access_tokens`, jwt, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
   });
-  if (!response.ok) {
-    const error = new Error([401, 403, 404].includes(response.status) ? "github_authorization_expired" : "github_upstream_error");
-    error.status = response.status;
-    throw error;
+  if (!response.ok) throw await githubUpstreamFailure(response, "GitHub installation token request");
+  const payload = await response.json();
+  if (typeof payload?.token !== "string" || !payload.token) throw new Error("github_invalid_installation_token_response");
+  return payload.token;
+}
+
+async function listAppAuthorizedRepositories(env, { includeTokens = false } = {}) {
+  const jwt = await appJwt(env);
+  const installations = await findAppInstallations(jwt, env);
+  const repositories = new Map();
+  for (const installation of installations) {
+    const token = await createInstallationToken(installation.id, jwt);
+    const response = await githubApi("/installation/repositories?per_page=100", token);
+    if (!response.ok) throw await githubUpstreamFailure(response, "GitHub authorized repository list");
+    const payload = await response.json();
+    if (!Array.isArray(payload?.repositories)) throw new Error("github_invalid_repository_response");
+    for (const repo of payload.repositories) {
+      if (typeof repo?.full_name !== "string") continue;
+      const key = repo.full_name.toLowerCase();
+      if (!repositories.has(key)) repositories.set(key, { repo, ...(includeTokens ? { token } : {}) });
+    }
   }
-  return (await response.json()).token;
+  return repositories;
 }
 
 async function githubRoute(request, env, url) {
   if (!githubConfigured(env)) return githubError(request, env, 503, "github_not_configured", "GitHub App 尚未配置；现有公开仓库和本机 Companion 仍可使用。");
-  if (request.method === "GET" && url.pathname === "/api/github/callback") {
-    const state = await readSignedState(url.searchParams.get("state"), env);
-    const installationId = url.searchParams.get("installation_id");
-    if (!state || !/^\d{1,20}$/.test(installationId || "") || !["install", "update"].includes(url.searchParams.get("setup_action"))) {
-      return new Response("GitHub 安装状态无效或已过期，请回到 Workspace 重试。", { status: 400, headers: { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" } });
-    }
-    const nonceKey = `state:${state.nonce}`;
-    if (!state.nonce || await env.GITHUB_INSTALLATIONS.get(nonceKey) !== state.userId) return new Response("GitHub 安装状态已使用或已过期，请回到 Workspace 重试。", { status: 400, headers: { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" } });
-    await env.GITHUB_INSTALLATIONS.delete(nonceKey);
-    const nonce = base64Url(crypto.getRandomValues(new Uint8Array(16)));
-    const verifyState = await signedState({ userId: state.userId, installationId, returnOrigin: state.returnOrigin, returnPath: state.returnPath, exp: Date.now() + 10 * 60_000, nonce }, env);
-    await env.GITHUB_INSTALLATIONS.put(`state:${nonce}`, state.userId, { expirationTtl: 600 });
-    return redirectNoStore(githubOAuthUrl(verifyState, env, url.origin));
-  }
-  if (request.method === "GET" && url.pathname === "/api/github/oauth/callback") {
-    const state = await readSignedState(url.searchParams.get("state"), env);
-    const code = url.searchParams.get("code");
-    const nonceKey = state?.nonce ? `state:${state.nonce}` : "";
-    if (!state || (state.installationId && !/^\d{1,20}$/.test(state.installationId))
-      || !nonceKey || await env.GITHUB_INSTALLATIONS.get(nonceKey) !== state.userId) {
-      return new Response("GitHub 身份核验失败或已过期，请回到 Workspace 重试。", { status: 400, headers: { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" } });
-    }
-    await env.GITHUB_INSTALLATIONS.delete(nonceKey);
-    if (url.searchParams.has("error")) return redirectNoStore(githubWorkspaceReturn(state, "denied"));
-    if (!code || code.length > 256) return redirectNoStore(githubWorkspaceReturn(state, "oauth_error"));
-    const tokenResponse = await fetch("https://github.com/login/oauth/access_token", {
-      method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: env.GITHUB_CLIENT_ID, client_secret: env.GITHUB_CLIENT_SECRET, code }),
-      signal: AbortSignal.timeout(10_000),
-    });
-    const tokenPayload = await tokenResponse.json().catch(() => ({}));
-    if (!tokenResponse.ok || typeof tokenPayload.access_token !== "string") return redirectNoStore(githubWorkspaceReturn(state, "oauth_error"));
-    const installationsResponse = await githubApi("/user/installations?per_page=100", tokenPayload.access_token);
-    if (!installationsResponse.ok) return redirectNoStore(githubWorkspaceReturn(state, "oauth_error"));
-    const installations = await installationsResponse.json();
-    const appInstallations = (installations.installations || []).filter((installation) => String(installation.app_id) === String(env.GITHUB_APP_ID));
-    if (state.installationId) {
-      const belongsToUser = appInstallations.some((installation) => String(installation.id) === state.installationId);
-      if (!belongsToUser) return new Response("此 GitHub 安装不属于当前授权账号。", { status: 403, headers: { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" } });
-    } else if (appInstallations.length === 0) {
-      const nonce = base64Url(crypto.getRandomValues(new Uint8Array(16)));
-      const installState = await signedState({ userId: state.userId, returnOrigin: state.returnOrigin, returnPath: state.returnPath, exp: Date.now() + 10 * 60_000, nonce }, env);
-      await env.GITHUB_INSTALLATIONS.put(`state:${nonce}`, state.userId, { expirationTtl: 600 });
-      return redirectNoStore(githubInstallUrl(installState, env));
-    } else if (appInstallations.length > 1) {
-      return redirectNoStore(githubWorkspaceReturn(state, "multiple_installations"));
-    }
-    const installationId = state.installationId || String(appInstallations[0].id);
-    await env.GITHUB_INSTALLATIONS.put(`user:${state.userId}`, installationId);
-    return redirectNoStore(githubWorkspaceReturn(state, "connected"));
-  }
   const user = await authenticateWorkspace(request, env);
   if (!user) return githubError(request, env, 401, "github_session_required", "Workspace 登录已失效，请重新登录后重试。");
 
-  if (request.method === "POST" && url.pathname === "/api/github/connect") {
-    let body;
-    try { body = await request.json(); } catch { return githubError(request, env, 400, "github_invalid_request", "请求格式无效。"); }
-    const returnOrigin = body?.returnOrigin;
-    if (!allowedOrigins(env).has(returnOrigin)) return githubError(request, env, 400, "github_invalid_origin", "Workspace 来源不在允许列表中。");
-    const returnPath = typeof body?.returnPath === "string" && body.returnPath.startsWith("/") && !body.returnPath.startsWith("//") ? body.returnPath.slice(0, 1_000) : "/";
-    const nonce = base64Url(crypto.getRandomValues(new Uint8Array(16)));
-    const state = await signedState({ userId: user.id, returnOrigin, returnPath, exp: Date.now() + 10 * 60_000, nonce }, env);
-    await env.GITHUB_INSTALLATIONS.put(`state:${nonce}`, user.id, { expirationTtl: 600 });
-    return jsonResponse(request, env, { url: githubOAuthUrl(state, env, url.origin) });
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/github/disconnect") {
-    await env.GITHUB_INSTALLATIONS.delete(`user:${user.id}`);
-    return jsonResponse(request, env, { connected: false });
-  }
-
-  const installationId = await installationFor(user, env);
-  if (request.method === "GET" && url.pathname === "/api/github/status") return jsonResponse(request, env, { connected: Boolean(installationId) });
-  if (!installationId) return githubError(request, env, 404, "github_not_connected", "尚未授权 GitHub App；请先连接并选择仓库。");
-
   try {
-    const token = await installationToken(installationId, env);
+    if (request.method === "GET" && url.pathname === "/api/github/status") {
+      return jsonResponse(request, env, { connected: (await listAppAuthorizedRepositories(env)).size > 0 });
+    }
     if (request.method === "GET" && url.pathname === "/api/github/repositories") {
-      const response = await githubApi("/installation/repositories?per_page=100", token);
-      if (!response.ok) return githubError(request, env, 502, "github_upstream_error", "GitHub 暂时无法读取授权仓库，请重试。");
-      const payload = await response.json();
-      return jsonResponse(request, env, { repositories: (payload.repositories || []).slice(0, 100).map((repo) => ({ fullName: repo.full_name, name: repo.name, owner: repo.owner?.login, private: repo.private, defaultBranch: repo.default_branch, htmlUrl: repo.html_url })) });
+      const repositories = await listAppAuthorizedRepositories(env);
+      return jsonResponse(request, env, {
+        repositories: [...repositories.values()].slice(0, 100).map(({ repo }) => ({
+          fullName: repo.full_name,
+          name: repo.name,
+          owner: repo.owner?.login,
+          private: repo.private,
+          defaultBranch: repo.default_branch,
+          htmlUrl: repo.html_url,
+        })),
+      });
     }
     if (request.method === "POST" && url.pathname === "/api/github/snapshots") {
       let body;
       try { body = await request.json(); } catch { return githubError(request, env, 400, "github_invalid_request", "请求格式无效。"); }
       const requested = Array.isArray(body?.repositories) ? body.repositories.slice(0, 20) : [];
+      const authorized = await listAppAuthorizedRepositories(env, { includeTokens: true });
       const output = [];
       for (const item of requested) {
         if (!/^[A-Za-z0-9-]{1,39}\/[-A-Za-z0-9_.]{1,100}$/.test(item?.fullName || "")) continue;
-        const encoded = item.fullName.split("/").map(encodeURIComponent).join("/");
+        const entry = authorized.get(item.fullName.toLowerCase());
+        if (!entry) continue;
+        const fullName = entry.repo.full_name;
+        const encoded = fullName.split("/").map(encodeURIComponent).join("/");
         const now = Date.now();
         const [repoResponse, recentResponse, latestResponse] = await Promise.all([
-          githubApi(`/repos/${encoded}`, token),
-          githubApi(`/repos/${encoded}/commits?per_page=100&since=${encodeURIComponent(new Date(now - 7 * 86400_000).toISOString())}`, token),
-          githubApi(`/repos/${encoded}/commits?per_page=1`, token),
+          githubApi(`/repos/${encoded}`, entry.token),
+          githubApi(`/repos/${encoded}/commits?per_page=100&since=${encodeURIComponent(new Date(now - 7 * 86400_000).toISOString())}`, entry.token),
+          githubApi(`/repos/${encoded}/commits?per_page=1`, entry.token),
         ]);
-        if (!repoResponse.ok || !recentResponse.ok || !latestResponse.ok) continue;
-        const [repo, commits, latestCommits] = await Promise.all([repoResponse.json(), recentResponse.json(), latestResponse.json()]);
-        if (!Array.isArray(commits) || !Array.isArray(latestCommits) || repo.full_name?.toLowerCase() !== item.fullName.toLowerCase()) continue;
+        if (!repoResponse.ok) throw await githubUpstreamFailure(repoResponse, "GitHub repository metadata read");
+        const repo = await repoResponse.json();
+        const emptyRepository = repo.size === 0;
+        if (!recentResponse.ok && !(emptyRepository && recentResponse.status === 409)) throw await githubUpstreamFailure(recentResponse, "GitHub recent commits read");
+        if (!latestResponse.ok && !(emptyRepository && latestResponse.status === 409)) throw await githubUpstreamFailure(latestResponse, "GitHub latest commit read");
+        const [commits, latestCommits] = await Promise.all([
+          recentResponse.ok ? recentResponse.json() : Promise.resolve([]),
+          latestResponse.ok ? latestResponse.json() : Promise.resolve([]),
+        ]);
+        if (!Array.isArray(commits) || !Array.isArray(latestCommits) || repo.full_name?.toLowerCase() !== fullName.toLowerCase()) throw new Error("github_invalid_repository_response");
         const recent = commits.map((commit) => ({
           sha: typeof commit.sha === "string" ? commit.sha.slice(0, 7) : "",
           message: typeof commit.commit?.message === "string" ? commit.commit.message.split(/\r?\n/, 1)[0].slice(0, 240) : "",
@@ -273,18 +239,32 @@ async function githubRoute(request, env, url) {
         })).filter((commit) => /^[a-f0-9]{7}$/i.test(commit.sha) && commit.message && Number.isFinite(Date.parse(commit.committedAt)));
         const latestRaw = latestCommits[0];
         const latestSha = typeof latestRaw?.sha === "string" ? latestRaw.sha.slice(0, 7) : "";
-        const latest = latestSha ? { sha: latestSha, message: typeof latestRaw.commit?.message === "string" ? latestRaw.commit.message.split(/\r?\n/, 1)[0].slice(0, 240) : "", committedAt: latestRaw.commit?.committer?.date || latestRaw.commit?.author?.date || "", url: `https://github.com/${repo.full_name}/commit/${latestRaw.sha}` } : null;
-        output.push({ source: "github-app", fullName: repo.full_name, isPublic: repo.private === false, repositoryName: repo.full_name, repositoryUrl: repo.html_url, defaultBranch: repo.default_branch, updatedAt: repo.pushed_at || repo.updated_at, latestCommit: latest, recentCommits: recent.slice(0, 20), recentSevenDayCommitCount: commits.length, recentSevenDayCommitCountTruncated: commits.length === 100, refreshedAt: new Date(now).toISOString() });
+        const latest = latestSha ? {
+          sha: latestSha,
+          message: typeof latestRaw.commit?.message === "string" ? latestRaw.commit.message.split(/\r?\n/, 1)[0].slice(0, 240) : "",
+          committedAt: latestRaw.commit?.committer?.date || latestRaw.commit?.author?.date || "",
+          url: `https://github.com/${repo.full_name}/commit/${latestRaw.sha}`,
+        } : null;
+        output.push({
+          source: "github-app",
+          fullName: repo.full_name,
+          isPublic: repo.private === false,
+          repositoryName: repo.full_name,
+          repositoryUrl: repo.html_url,
+          defaultBranch: repo.default_branch,
+          updatedAt: repo.pushed_at || repo.updated_at,
+          latestCommit: latest,
+          recentCommits: recent.slice(0, 20),
+          recentSevenDayCommitCount: commits.length,
+          recentSevenDayCommitCountTruncated: commits.length === 100,
+          refreshedAt: new Date(now).toISOString(),
+        });
       }
       return jsonResponse(request, env, { snapshots: output });
     }
     return githubError(request, env, 404, "not_found", "Not found.");
   } catch (error) {
-    if (error?.message === "github_authorization_expired") {
-      await env.GITHUB_INSTALLATIONS.delete(`user:${user.id}`);
-      return githubError(request, env, 401, "github_authorization_expired", "GitHub App 授权已失效或已撤销，请重新连接并选择仓库。");
-    }
-    return githubError(request, env, 502, "github_unavailable", "GitHub 暂时不可用；Workspace 会保留上次成功数据并继续提供本机 Companion 信息。");
+    return githubFailure(request, env, error);
   }
 }
 
@@ -461,7 +441,6 @@ async function postChat(request, env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (request.method === "GET" && ["/api/github/callback", "/api/github/oauth/callback"].includes(url.pathname)) return githubRoute(request, env, url);
     if (!corsHeaders(request, env)) return new Response(null, { status: 403, headers: { "Cache-Control": "no-store" } });
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(request, env) });
     if (url.pathname.startsWith("/api/github/")) return githubRoute(request, env, url);

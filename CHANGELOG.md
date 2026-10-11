@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-11 · V3.5-B.3 改用 GitHub App 安装令牌读取私有仓库
+
+- 移除 GitHub 用户 OAuth 跳转、回调和 KV 安装映射依赖；Workspace 只允许指定的 Supabase 用户请求私有仓库 API。
+- Worker 使用 App 私钥在服务端签发短期 installation token，并在服务端校验仓库授权后读取元数据和最新提交；私钥与令牌不发往浏览器。
+- 补齐 GitHub REST `User-Agent`，并在失败时展示脱敏的上游 HTTP 状态与错误说明。线上登录态已读取 3 个授权仓库及最新提交。
+
 ## 2026-10-11 · V3.5-B.2 修复 OAuth 成功回跳后的 KV 传播延迟
 
 - OAuth 回跳后，客户端会自动重试私有仓库列表和快照读取，处理 Cloudflare KV 对先前“不存在”结果的短期负缓存；Projects 显示授权确认状态，避免用户重复启动 OAuth。
