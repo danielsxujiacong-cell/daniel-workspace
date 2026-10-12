@@ -181,6 +181,8 @@ export function buildHomeActivity({
       code: typeof error?.code === "string" ? error.code : "",
       operation: typeof error?.operation === "string" ? error.operation : "",
       httpStatus: Number.isInteger(error?.httpStatus) ? error.httpStatus : null,
+      ...(typeof error?.diagnostic === "string" ? { diagnostic: error.diagnostic } : {}),
+      ...(typeof error?.errorType === "string" ? { errorType: error.errorType } : {}),
     };
   });
 

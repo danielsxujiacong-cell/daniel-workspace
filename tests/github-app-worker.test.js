@@ -238,6 +238,35 @@ test("GitHub activity reports branch-history permission failures separately from
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test("GitHub activity reports a sanitized diagnostic when GitHub returns malformed branch JSON", async () => {
+  const { env } = await testEnv();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/auth/v1/user") return Response.json({ id: uid });
+    if (url.pathname === "/app/installations") return Response.json([{ id: 987654, app_id: 12345 }]);
+    if (url.pathname.endsWith("/access_tokens")) return Response.json({ token: installationToken });
+    if (url.pathname === "/installation/repositories") return Response.json({ repositories: [{
+      full_name: "acme/private-one", name: "private-one", owner: { login: "acme" }, private: true,
+      default_branch: "main", html_url: "https://github.com/acme/private-one",
+    }] });
+    if (url.pathname === "/repos/acme/private-one/branches") return new Response("not-json github_pat_0123456789abcdefghijkl", { status: 200 });
+    return new Response(`unexpected ${url}`, { status: 500 });
+  };
+  try {
+    const response = await worker.fetch(req("/api/github/activity", {
+      method: "POST",
+      body: { repositories: [{ fullName: "acme/private-one" }], startDate: "2026-10-10", endDate: "2026-10-12" },
+    }), env);
+    const payload = await response.json();
+    assert.equal(payload.errors[0].reasonCategory, "invalid_github_response");
+    assert.equal(payload.errors[0].errorType, "SyntaxError");
+    assert.match(payload.errors[0].diagnostic, /not-json|JSON/i);
+    assert.equal(payload.errors[0].diagnostic.includes("github_pat_0123456789abcdefghijkl"), false);
+    assert.equal(payload.errors[0].diagnostic.includes(installationToken), false);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("GitHub activity identifies upstream rate limits while reading branch lists", async () => {
   const { env } = await testEnv();
   const originalFetch = globalThis.fetch;

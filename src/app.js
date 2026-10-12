@@ -1424,7 +1424,7 @@ function renderActivityStatus(activity, dataAvailable) {
   if (invalidProjects.length) notices.push(`${invalidProjects.length} 个项目的 GitHub 地址无效，未计入覆盖统计。`);
   if (!coverage.workLogsComplete) warnings.push("工作记录读取未完成；缺失日期不计为零。");
   const affectedList = affectedDetails.length
-    ? `<details class="dashboard-activity-gaps"><summary>查看 ${affectedDetails.length} 个未完整仓库及原因</summary><ul>${affectedDetails.map(({ fullName, reason, reasonCategory, code, operation, httpStatus }) => `<li><strong>${esc(fullName)}</strong>${reasonCategory || code ? `<small>${esc([reasonCategory ? activityReasonLabel(reasonCategory) : "", code].filter(Boolean).join(" · "))}</small>` : ""}<span>${esc([operation, httpStatus ? `HTTP ${httpStatus}` : "", reason].filter(Boolean).join(" · "))}</span></li>`).join("")}</ul></details>`
+    ? `<details class="dashboard-activity-gaps"><summary>查看 ${affectedDetails.length} 个未完整仓库及原因</summary><ul>${affectedDetails.map(({ fullName, reason, reasonCategory, code, operation, httpStatus, errorType, diagnostic }) => `<li><strong>${esc(fullName)}</strong>${reasonCategory || code ? `<small>${esc([reasonCategory ? activityReasonLabel(reasonCategory) : "", code].filter(Boolean).join(" · "))}</small>` : ""}<span>${esc([operation, httpStatus ? `HTTP ${httpStatus}` : "", reason, diagnostic ? `诊断 ${errorType || ""}: ${diagnostic}` : ""].filter(Boolean).join(" · "))}</span></li>`).join("")}</ul></details>`
     : "";
   const projectLinkIssues = [...unlinkedProjects, ...invalidProjects];
   const projectLinkList = projectLinkIssues.length
@@ -1442,6 +1442,7 @@ function activityReasonLabel(category) {
     github_app_authorized_repo_read_failed: "已授权仓库读取失败或缺少权限",
     branch_list_failed: "分支清单读取失败",
     branch_commit_history_failed: "分支 Commit 历史读取失败",
+    invalid_github_response: "GitHub 响应无法解析",
     pagination_limit_reached: "GitHub 分页上限",
     invalid_commit_data: "Commit 响应字段无效",
     workspace_session_required: "Workspace 登录会话失效",

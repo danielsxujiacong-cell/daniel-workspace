@@ -112,6 +112,7 @@ function sanitizeGitHubMessage(value) {
   return String(value || "GitHub 未提供错误说明")
     .replace(/Bearer\s+[^\s,"']+/gi, "Bearer [redacted]")
     .replace(/\bgh[pousr]_[A-Za-z0-9_]{12,}\b/g, "[redacted]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{12,}\b/gi, "[redacted]")
     .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[redacted private key]")
     .replace(/[\r\n\t]+/g, " ")
     .slice(0, 180);
@@ -390,12 +391,21 @@ function publicRepositoryError(fullName, error) {
                     : error?.name === "TimeoutError" || error?.name === "AbortError" ? "GitHub API 请求超时。请重试。"
                       : error?.name === "TypeError" ? "GitHub API 网络请求失败。请检查 Worker 到 GitHub 的连接后重试。"
                         : "GitHub 仓库读取失败，请稍后重试。");
+  const diagnostic = !httpStatus && !error?.publicMessage && typeof error?.message === "string"
+    ? sanitizeGitHubMessage(error.message)
+      .replace(/https?:\/\/[^\s]+/gi, "[URL redacted]")
+      .replace(/\b[A-Z]:\\[^\r\n]*/g, "[path redacted]")
+      .replace(/\/(?:Users|home|private|root|tmp|var|workspace)\/[^\r\n]*/g, "[path redacted]")
+      .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[email redacted]")
+    : "";
   return {
     fullName,
     code: error?.code || "github_unavailable",
     reasonCategory: error?.reasonCategory || (error?.rateLimited
       ? "rate_limited"
-      : /branch list/i.test(error?.upstreamOperation || "")
+      : error?.name === "SyntaxError"
+        ? "invalid_github_response"
+        : /branch list/i.test(error?.upstreamOperation || "")
         ? "branch_list_failed"
         : /branch commit history/i.test(error?.upstreamOperation || "")
           ? "branch_commit_history_failed"
@@ -414,6 +424,7 @@ function publicRepositoryError(fullName, error) {
         ? `${sanitizeGitHubMessage(error.publicMessage)}${rateLimitNote}`
         : `${error?.upstreamOperation || "GitHub API"} HTTP ${httpStatus}: ${upstreamMessage}${rateLimitNote}`
       : `${sanitizeGitHubMessage(knownMessage)}${rateLimitNote}`,
+    ...(diagnostic ? { diagnostic, errorType: error?.name || "Error" } : {}),
   };
 }
 
