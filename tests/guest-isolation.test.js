@@ -21,7 +21,7 @@ test("existing sessions never auto-open from the root; only the explicit private
   assert.match(gate, /function startPrivateEntry\(\)[\s\S]*?showLogin\(\)[\s\S]*?shouldRestoreExistingSession\(entryMode, hasStoredAuthSession\(\)\)[\s\S]*?restoreExistingSession\(\)/);
   assert.match(gate, /async function startPublicDashboard\(\)[\s\S]*?await import\("\.\.\/app\.js\?v=3\.8-c"\)[\s\S]*?catch[\s\S]*?startup-failure/);
   const publicStartup = gate.slice(gate.indexOf("async function startPublicDashboard"), gate.indexOf("function startPrivateEntry"));
-  assert.ok(publicStartup.indexOf('await import("../app.js?v=3.8-c")') < publicStartup.indexOf("void snapshotPromise.then"));
+  assert.ok(publicStartup.indexOf('await import("../app.js?v=3.8-j")') < publicStartup.indexOf("void snapshotPromise.then"));
   assert.doesNotMatch(publicStartup, /await\s+snapshotPromise/);
   assert.doesNotMatch(publicStartup, /hasStoredAuthSession|restoreExistingSession|initializeAuthClient|localStorage|config\.js/);
   assert.match(index, /class="startup-screen"[\s\S]*?正在打开公开项目指挥中心/);
@@ -69,7 +69,7 @@ test("visitor UI has no imports or private data and service interfaces", () => {
 
 test("public entry loads only the gate module", () => {
   const scripts = [...index.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map((match) => match[1]);
-  assert.deepEqual(scripts, ["./src/auth/gate.js?v=3.8-c"]);
+  assert.deepEqual(scripts, ["./src/auth/gate.js?v=3.8-j"]);
 });
 
 test("private login still signs in, verifies the user, and checks the allowlist before opening app", () => {

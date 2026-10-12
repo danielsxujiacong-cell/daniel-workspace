@@ -1,4 +1,4 @@
-import { requestGitHubWorker } from "./worker-api.js";
+import { requestGitHubWorker } from "./worker-api.js?v=3.8-j";
 
 export const GITHUB_ACTIVITY_CACHE_TTL_MS = 15 * 60 * 1000;
 // Keep each Worker invocation below Cloudflare's outbound subrequest limit
@@ -38,7 +38,7 @@ export function mergeGitHubActivityRetry(previous, refreshed, attemptedNames) {
   };
 }
 
-export async function fetchGitHubActivity(fullNames, auth, { startDate, endDate } = {}) {
+export async function fetchGitHubActivity(fullNames, auth, { startDate, endDate, signal } = {}) {
   if (!validDate(startDate) || !validDate(endDate) || startDate > endDate) throw new Error("GitHub 活动日期范围无效。");
   const repositories = [...new Set((Array.isArray(fullNames) ? fullNames : [])
     .filter(validRepository).map((name) => name.trim()))];
@@ -46,12 +46,27 @@ export async function fetchGitHubActivity(fullNames, auth, { startDate, endDate 
   const errors = [];
   for (let index = 0; index < repositories.length; index += MAX_REPOSITORIES_PER_REQUEST) {
     const chunk = repositories.slice(index, index + MAX_REPOSITORIES_PER_REQUEST);
-    const response = await requestGitHubWorker("/api/github/activity", auth, {
-      method: "POST",
-      body: { repositories: chunk.map((fullName) => ({ fullName })), startDate, endDate },
-    });
-    if (Array.isArray(response.repositories)) results.push(...response.repositories);
-    if (Array.isArray(response.errors)) errors.push(...response.errors);
+    if (signal?.aborted) {
+      errors.push(...chunk.map((fullName) => ({ fullName, code: "github_request_aborted", message: "GitHub 活动读取阶段已超时。" })));
+      continue;
+    }
+    try {
+      const response = await requestGitHubWorker("/api/github/activity", auth, {
+        method: "POST",
+        body: { repositories: chunk.map((fullName) => ({ fullName })), startDate, endDate },
+        signal,
+      });
+      if (Array.isArray(response.repositories)) results.push(...response.repositories);
+      if (Array.isArray(response.errors)) errors.push(...response.errors);
+    } catch (error) {
+      const reasonCategory = error?.code === "github_rate_limited" ? "rate_limited" : "github_worker_request_failed";
+      errors.push(...chunk.map((fullName) => ({
+        fullName,
+        code: error?.code || "github_worker_request_failed",
+        reasonCategory,
+        message: typeof error?.message === "string" ? error.message : "GitHub Worker 请求失败。",
+      })));
+    }
   }
   return { repositories: results, errors };
 }

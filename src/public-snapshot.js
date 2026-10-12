@@ -201,16 +201,29 @@ export function createSnapshotReviewDraft({ data = {}, workLogs = [], publicRepo
   }
   for (const item of summaryItems) item.label = PUBLIC_SNAPSHOT_COLLECTION_LABELS.summaries;
 
+  const workLogsComplete = githubActivity.workLogsComplete !== false;
+  const githubComplete = githubActivity.complete !== false;
+  const workLogsTruncated = githubActivity.workLogsTruncated === true;
+  const completenessIssues = [
+    ...(Array.isArray(githubActivity.workLogIssues) ? githubActivity.workLogIssues : []),
+    ...(Array.isArray(githubActivity.issues) ? githubActivity.issues : []),
+  ].filter((issue) => typeof issue === "string" && issue.trim()).slice(0, 40);
+  if ((!workLogsComplete || !githubComplete || workLogsTruncated) && !completenessIssues.length) {
+    completenessIssues.push("至少一个数据源未通过完整性核对。");
+  }
+
   return {
     schemaVersion: PUBLIC_SNAPSHOT_VERSION,
     generatedAt: now,
     activityRange: activityRange || null,
     collections: { projects, tasks, workLogs: logs, knowledge, decisions, githubActivity: githubActivityItems, summaries: summaryItems },
     completeness: {
-      workLogs: githubActivity.workLogsComplete !== false,
-      github: githubActivity.complete !== false,
-      workLogsTruncated: githubActivity.workLogsTruncated === true,
+      complete: workLogsComplete && githubComplete && !workLogsTruncated,
+      workLogs: workLogsComplete,
+      github: githubComplete,
+      workLogsTruncated,
       githubErrors: Array.isArray(githubActivity.errors) ? githubActivity.errors.length : 0,
+      issues: completenessIssues,
     },
   };
 }
@@ -225,6 +238,10 @@ export function selectedSnapshotCounts(draft) {
 
 export function buildPublishableSnapshot(draft, { now = new Date().toISOString() } = {}) {
   if (!draft || draft.schemaVersion !== PUBLIC_SNAPSHOT_VERSION) throw new Error("访客快照草稿版本无效。");
+  if (draft.completeness?.complete === false || draft.completeness?.workLogs === false
+    || draft.completeness?.github === false || draft.completeness?.workLogsTruncated === true) {
+    throw new Error("快照数据源读取不完整，必须完成安全重试后才能发布。");
+  }
   const collections = draft.collections || {};
   const selectedProjects = selectedItems(draft, "projects");
   const projectIdMap = new Map(selectedProjects.map((item, index) => [item.reviewId, `project-${String(index + 1).padStart(3, "0")}`]));

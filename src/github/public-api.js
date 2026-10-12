@@ -1,4 +1,4 @@
-import { requestGitHubWorker } from "./worker-api.js";
+import { requestGitHubWorker } from "./worker-api.js?v=3.8-j";
 
 export const GITHUB_CACHE_TTL_MS = 60 * 60 * 1000;
 export const GITHUB_ACTIVITY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
@@ -45,7 +45,7 @@ function createRepositoryError(value) {
   throw error;
 }
 
-export async function fetchPublicGitHubRepositories(githubUrls, auth) {
+export async function fetchPublicGitHubRepositories(githubUrls, auth, { signal } = {}) {
   const repositories = (Array.isArray(githubUrls) ? githubUrls : [])
     .map((url) => parsePublicGitHubRepository(url))
     .filter(Boolean);
@@ -57,6 +57,7 @@ export async function fetchPublicGitHubRepositories(githubUrls, auth) {
     const result = await requestGitHubWorker("/api/github/public-snapshots", auth, {
       method: "POST",
       body: { repositories: chunk.map(({ fullName }) => ({ fullName })) },
+      signal,
     });
     if (Array.isArray(result.snapshots)) snapshots.push(...result.snapshots);
     if (Array.isArray(result.errors)) errors.push(...result.errors);

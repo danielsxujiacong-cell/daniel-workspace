@@ -125,6 +125,14 @@ test("snapshot draft is whitelist-only, redacts private values, and stays unchec
   assert.equal(snapshot.activity.githubDailyCounts[0].count, 3);
 });
 
+test("a partially read snapshot draft cannot be converted into a publishable snapshot", () => {
+  const draft = draftWithSensitiveSources();
+  draft.completeness.complete = false;
+  draft.completeness.github = false;
+  draft.completeness.issues = ["GitHub 活动：acme/public-demo 未完整读取"];
+  assert.throws(() => buildPublishableSnapshot(draft), /数据源读取不完整/);
+});
+
 test("public GET reads only the isolated KV snapshot and returns 404 until one is published", async () => {
   const empty = testEnv();
   const missing = await worker.fetch(request("/api/public/snapshot"), empty.env);

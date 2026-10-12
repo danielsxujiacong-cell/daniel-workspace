@@ -82,6 +82,29 @@ export function loadGitHubActivityCache(userId, cacheKey, now = Date.now(), ttlM
   }
 }
 
+export function loadGitHubActivityCacheForRange(userId, startDate, endDate, now = Date.now(), ttlMs = 15 * 60 * 1000) {
+  try {
+    const cached = JSON.parse(localStorage.getItem(GITHUB_ACTIVITY_CACHE_KEY) || "null");
+    if (cached?.version !== 1 || cached.userId !== userId || !cached.entries || typeof cached.entries !== "object") return null;
+    const prefix = `${startDate}|${endDate}|`;
+    const repositories = new Map();
+    let fetchedAt = "";
+    for (const cacheKey of Object.keys(cached.entries)) {
+      if (!cacheKey.startsWith(prefix)) continue;
+      const entry = loadGitHubActivityCache(userId, cacheKey, now, ttlMs);
+      if (!entry) continue;
+      fetchedAt = !fetchedAt || new Date(entry.fetchedAt) > new Date(fetchedAt) ? entry.fetchedAt : fetchedAt;
+      for (const repository of entry.repositories || []) {
+        const name = String(repository?.fullName || "").toLowerCase();
+        if (name) repositories.set(name, repository);
+      }
+    }
+    return repositories.size ? { repositories: [...repositories.values()], errors: [], fetchedAt } : null;
+  } catch {
+    return null;
+  }
+}
+
 export function saveGitHubActivityCache(userId, cacheKey, data, fetchedAt = new Date().toISOString()) {
   if (!completeGitHubActivityData(data, cacheKey)) return false;
   try {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loadGitHubActivityCache, saveGitHubActivityCache } from "../src/store.js";
+import { loadGitHubActivityCache, loadGitHubActivityCacheForRange, saveGitHubActivityCache } from "../src/store.js";
 
 const CACHE_KEY = "daniel-workspace-github-activity-v2";
 const USER_ID = "user-1";
@@ -45,4 +45,15 @@ test("GitHub activity cache accepts only a complete repository set and keeps the
   assert.equal(saveGitHubActivityCache(USER_ID, RANGE_KEY, data, fetchedAt), true);
   assert.deepEqual(loadGitHubActivityCache(USER_ID, RANGE_KEY, Date.parse(fetchedAt) + 14 * 60 * 1000), { ...data, fetchedAt });
   assert.equal(loadGitHubActivityCache(USER_ID, RANGE_KEY, Date.parse(fetchedAt) + 16 * 60 * 1000), null);
+});
+
+test("snapshot preview can reuse complete per-batch entries from the existing range cache", (t) => {
+  withLocalStorage(t);
+  const startDate = "2026-10-01";
+  const endDate = "2026-10-30";
+  assert.equal(saveGitHubActivityCache(USER_ID, `${startDate}|${endDate}|acme/one`, { repositories: [complete("acme/one")], errors: [] }), true);
+  assert.equal(saveGitHubActivityCache(USER_ID, `${startDate}|${endDate}|acme/two`, { repositories: [complete("acme/two")], errors: [] }), true);
+  const cached = loadGitHubActivityCacheForRange(USER_ID, startDate, endDate);
+  assert.deepEqual(cached.repositories.map(({ fullName }) => fullName).sort(), ["acme/one", "acme/two"]);
+  assert.deepEqual(cached.errors, []);
 });

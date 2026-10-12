@@ -86,8 +86,11 @@ function assertRange(startDate, endDate) {
   }
 }
 
-function timedQuery(query, timeoutMs = 15_000) {
+function timedQuery(query, timeoutMs = 15_000, parentSignal = null) {
   const controller = new AbortController();
+  const abortFromParent = () => controller.abort(parentSignal.reason);
+  if (parentSignal?.aborted) controller.abort(parentSignal.reason);
+  else parentSignal?.addEventListener("abort", abortFromParent, { once: true });
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   return query.abortSignal(controller.signal)
     .then((result) => {
@@ -98,15 +101,18 @@ function timedQuery(query, timeoutMs = 15_000) {
       if (controller.signal.aborted) throw new Error("工作记录云端读取超时，请重试。");
       throw error;
     })
-    .finally(() => clearTimeout(timeout));
+    .finally(() => {
+      clearTimeout(timeout);
+      parentSignal?.removeEventListener("abort", abortFromParent);
+    });
 }
 
-export async function loadProjectWorkLogs(client, userId, projectId) {
+export async function loadProjectWorkLogs(client, userId, projectId, { signal } = {}) {
   if (!userId || !projectId) throw new Error("缺少已验证的账号或项目。");
   const query = client.from(TABLE).select(COLUMNS)
     .eq("user_id", userId).eq("project_id", String(projectId))
     .order("work_date", { ascending: false }).order("updated_at", { ascending: false }).limit(200);
-  return (await timedQuery(query)).map(workLogFromRow).filter(Boolean);
+  return (await timedQuery(query, 15_000, signal)).map(workLogFromRow).filter(Boolean);
 }
 
 export async function loadWorkLogsForRange(client, userId, { startDate, endDate, projectIds = [], limit = 150 } = {}) {
