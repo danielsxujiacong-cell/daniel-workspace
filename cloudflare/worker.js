@@ -371,6 +371,7 @@ async function readPublicGitHubSnapshot(fullName, token) {
 
 function publicRepositoryError(fullName, error) {
   const httpStatus = Number.isInteger(error?.upstreamStatus) ? error.upstreamStatus : null;
+  const workerSubrequestLimit = /too many subrequests by single worker invocation/i.test(error?.message || "");
   const upstreamMessage = httpStatus ? sanitizeGitHubMessage(error?.upstreamMessage) : null;
   const rateLimitNote = error?.rateLimited
     ? error.retryAfterSeconds !== null && error.retryAfterSeconds !== undefined
@@ -403,7 +404,9 @@ function publicRepositoryError(fullName, error) {
     code: error?.code || "github_unavailable",
     reasonCategory: error?.reasonCategory || (error?.rateLimited
       ? "rate_limited"
-      : error?.name === "SyntaxError"
+      : workerSubrequestLimit
+        ? "worker_subrequest_limit"
+        : error?.name === "SyntaxError"
         ? "invalid_github_response"
         : /branch list/i.test(error?.upstreamOperation || "")
         ? "branch_list_failed"
@@ -423,7 +426,8 @@ function publicRepositoryError(fullName, error) {
       ? error?.publicMessage
         ? `${sanitizeGitHubMessage(error.publicMessage)}${rateLimitNote}`
         : `${error?.upstreamOperation || "GitHub API"} HTTP ${httpStatus}: ${upstreamMessage}${rateLimitNote}`
-      : `${sanitizeGitHubMessage(knownMessage)}${rateLimitNote}`,
+      : `${sanitizeGitHubMessage(workerSubrequestLimit ? "Cloudflare Worker 单次调用子请求达到上限；请缩小批次后重试。" : knownMessage)}${rateLimitNote}`,
+    ...(workerSubrequestLimit ? { code: "github_worker_subrequest_limit" } : {}),
     ...(diagnostic ? { diagnostic, errorType: error?.name || "Error" } : {}),
   };
 }

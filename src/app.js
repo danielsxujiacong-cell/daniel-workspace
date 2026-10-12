@@ -43,7 +43,7 @@ const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = aw
 const { fetchPublicGitHubRepositories, fetchPublicGitHubRepository, GITHUB_CACHE_TTL_MS, isGitHubSnapshotFresh, parsePublicGitHubRepository } = publicSnapshotMode
   ? await import("./github/public-api.js?v=3.5-b.4")
   : await import("./github/public-api.js?v=3.5-b.4");
-const { fetchGitHubActivity } = publicSnapshotMode ? {} : await import("./github/activity.js?v=3.8-d");
+const { fetchGitHubActivity } = publicSnapshotMode ? {} : await import("./github/activity.js?v=3.8-h");
 const { deployedWebsiteUrl, humanizeProjectCommit, projectDescriptionAfterEdit, projectDescriptionForEdit, projectIntroduction, projectShowcase } = await import("./project-story.js?v=3.7-d");
 const { buildCloudDashboardModel, buildLocalDashboardModel, buildRecentProjectUpdates, chooseRecentCommit, compareLocalProjects, homeProjectField, projectTaskProgress, taskPriorityLabel } = await import("./dashboard.js?v=3.8");
 const { buildHomeActivity, projectStageBreakdown, projectStatusBreakdown, resolveActivityRange, shiftDateKey } = await import("./home-activity.js?v=3.8-e");
@@ -1443,6 +1443,7 @@ function activityReasonLabel(category) {
     branch_list_failed: "分支清单读取失败",
     branch_commit_history_failed: "分支 Commit 历史读取失败",
     invalid_github_response: "GitHub 响应无法解析",
+    worker_subrequest_limit: "Cloudflare Worker 单次调用子请求达到上限",
     pagination_limit_reached: "GitHub 分页上限",
     invalid_commit_data: "Commit 响应字段无效",
     workspace_session_required: "Workspace 登录会话失效",

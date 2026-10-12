@@ -1,7 +1,9 @@
 import { requestGitHubWorker } from "./worker-api.js";
 
 export const GITHUB_ACTIVITY_CACHE_TTL_MS = 15 * 60 * 1000;
-const MAX_REPOSITORIES_PER_REQUEST = 30;
+// Keep each Worker invocation below Cloudflare's outbound subrequest limit
+// when it enumerates every branch and paginates recent commits.
+const MAX_REPOSITORIES_PER_REQUEST = 4;
 
 function validDate(value) {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;

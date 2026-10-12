@@ -267,6 +267,34 @@ test("GitHub activity reports a sanitized diagnostic when GitHub returns malform
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test("GitHub activity explains Cloudflare single-invocation subrequest exhaustion", async () => {
+  const { env } = await testEnv();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/auth/v1/user") return Response.json({ id: uid });
+    if (url.pathname === "/app/installations") return Response.json([{ id: 987654, app_id: 12345 }]);
+    if (url.pathname.endsWith("/access_tokens")) return Response.json({ token: installationToken });
+    if (url.pathname === "/installation/repositories") return Response.json({ repositories: [{
+      full_name: "acme/private-one", name: "private-one", owner: { login: "acme" }, private: true, default_branch: "main",
+    }] });
+    if (url.pathname === "/repos/acme/private-one/branches") {
+      throw new Error("Too many subrequests by single Worker invocation");
+    }
+    return new Response(`unexpected ${url}`, { status: 500 });
+  };
+  try {
+    const response = await worker.fetch(req("/api/github/activity", {
+      method: "POST",
+      body: { repositories: [{ fullName: "acme/private-one" }], startDate: "2026-10-10", endDate: "2026-10-12" },
+    }), env);
+    const payload = await response.json();
+    assert.equal(payload.errors[0].reasonCategory, "worker_subrequest_limit");
+    assert.equal(payload.errors[0].code, "github_worker_subrequest_limit");
+    assert.match(payload.errors[0].message, /缩小批次/);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("GitHub activity identifies upstream rate limits while reading branch lists", async () => {
   const { env } = await testEnv();
   const originalFetch = globalThis.fetch;
