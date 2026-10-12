@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fetchGitHubActivity } from "../src/github/activity.js";
+import { fetchGitHubActivity, mergeGitHubActivityRetry, rateLimitedGitHubActivityNames } from "../src/github/activity.js";
 
 test("GitHub activity client splits repository reads into safe Worker batches", async (t) => {
   const originalFetch = globalThis.fetch;
@@ -36,4 +36,23 @@ test("GitHub activity client splits repository reads into safe Worker batches", 
   assert.equal(sessionLookups, 3);
   assert.deepEqual(result.repositories.map(({ fullName }) => fullName), names);
   assert.deepEqual(result.errors, []);
+});
+
+test("GitHub activity retry refreshes only rate-limited repositories and preserves other results", () => {
+  const previous = {
+    repositories: [{ fullName: "acme/ok", complete: true }],
+    errors: [
+      { fullName: "acme/limited", code: "github_rate_limited", reasonCategory: "rate_limited" },
+      { fullName: "acme/private", code: "github_repo_not_in_app_scope", reasonCategory: "private_or_missing_outside_app_scope" },
+    ],
+  };
+  const retryNames = rateLimitedGitHubActivityNames(previous);
+  const merged = mergeGitHubActivityRetry(previous, {
+    repositories: [{ fullName: "acme/limited", complete: true }],
+    errors: [],
+  }, retryNames);
+
+  assert.deepEqual(retryNames, ["acme/limited"]);
+  assert.deepEqual(merged.repositories.map(({ fullName }) => fullName), ["acme/ok", "acme/limited"]);
+  assert.deepEqual(merged.errors.map(({ fullName }) => fullName), ["acme/private"]);
 });

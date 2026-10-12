@@ -43,7 +43,7 @@ const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = aw
 const { fetchPublicGitHubRepositories, fetchPublicGitHubRepository, GITHUB_CACHE_TTL_MS, isGitHubSnapshotFresh, parsePublicGitHubRepository } = publicSnapshotMode
   ? await import("./github/public-api.js?v=3.5-b.4")
   : await import("./github/public-api.js?v=3.5-b.4");
-const { fetchGitHubActivity } = publicSnapshotMode ? {} : await import("./github/activity.js?v=3.8-h");
+const { fetchGitHubActivity, mergeGitHubActivityRetry, rateLimitedGitHubActivityNames } = publicSnapshotMode ? {} : await import("./github/activity.js?v=3.8-i");
 const { deployedWebsiteUrl, humanizeProjectCommit, projectDescriptionAfterEdit, projectDescriptionForEdit, projectIntroduction, projectShowcase } = await import("./project-story.js?v=3.7-d");
 const { buildCloudDashboardModel, buildLocalDashboardModel, buildRecentProjectUpdates, chooseRecentCommit, compareLocalProjects, homeProjectField, projectTaskProgress, taskPriorityLabel } = await import("./dashboard.js?v=3.8");
 const { buildHomeActivity, projectStageBreakdown, projectStatusBreakdown, resolveActivityRange, shiftDateKey } = await import("./home-activity.js?v=3.8-e");
@@ -435,6 +435,11 @@ async function loadHomeActivity({ force = false } = {}) {
   const projectIds = projects.map((project) => project.id).filter(Boolean);
   const cacheKey = `${range.startDate}|${range.endDate}|${repositories.map((name) => name.toLowerCase()).sort().join(",")}`;
   if (!force && ui.homeActivity.key === cacheKey && ["loading", "ready"].includes(ui.homeActivity.status)) return;
+  const previousActivity = force && ui.homeActivity.key === cacheKey && ui.homeActivity.status === "ready"
+    ? ui.homeActivity
+    : null;
+  const previousGitHubData = previousActivity?.githubData || null;
+  const rateLimitedNames = rateLimitedGitHubActivityNames(previousGitHubData);
   const requestId = ++homeActivityRequestId;
   ui.homeActivity = { key: cacheKey, status: "loading", model: null, range, githubStatus: "loading", workLogsStatus: "loading", error: "" };
   render();
@@ -445,7 +450,10 @@ async function loadHomeActivity({ force = false } = {}) {
   const githubPromise = repositories.length
     ? cachedGitHub
       ? Promise.resolve(cachedGitHub)
-      : fetchGitHubActivity(repositories, workspaceAuth, range)
+      : fetchGitHubActivity(rateLimitedNames.length ? rateLimitedNames : repositories, workspaceAuth, range)
+        .then((result) => rateLimitedNames.length
+          ? mergeGitHubActivityRetry(previousGitHubData, result, rateLimitedNames)
+          : result)
     : Promise.resolve({ repositories: [], errors: [] });
   const workLogsPromise = loadWorkLogActivityForRange(workspaceAuth.client, workspaceAuth.userId, {
     ...range,
@@ -496,6 +504,7 @@ async function loadHomeActivity({ force = false } = {}) {
     workLogsStatus: workLogsReady ? "ready" : "error",
     error: messages.join(" "),
     fetchedAt: githubData.fetchedAt || new Date().toISOString(),
+    githubData,
   };
   if (ui.selectedActivityDate && (ui.selectedActivityDate < range.startDate || ui.selectedActivityDate > range.endDate)) {
     ui.selectedActivityDate = "";

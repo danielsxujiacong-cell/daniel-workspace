@@ -15,6 +15,29 @@ function validRepository(value) {
   return typeof value === "string" && /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9_.-]{1,100}$/.test(value);
 }
 
+export function rateLimitedGitHubActivityNames(activity) {
+  return [...new Set((Array.isArray(activity?.errors) ? activity.errors : [])
+    .filter((error) => error?.reasonCategory === "rate_limited" || error?.code === "github_rate_limited")
+    .map((error) => error?.fullName)
+    .filter(validRepository))];
+}
+
+export function mergeGitHubActivityRetry(previous, refreshed, attemptedNames) {
+  const attempted = new Set(attemptedNames.filter(validRepository).map((name) => name.toLowerCase()));
+  return {
+    repositories: [
+      ...(Array.isArray(previous?.repositories) ? previous.repositories : []).filter((repo) =>
+        !attempted.has(String(repo?.fullName || "").toLowerCase())),
+      ...(Array.isArray(refreshed?.repositories) ? refreshed.repositories : []),
+    ],
+    errors: [
+      ...(Array.isArray(previous?.errors) ? previous.errors : []).filter((error) =>
+        !attempted.has(String(error?.fullName || "").toLowerCase())),
+      ...(Array.isArray(refreshed?.errors) ? refreshed.errors : []),
+    ],
+  };
+}
+
 export async function fetchGitHubActivity(fullNames, auth, { startDate, endDate } = {}) {
   if (!validDate(startDate) || !validDate(endDate) || startDate > endDate) throw new Error("GitHub 活动日期范围无效。");
   const repositories = [...new Set((Array.isArray(fullNames) ? fullNames : [])
