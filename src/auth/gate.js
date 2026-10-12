@@ -102,7 +102,7 @@ async function enterWorkspace(user) {
   globalThis.DANIEL_WORKSPACE_AUTHENTICATED = true;
   globalThis.DANIEL_WORKSPACE_AUTH = { client: authClient, userId: user.id };
   try {
-    workspaceModule = await import("../app.js?v=3.7-d");
+    workspaceModule = await import("../app.js?v=3.7-e");
     workspaceVisible = true;
   } catch (error) {
     globalThis.DANIEL_WORKSPACE_AUTHENTICATED = false;

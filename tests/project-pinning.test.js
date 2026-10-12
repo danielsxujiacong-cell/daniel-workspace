@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   countPinnedProjects,
   getHomePinnedProjects,
+  getHomeShowcaseProjects,
   MAX_HOME_PROJECT_PINS,
   MIN_HOME_PROJECT_PINS,
   toggleProjectPin,
@@ -23,6 +24,35 @@ test("Home waits for three pins and never displays more than five", () => {
   assert.deepEqual(getHomePinnedProjects(projects(2)), []);
   assert.equal(getHomePinnedProjects(projects(3)).length, 3);
   assert.equal(getHomePinnedProjects(projects(7)).length, 5);
+});
+
+test("Home showcase prioritizes Daniel Workspace and keeps at most five pinned projects", () => {
+  const items = [
+    { id: "ai", name: "AI Investment Dashboard", isPinned: true },
+    { id: "n8n", name: "n8n AI Automation Lab", isPinned: true },
+    { id: "workspace", name: "Daniel Workspace", isPinned: true },
+    { id: "hub", name: "Daniel Project Hub", isPinned: true },
+    { id: "site", name: "Daniel website", isPinned: true },
+    { id: "extra", name: "Another project", isPinned: true },
+  ];
+
+  const showcase = getHomeShowcaseProjects(items);
+  const pinned = getHomePinnedProjects(items);
+
+  assert.equal(showcase.featured.id, "workspace");
+  assert.equal(showcase.secondary.length, 4);
+  assert.deepEqual(showcase.secondary, pinned.filter((project) => project.id !== "workspace"));
+});
+
+test("Home showcase falls back to the first pinned project when Daniel Workspace is not pinned", () => {
+  const showcase = getHomeShowcaseProjects([
+    { id: "c", name: "C 项目", isPinned: true },
+    { id: "b", name: "B 项目", isPinned: true },
+    { id: "a", name: "A 项目", isPinned: true },
+  ]);
+
+  assert.equal(showcase.featured.id, "a");
+  assert.deepEqual(showcase.secondary.map((project) => project.id), ["b", "c"]);
 });
 
 test("pin toggle caps new pins at five while allowing unpin", () => {

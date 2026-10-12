@@ -12,6 +12,17 @@ export function getHomePinnedProjects(projects = []) {
   return pinned.length < MIN_HOME_PROJECT_PINS ? [] : pinned.slice(0, MAX_HOME_PROJECT_PINS);
 }
 
+export function getHomeShowcaseProjects(projects = []) {
+  const pinned = getHomePinnedProjects(projects);
+  if (!pinned.length) return { featured: null, secondary: [] };
+
+  const featured = pinned.find((project) => project.name === "Daniel Workspace") || pinned[0];
+  return {
+    featured,
+    secondary: pinned.filter((project) => project !== featured).slice(0, 4),
+  };
+}
+
 export function toggleProjectPin(projects = [], projectId) {
   const project = projects.find((item) => item.id === projectId);
   if (!project) return { projects, changed: false, reason: "missing" };

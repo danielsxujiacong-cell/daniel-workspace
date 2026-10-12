@@ -121,8 +121,33 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 .cloud-task-row { appearance: none; width: 100%; border: 0; border-radius: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; transition: background .16s ease; }
 .cloud-task-row:hover { background: var(--panel-hover); }
 .cloud-task-row > svg { flex: 0 0 auto; color: var(--muted); }
-.content:has(.dashboard-home) { width: min(1440px, 100%); }
-.dashboard-home .page-heading { margin-bottom: 17px; }
+.content:has(.dashboard-home) { width: min(1280px, 100%); }
+.dashboard-home { width: min(1080px, 100%); margin: 0 auto; padding-bottom: 72px; }
+.dashboard-home .dashboard-grid { gap: 22px; }
+.dashboard-page-heading { margin: 2px 0 0; }
+.dashboard-page-heading h1 { margin: 0; color: var(--text); font-size: 27px; font-weight: 650; letter-spacing: -.04em; }
+.dashboard-page-heading p { margin: 7px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.dashboard-focus-section { display: grid; gap: 14px; min-width: 0; }
+.dashboard-focus-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.dashboard-focus-heading h2 { margin: 0; color: var(--text); font-size: 15px; font-weight: 620; letter-spacing: -.02em; }
+.dashboard-project-card { display: flex; min-width: 0; min-height: 168px; flex-direction: column; justify-content: space-between; gap: 23px; padding: 21px 22px; border: 1px solid var(--line); border-radius: 17px; color: var(--text); background: var(--panel); transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
+.dashboard-project-card-featured { min-height: 188px; padding: 27px 29px; }
+.dashboard-project-card:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--accent) 25%, var(--line)); }
+.dashboard-project-card-copy { min-width: 0; }
+.dashboard-project-card-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-width: 0; }
+.dashboard-project-card-heading h3 { min-width: 0; margin: 0; color: var(--text); font-size: 16px; font-weight: 620; letter-spacing: -.025em; line-height: 1.35; overflow-wrap: anywhere; }
+.dashboard-project-card-featured .dashboard-project-card-heading h3 { font-size: 23px; }
+.dashboard-project-card .status-pill { border-color: var(--line); color: var(--muted); background: var(--panel-raised); }
+.dashboard-project-card-copy > p { display: -webkit-box; max-width: 720px; margin: 8px 0 0; overflow: hidden; color: var(--muted); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.dashboard-project-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.dashboard-project-actions .button { min-height: 35px; padding: 0 12px; border-color: transparent; border-radius: 9px; background: transparent; }
+.dashboard-project-actions .button:first-child { color: var(--accent-strong); }
+.dashboard-project-actions .button:hover { background: var(--accent-wash); }
+.dashboard-project-actions .button:active { transform: scale(.985); }
+.dashboard-secondary-projects { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 1fr; gap: 14px; min-width: 0; }
+.dashboard-secondary-projects .dashboard-project-card { min-height: 166px; }
+.dashboard-secondary-projects .dashboard-project-card-copy > p { max-width: 480px; }
+.dashboard-home .dashboard-focus-section .empty-state { margin: 0; padding: 28px; border: 1px solid var(--line); border-radius: 17px; background: var(--panel); }
 .dashboard-stat-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
 .dashboard-stat-card { appearance: none; display: grid; gap: 8px; min-width: 0; min-height: 112px; padding: 15px 17px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: var(--panel); text-align: left; cursor: pointer; transition: transform .16s ease, border-color .16s ease, background .16s ease; }
 .dashboard-stat-card:hover { transform: translateY(-1px); border-color: #5a5579; background: var(--panel-hover); }
@@ -130,7 +155,6 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 .dashboard-stat-card > strong { color: #f1f0f7; font: 700 28px/1 Manrope, sans-serif; letter-spacing: -.05em; }
 .dashboard-stat-link { display: flex; align-items: center; gap: 4px; margin-top: auto; color: #a9a3db; font-size: 9px; }
 .dashboard-stat-link .icon { width: 12px; height: 12px; }
-.dashboard-focus-section { padding: 17px; }
 .dashboard-focus-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 235px), 1fr)); gap: 10px; }
 .daily-brief .card-header { align-items: flex-start; gap: 12px; }
 .daily-brief .card-header h2 { margin: 0; }
@@ -500,6 +524,19 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
   .dashboard-focus-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 760px) {
+  .dashboard-home { padding-bottom: 24px; }
+  .dashboard-home .dashboard-grid { gap: 18px; }
+  .dashboard-page-heading h1 { font-size: 25px; }
+  .dashboard-focus-section { gap: 12px; }
+  .dashboard-focus-heading h2 { font-size: 14px; }
+  .dashboard-secondary-projects { grid-template-columns: minmax(0, 1fr); gap: 11px; }
+  .dashboard-project-card, .dashboard-secondary-projects .dashboard-project-card { min-height: 148px; gap: 18px; padding: 18px; border-radius: 15px; }
+  .dashboard-project-card-featured { min-height: 164px; padding: 21px 19px; }
+  .dashboard-project-card-featured .dashboard-project-card-heading h3 { font-size: 21px; }
+  .dashboard-project-actions { gap: 8px; }
+  .dashboard-project-actions .button { min-height: 42px; padding: 0 14px; }
+  #app:has(.dashboard-home) .assistant-launcher { position: static; right: auto; bottom: auto; width: fit-content; min-height: 43px; margin: 10px 14px calc(18px + env(safe-area-inset-bottom)) auto; padding: 0 15px 0 10px; }
+  #app:has(.dashboard-home) .assistant-panel { right: 12px; bottom: calc(72px + env(safe-area-inset-bottom)); width: min(375px, calc(100vw - 24px)); }
   .project-next-step-head { align-items: flex-start; flex-direction: column; }
   .project-next-step-head > button { width: 100%; }
   .project-next-step-footer { align-items: stretch; flex-direction: column; }
@@ -900,6 +937,12 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 [data-theme="light"] .dashboard-alert-copy strong, [data-theme="light"] .dashboard-recent-copy strong { color: #303540; }
 [data-theme="light"] .dashboard-recent-project:hover .dashboard-recent-copy strong { color: #5147a1; }
 [data-theme="light"] .dashboard-recent-time { color: #727a87; }
+[data-theme="light"] .content:has(.dashboard-home) { background: #f8f7f3; }
+[data-theme="light"] .dashboard-project-card { border-color: #e8e6e1; background: #fff; box-shadow: 0 2px 9px rgb(45 42 34 / 3%); }
+[data-theme="light"] .dashboard-project-card:hover { border-color: #d7d1e9; box-shadow: 0 5px 16px rgb(45 42 34 / 6%); }
+[data-theme="light"] .dashboard-project-card .status-pill { border-color: #e9e7e3; color: #74717a; background: #f5f4f1; }
+[data-theme="light"] .dashboard-ai-summary { border-color: #e8e6e1; border-radius: 17px; background: #fff; }
+[data-theme="light"] .dashboard-ai-summary > summary { min-height: 60px; }
 
 @media (max-width: 1100px) {
   .dashboard-health-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
@@ -922,6 +965,12 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 }
 
 @media (max-width: 430px) {
+  .dashboard-page-heading h1 { font-size: 23px; }
+  .dashboard-page-heading p { font-size: 12px; }
+  .dashboard-project-card, .dashboard-secondary-projects .dashboard-project-card { padding: 16px; }
+  .dashboard-project-card-featured { padding: 19px 16px; }
+  .dashboard-project-card-copy > p { font-size: 12px; }
+  .dashboard-project-actions .button { flex: 1 1 auto; }
   .dashboard-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dashboard-alert, .dashboard-change { align-items: flex-start; flex-wrap: wrap; }
   .dashboard-alert-copy { min-width: calc(100% - 20px); }

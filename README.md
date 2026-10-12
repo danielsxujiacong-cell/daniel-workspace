@@ -1,10 +1,10 @@
 # Daniel Workspace
 
-私人 AI 工作台 V3.7-D。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI。首页与 Projects 卡片提供明确的项目详情和已登记线上体验入口；项目详情优先呈现用途、核心功能、已核对成果和近期进展，路径及 GitHub 技术资料默认折叠。访客页展示精选公开作品和模拟流程演示，与私人工作台隔离。
+私人 AI 工作台 V3.7-E。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI。Home 以精选置顶项目为主，项目详情优先呈现用途、核心功能、已核对成果和近期进展，路径及 GitHub 技术资料默认折叠。访客页展示精选公开作品和模拟流程演示，与私人工作台隔离。
 
 ## Status
 
-- **Stage:** V3.7-D adds interview-friendly project cards/details and a curated, isolated visitor portfolio; Supabase data and auth flows remain unchanged. Verification and acceptance status are recorded in [HANDOFF](docs/HANDOFF.md).
+- **Stage:** V3.7-E finalizes the interview-friendly Home showcase while preserving project data, Supabase sync, auth, and AI service behavior. Verification and acceptance status are recorded in [HANDOFF](docs/HANDOFF.md).
 - **Last updated:** 2026-10-12
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -40,6 +40,13 @@ python local_companion.py
 - Home 与 Projects 项目卡明确提供「查看详情」；只有填写有效远端 HTTP(S) 在线网址的项目才显示「体验网站」，GitHub 仓库地址不会被当成体验站点。
 - 项目详情依次展示用途、已核对的核心功能与成果，以及最多三条来自现有 GitHub 快照或工作记录的近期进展；路径、提交和仓库技术信息仍收在「技术详情」中。
 - 访客页将项目导航、FlowOps 演示和个人作品集作为精选作品。访客内容只来自静态公开摘要，TK-1001 及相关公司/团队资料继续作为明确标注的虚构样例，仅保存在页面内存；不读取私人工作台资料、仓库文件或密钥。
+
+## V3.7-E Home 首页最终版
+
+- Home 标题改为「我的工作台」，用一行介绍承接首页内容，并优先展示手动置顶的 Daniel Workspace 主卡及最多四张次级项目卡。
+- 卡片只展示项目名称、已核实的一句话用途、当前状态、「查看详情」和通过现有 URL 校验的「体验网站」入口；Home 不再展示最近进展，项目详情中的开发记录保留。
+- AI 下一步建议、今日简报和每周总结继续由「AI 总结」默认折叠区承载。浅色主题采用米白、浅灰与克制紫色；手机端卡片纵向排列，AI 快捷入口放在内容之后，避免遮挡项目卡。
+- 本次只改 Home 展示与资源缓存版本，不改 Supabase、GitHub、Worker、登录门或数据同步逻辑。
 
 ## V2.5 登录配置
 
