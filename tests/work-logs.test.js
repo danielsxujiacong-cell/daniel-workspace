@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   loadProjectWorkLogs,
+  loadWorkLogActivityForRange,
   loadWorkLogsForRange,
   normalizeEvidenceLinks,
   saveWorkLogRecord,
@@ -13,6 +14,7 @@ import {
 function fakeClient(data = []) {
   const calls = [];
   const builder = {
+    selectedRange: null,
     select(value) { calls.push(["select", value]); return this; },
     eq(key, value) { calls.push(["eq", key, value]); return this; },
     in(key, value) { calls.push(["in", key, value]); return this; },
@@ -20,8 +22,12 @@ function fakeClient(data = []) {
     lte(key, value) { calls.push(["lte", key, value]); return this; },
     order(key, value) { calls.push(["order", key, value]); return this; },
     limit(value) { calls.push(["limit", value]); return this; },
+    range(start, end) { calls.push(["range", start, end]); this.selectedRange = [start, end]; return this; },
     abortSignal() { return this; },
-    then(resolve, reject) { return Promise.resolve({ data, error: null }).then(resolve, reject); },
+    then(resolve, reject) {
+      const rows = this.selectedRange ? data.slice(this.selectedRange[0], this.selectedRange[1] + 1) : data;
+      return Promise.resolve({ data: rows, error: null }).then(resolve, reject);
+    },
   };
   return { calls, from(table) { calls.push(["from", table]); return builder; } };
 }
@@ -72,6 +78,43 @@ test("date range reads stay within supplied projects and week bounds", async () 
   assert.ok(client.calls.some((call) => call[0] === "gte" && call[1] === "work_date" && call[2] === "2026-10-05"));
   assert.ok(client.calls.some((call) => call[0] === "lte" && call[1] === "work_date" && call[2] === "2026-10-11"));
   await assert.rejects(() => loadWorkLogsForRange(client, "user-1", { startDate: "2026-10-12", endDate: "2026-10-11", projectIds: ["p1"] }), /日期范围无效/);
+});
+
+test("activity reads only minimal work-log fields and page through scoped rows", async () => {
+  const rows = Array.from({ length: 1_001 }, (_, index) => ({
+    id: `log-${index}`,
+    project_id: "p1",
+    work_date: "2026-10-11",
+    completed_items: "must not be selected",
+    evidence_links: ["https://example.com/private"],
+  }));
+  const client = fakeClient(rows);
+  const result = await loadWorkLogActivityForRange(client, "user-1", {
+    startDate: "2026-10-01",
+    endDate: "2026-10-12",
+    projectIds: ["p1", "p2", "p1"],
+  });
+
+  assert.equal(result.items.length, 1_001);
+  assert.equal(result.complete, true);
+  assert.deepEqual(client.calls.filter((call) => call[0] === "range"), [["range", 0, 999], ["range", 1_000, 1_999]]);
+  assert.deepEqual(client.calls.find((call) => call[0] === "select"), ["select", "id,project_id,work_date"]);
+  assert.deepEqual(client.calls.find((call) => call[0] === "in"), ["in", "project_id", ["p1", "p2"]]);
+  assert.ok(client.calls.some((call) => call[0] === "eq" && call[1] === "user_id" && call[2] === "user-1"));
+  assert.deepEqual(Object.keys(result.items[0]).sort(), ["id", "projectId", "workDate"]);
+  assert.equal(JSON.stringify(result.items).includes("must not be selected"), false);
+  assert.equal(JSON.stringify(result.items).includes("private"), false);
+});
+
+test("activity reads report malformed source rows as incomplete", async () => {
+  const client = fakeClient([{ id: "log-1", project_id: "p1", work_date: "not-a-date" }]);
+  const result = await loadWorkLogActivityForRange(client, "user-1", {
+    startDate: "2026-10-01",
+    endDate: "2026-10-12",
+    projectIds: ["p1"],
+  });
+  assert.deepEqual(result.items, []);
+  assert.equal(result.complete, false);
 });
 
 test("saving an edit uses an upsert and leaves deletion unsupported", async () => {

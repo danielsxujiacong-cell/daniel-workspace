@@ -5,6 +5,7 @@ const LOCAL_SCAN_BASELINE_KEY = "daniel-workspace-local-scan-baseline-v1";
 const LOCAL_SCAN_CACHE_KEY = "daniel-workspace-local-scan-cache-v1";
 const CLOUD_CACHE_KEY = "daniel-workspace-cloud-cache-v1";
 const CLOUD_MIGRATION_KEY = "daniel-workspace-v2.6-migration-v1";
+const GITHUB_ACTIVITY_CACHE_KEY = "daniel-workspace-github-activity-v1";
 
 export function loadData() {
   try {
@@ -52,6 +53,43 @@ export function loadCloudCache(userId) {
 export function saveCloudCache(userId, data, baseline, lastSyncedAt = "", projectPinningAvailable = null) {
   try {
     localStorage.setItem(CLOUD_CACHE_KEY, JSON.stringify({ version: 1, userId, data, baseline, lastSyncedAt, projectPinningAvailable }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function loadGitHubActivityCache(userId, cacheKey, now = Date.now(), ttlMs = 60 * 60 * 1000) {
+  try {
+    const cached = JSON.parse(localStorage.getItem(GITHUB_ACTIVITY_CACHE_KEY) || "null");
+    if (cached?.version !== 1 || cached.userId !== userId || !cached.entries || typeof cached.entries !== "object") return null;
+    const entry = cached.entries[cacheKey];
+    const fetchedAt = new Date(entry?.fetchedAt || "").getTime();
+    if (!entry?.data || !Array.isArray(entry.data.repositories) || !Array.isArray(entry.data.errors)
+      || !Number.isFinite(fetchedAt) || fetchedAt > now || now - fetchedAt >= ttlMs) return null;
+    return { ...entry.data, fetchedAt: entry.fetchedAt };
+  } catch {
+    return null;
+  }
+}
+
+export function saveGitHubActivityCache(userId, cacheKey, data, fetchedAt = new Date().toISOString()) {
+  try {
+    const existing = JSON.parse(localStorage.getItem(GITHUB_ACTIVITY_CACHE_KEY) || "null");
+    const entries = existing?.version === 1 && existing.userId === userId && existing.entries && typeof existing.entries === "object"
+      ? existing.entries
+      : {};
+    entries[cacheKey] = {
+      fetchedAt,
+      data: {
+        repositories: Array.isArray(data?.repositories) ? data.repositories : [],
+        errors: Array.isArray(data?.errors) ? data.errors : [],
+      },
+    };
+    const retained = Object.entries(entries)
+      .sort((left, right) => new Date(right[1]?.fetchedAt || 0) - new Date(left[1]?.fetchedAt || 0))
+      .slice(0, 8);
+    localStorage.setItem(GITHUB_ACTIVITY_CACHE_KEY, JSON.stringify({ version: 1, userId, entries: Object.fromEntries(retained) }));
     return true;
   } catch {
     return false;

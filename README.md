@@ -1,10 +1,10 @@
 # Daniel Workspace
 
-私人 AI 工作台 V3.7-F。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI。Home 以云端项目/任务统计和置顶项目实际进度为主，项目详情保留介绍、开发记录和 GitHub 技术资料。访客页展示精选公开作品和模拟流程演示，与私人工作台隔离。
+私人 AI 项目管理指挥中心 V3.8。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI。Home 汇总真实项目/任务状态、GitHub 提交历史、Workspace 工作记录和项目阶段；Daniel Project Hub 继续负责作品导航，访客页展示精选公开作品和模拟流程演示，与私人工作台隔离。
 
 ## Status
 
-- **Stage:** V3.7-F turns Home into a cloud-backed project management overview while preserving project data, Supabase sync, auth, and AI service behavior. Verification and acceptance status are recorded in [HANDOFF](docs/HANDOFF.md).
+- **Stage:** V3.8 upgrades Home to a Project Control Dashboard while preserving Supabase project/task/work-log rows, auth, sync, and AI service behavior. Verification and acceptance status are recorded in [HANDOFF](docs/HANDOFF.md).
 - **Last updated:** 2026-10-12
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -54,6 +54,13 @@ python local_companion.py
 - 置顶项目使用统一紧凑卡片，只展示已填写的状态、阶段和下一步；完成情况只按真实关联任务计算，没有任务时隐藏进度。
 - Home 恢复全站浅灰背景与白色卡片，项目介绍、GitHub 提交和开发记录留在详情页，AI 总结保持默认折叠。
 - 仅调整 Home 展示、首页样式和静态资源缓存版本；不改数据库、数据同步、其他页面、访客权限或 AI 服务。
+
+## V3.8 Project Control Dashboard
+
+- Home 按顺序展示 Supabase 项目/任务 KPI、近 30 天默认的 GitHub 风格活动热力图与每日趋势、当前项目状态占比、已保存阶段分布、最多五个置顶项目，以及默认折叠的 AI 总结。
+- GitHub 活动通过已认证的 Cloudflare Worker 按日期范围分页读取；Worker 在服务端按仓库和完整 SHA 去重，只返回每日计数。工作记录图表读取全部云端项目对应日期范围内的记录 ID、项目 ID 和日期，不读取正文或证据链接；两类来源分别统计和显示。
+- 日期范围支持近 7/30/90 天和不超过 366 天的自定义范围。仓库读取失败或达到分页上限时标记历史不完整，缺口日期不解释为零；没有保存阶段时显示「未分类」，重点项目只显示已保存状态、阶段、下一步和真实任务数，不显示百分比。
+- 不增加 Supabase 迁移或修改业务行；图表缓存只按账号和筛选范围保存在本机一小时，其他设备从相同云端项目和 Worker 独立读取。
 
 ## V2.5 登录配置
 

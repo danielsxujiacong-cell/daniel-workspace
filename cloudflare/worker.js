@@ -353,6 +353,145 @@ async function publicGitHubRoute(request, env) {
   return jsonResponse(request, env, { snapshots, errors });
 }
 
+const MAX_ACTIVITY_PAGES = 10;
+const MAX_ACTIVITY_RANGE_DAYS = 366;
+
+function activityDateKey(value) {
+  const timestamp = Date.parse(value || "");
+  return Number.isFinite(timestamp)
+    ? new Date(timestamp + 8 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    : "";
+}
+
+function validActivityDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function activityDateBounds(startDate, endDate) {
+  const start = new Date(`${startDate}T00:00:00+08:00`);
+  const end = new Date(`${endDate}T23:59:59.999+08:00`);
+  return { since: start.toISOString(), until: end.toISOString() };
+}
+
+async function activityGitHubJson(path, token, operation, { allowEmpty = false } = {}) {
+  let response = await githubApi(path, token);
+  if (!response.ok && token && [401, 404].includes(response.status)) response = await githubApi(path, null);
+  if (allowEmpty && response.status === 409) return [];
+  if (!response.ok) throw await githubUpstreamFailure(response, operation);
+  return response.json();
+}
+
+async function readRepositoryActivity(fullName, authorized, startDate, endDate) {
+  const encoded = fullName.split("/").map(encodeURIComponent).join("/");
+  const authorizedEntry = authorized.get(fullName.toLowerCase());
+  const token = authorizedEntry?.token || null;
+  let repo = authorizedEntry?.repo;
+  if (!repo) {
+    repo = await activityGitHubJson(`/repos/${encoded}`, null, "GitHub activity repository read");
+  }
+  if (repo?.full_name?.toLowerCase() !== fullName.toLowerCase() || repo.private !== false && !authorizedEntry) {
+    const error = new Error("当前仓库不在 GitHub App 授权范围内或不是公开仓库。");
+    error.code = "github_activity_repository_unavailable";
+    error.upstreamStatus = 404;
+    error.upstreamOperation = "GitHub activity repository read";
+    error.upstreamMessage = "Repository is not public or is outside the GitHub App installation scope.";
+    throw error;
+  }
+
+  const { since, until } = activityDateBounds(startDate, endDate);
+  const seen = new Set();
+  const counts = new Map();
+  let complete = false;
+  let recordsValid = true;
+  let page = 1;
+  let pageRows = [];
+  for (; page <= MAX_ACTIVITY_PAGES; page += 1) {
+    pageRows = await activityGitHubJson(
+      `/repos/${encoded}/commits?per_page=100&since=${encodeURIComponent(since)}&until=${encodeURIComponent(until)}&page=${page}`,
+      token,
+      "GitHub historical activity read",
+      { allowEmpty: true },
+    );
+    if (!Array.isArray(pageRows)) throw new Error("github_invalid_activity_response");
+    for (const commit of pageRows) {
+      const sha = typeof commit?.sha === "string" && /^[a-f0-9]{40}$/i.test(commit.sha) ? commit.sha.toLowerCase() : "";
+      const committedAt = commit?.commit?.committer?.date || commit?.commit?.author?.date || "";
+      const timestamp = Date.parse(committedAt);
+      if (!sha || !Number.isFinite(timestamp)) {
+        recordsValid = false;
+        continue;
+      }
+      if (timestamp < Date.parse(since) || timestamp > Date.parse(until) || seen.has(sha)) continue;
+      seen.add(sha);
+      const date = activityDateKey(committedAt);
+      if (date) counts.set(date, (counts.get(date) || 0) + 1);
+    }
+    if (pageRows.length < 100) {
+      complete = true;
+      break;
+    }
+  }
+
+  const dailyCounts = [...counts.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([date, count]) => ({ date, count }));
+  const truncated = !complete || !recordsValid;
+  return {
+    fullName: repo.full_name,
+    complete: complete && recordsValid,
+    truncated,
+    commitsCount: [...counts.values()].reduce((sum, count) => sum + count, 0),
+    dailyCounts,
+  };
+}
+
+async function githubActivityRoute(request, env) {
+  const user = await authenticateWorkspace(request, env);
+  if (!user) return githubError(request, env, 401, "github_session_required", "Workspace 登录已失效，请重新登录后重试。");
+  if (request.method !== "POST") return githubError(request, env, 405, "github_method_not_allowed", "仅支持 GitHub 活动只读请求。");
+
+  let body;
+  try { body = await request.json(); } catch { return githubError(request, env, 400, "github_invalid_request", "请求格式无效。"); }
+  if (!Array.isArray(body?.repositories) || body.repositories.length > 30
+    || !validActivityDate(body?.startDate) || !validActivityDate(body?.endDate) || body.startDate > body.endDate) {
+    return githubError(request, env, 400, "github_invalid_activity_range", "每次最多读取 30 个仓库，日期范围必须有效且不超过 366 天。");
+  }
+  const rangeDays = (Date.parse(`${body.endDate}T00:00:00.000Z`) - Date.parse(`${body.startDate}T00:00:00.000Z`)) / 86_400_000 + 1;
+  if (rangeDays > MAX_ACTIVITY_RANGE_DAYS) {
+    return githubError(request, env, 400, "github_invalid_activity_range", "日期范围最多 366 天。");
+  }
+
+  const requested = [];
+  for (const item of body.repositories) {
+    if (!/^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9_.-]{1,100}$/.test(item?.fullName || "")) {
+      return githubError(request, env, 400, "github_invalid_repository", "仓库名称格式无效。");
+    }
+    if (!requested.some((name) => name.toLowerCase() === item.fullName.toLowerCase())) requested.push(item.fullName);
+  }
+
+  let authorized = new Map();
+  if (githubConfigured(env)) {
+    try { authorized = await listAppAuthorizedRepositories(env, { includeTokens: true }); }
+    catch { authorized = new Map(); }
+  }
+
+  const repositories = [];
+  const errors = [];
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(3, requested.length) }, async () => {
+    while (nextIndex < requested.length) {
+      const fullName = requested[nextIndex++];
+      try {
+        repositories.push(await readRepositoryActivity(fullName, authorized, body.startDate, body.endDate));
+      } catch (error) {
+        errors.push(publicRepositoryError(fullName, error));
+      }
+    }
+  });
+  await Promise.all(workers);
+  return jsonResponse(request, env, { repositories, errors });
+}
+
 async function githubRoute(request, env, url) {
   if (!githubConfigured(env)) return githubError(request, env, 503, "github_not_configured", "GitHub App 尚未配置；现有公开仓库和本机 Companion 仍可使用。");
   const user = await authenticateWorkspace(request, env);
@@ -616,6 +755,7 @@ export default {
     if (!corsHeaders(request, env)) return new Response(null, { status: 403, headers: { "Cache-Control": "no-store" } });
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(request, env) });
     if (url.pathname === "/api/github/public-snapshots") return publicGitHubRoute(request, env);
+    if (url.pathname === "/api/github/activity") return githubActivityRoute(request, env);
     if (url.pathname.startsWith("/api/github/")) return githubRoute(request, env, url);
     if (request.method === "GET" && url.pathname === "/health") {
       return jsonResponse(request, env, { ok: true, provider: "智谱 BigModel", model: env.AI_MODEL || "glm-4-flash-250414", configured: Boolean(env.AI_API_KEY) });

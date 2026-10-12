@@ -156,3 +156,93 @@ test("the public route preserves sanitized upstream HTTP diagnostics", async (t)
   assert.match(payload.errors[0].message, /HTTP 403/);
   assert.equal(JSON.stringify(payload).includes(installationToken), false);
 });
+
+test("GitHub activity reads history through pagination, deduplicates repository SHAs, and returns only daily counts", async (t) => {
+  const env = await envPromise;
+  const calls = [];
+  const firstSha = "abcdef0123456789abcdef0123456789abcdef01";
+  const secondSha = "bbbbbb0123456789abcdef0123456789abcdef01";
+  await withFetch(t, async (input, init = {}) => {
+    const url = new URL(String(input));
+    calls.push(url);
+    if (url.pathname === "/auth/v1/user") return Response.json({ id: uid });
+    if (url.pathname === "/app/installations") return Response.json([{ id: 987654, app_id: 12345 }]);
+    if (url.pathname.endsWith("/access_tokens")) return Response.json({ token: installationToken });
+    if (url.pathname === "/installation/repositories") return Response.json({ repositories: [publicRepository] });
+    if (url.pathname === "/repos/acme/workspace/commits") {
+      if (url.searchParams.get("page") === "1") return Response.json(Array.from({ length: 100 }, () => publicCommit(firstSha, "commit a", "2026-10-12T01:00:00Z")));
+      return Response.json([
+        publicCommit(firstSha, "commit a duplicate", "2026-10-12T01:00:00Z"),
+        publicCommit(secondSha, "commit b", "2026-10-11T15:00:00Z"),
+      ]);
+    }
+    return new Response("unexpected", { status: 500 });
+  });
+
+  const response = await worker.fetch(request("/api/github/activity", {
+    body: { repositories: [{ fullName: "acme/workspace" }], startDate: "2026-10-10", endDate: "2026-10-12" },
+  }), env);
+  const payload = await response.json();
+  assert.equal(response.status, 200);
+  assert.deepEqual(payload.errors, []);
+  assert.deepEqual(payload.repositories, [{
+    fullName: "acme/workspace",
+    complete: true,
+    truncated: false,
+    commitsCount: 2,
+    dailyCounts: [{ date: "2026-10-11", count: 1 }, { date: "2026-10-12", count: 1 }],
+  }]);
+  assert.equal(JSON.stringify(payload).includes(firstSha), false);
+  assert.equal(JSON.stringify(payload).includes(installationToken), false);
+  assert.equal(calls.some((url) => url.pathname.endsWith("/commits") && url.searchParams.get("page") === "2"), true);
+  const activityRequest = calls.find((url) => url.pathname.endsWith("/commits"));
+  assert.equal(activityRequest.searchParams.get("since"), "2026-10-09T16:00:00.000Z");
+  assert.equal(activityRequest.searchParams.get("until"), "2026-10-12T15:59:59.999Z");
+});
+
+test("GitHub activity rejects an excessive date range before calling GitHub", async (t) => {
+  const env = await envPromise;
+  const calls = [];
+  await withFetch(t, async (input) => {
+    const url = new URL(String(input));
+    calls.push(url);
+    if (url.pathname === "/auth/v1/user") return Response.json({ id: uid });
+    return new Response("unexpected", { status: 500 });
+  });
+
+  const response = await worker.fetch(request("/api/github/activity", {
+    body: { repositories: [{ fullName: "acme/workspace" }], startDate: "2025-01-01", endDate: "2026-10-12" },
+  }), env);
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).error.code, "github_invalid_activity_range");
+  assert.equal(calls.filter((url) => url.hostname === "api.github.com").length, 0);
+});
+
+test("GitHub activity marks malformed commit history as incomplete", async (t) => {
+  const env = await envPromise;
+  await withFetch(t, async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/auth/v1/user") return Response.json({ id: uid });
+    if (url.pathname === "/app/installations") return Response.json([{ id: 987654, app_id: 12345 }]);
+    if (url.pathname.endsWith("/access_tokens")) return Response.json({ token: installationToken });
+    if (url.pathname === "/installation/repositories") return Response.json({ repositories: [publicRepository] });
+    if (url.pathname === "/repos/acme/workspace/commits") return Response.json([
+      publicCommit("short-sha", "invalid", "2026-10-12T01:00:00Z"),
+      publicCommit("abcdef0123456789abcdef0123456789abcdef01", "valid", "2026-10-12T02:00:00Z"),
+    ]);
+    return new Response("unexpected", { status: 500 });
+  });
+
+  const response = await worker.fetch(request("/api/github/activity", {
+    body: { repositories: [{ fullName: "acme/workspace" }], startDate: "2026-10-10", endDate: "2026-10-12" },
+  }), env);
+  const payload = await response.json();
+  assert.equal(response.status, 200);
+  assert.deepEqual(payload.repositories, [{
+    fullName: "acme/workspace",
+    complete: false,
+    truncated: true,
+    commitsCount: 1,
+    dailyCounts: [{ date: "2026-10-12", count: 1 }],
+  }]);
+});

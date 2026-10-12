@@ -1,6 +1,9 @@
 const TABLE = "workspace_work_logs";
 const COLUMNS = "id,user_id,project_id,work_date,completed_items,outcomes,next_step,evidence_links,created_at,updated_at";
+const ACTIVITY_COLUMNS = "id,project_id,work_date";
 const MAX_EVIDENCE_LINKS = 10;
+const ACTIVITY_PAGE_SIZE = 1_000;
+const MAX_ACTIVITY_ROWS = 5_000;
 
 function cleanText(value, maxLength) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
@@ -117,6 +120,37 @@ export async function loadWorkLogsForRange(client, userId, { startDate, endDate,
     .order("work_date", { ascending: false }).order("updated_at", { ascending: false })
     .limit(Math.max(1, Math.min(200, Number(limit) || 150)));
   return (await timedQuery(query)).map(workLogFromRow).filter(Boolean);
+}
+
+export async function loadWorkLogActivityForRange(client, userId, { startDate, endDate, projectIds = [], maxRows = MAX_ACTIVITY_ROWS } = {}) {
+  if (!userId) throw new Error("缺少已验证账号。");
+  assertRange(startDate, endDate);
+  const ids = [...new Set((Array.isArray(projectIds) ? projectIds : []).map(String).filter(Boolean))];
+  if (!ids.length) return { items: [], complete: true };
+
+  const boundedMaxRows = Math.max(1, Math.min(MAX_ACTIVITY_ROWS, Number(maxRows) || MAX_ACTIVITY_ROWS));
+  const items = [];
+  let recordsValid = true;
+  let offset = 0;
+  while (offset < boundedMaxRows) {
+    const pageEnd = Math.min(offset + ACTIVITY_PAGE_SIZE, boundedMaxRows) - 1;
+    const query = client.from(TABLE).select(ACTIVITY_COLUMNS)
+      .eq("user_id", userId).in("project_id", ids)
+      .gte("work_date", startDate).lte("work_date", endDate)
+      .order("work_date", { ascending: true }).order("id", { ascending: true })
+      .range(offset, pageEnd);
+    const rows = await timedQuery(query);
+    for (const row of rows) {
+      if (!row || !validDate(row.work_date) || typeof row.id !== "string" || !row.id || typeof row.project_id !== "string" || !row.project_id) {
+        recordsValid = false;
+        continue;
+      }
+      items.push({ id: row.id, projectId: row.project_id, workDate: row.work_date });
+    }
+    if (rows.length < pageEnd - offset + 1) return { items, complete: recordsValid };
+    offset = pageEnd + 1;
+  }
+  return { items, complete: false };
 }
 
 export async function saveWorkLogRecord(client, userId, projectId, record) {
