@@ -21,6 +21,37 @@ export function reusablePublicRepositorySnapshot(snapshot, repositoryName, fresh
   return snapshot;
 }
 
+export function missingPublicRepositoryVerifications(repositoryNames, snapshots, errors) {
+  const resolved = new Set([
+    ...(Array.isArray(snapshots) ? snapshots : []).map((snapshot) => snapshot?.repositoryName),
+    ...(Array.isArray(errors) ? errors.filter((error) => error?.httpStatus === 404).map((error) => error?.fullName) : []),
+  ].filter((name) => typeof name === "string").map((name) => name.toLowerCase()));
+  return [...new Set((Array.isArray(repositoryNames) ? repositoryNames : []).filter((name) => typeof name === "string"))]
+    .filter((name) => !resolved.has(name.toLowerCase()));
+}
+
+export function mergePublicRepositoryVerification(previous, next, retriedNames = []) {
+  const retried = new Set((Array.isArray(retriedNames) ? retriedNames : []).map((name) => String(name).toLowerCase()));
+  const snapshots = new Map();
+  for (const snapshot of [...(previous?.snapshots || []), ...(next?.snapshots || [])]) {
+    const name = String(snapshot?.repositoryName || "").toLowerCase();
+    if (name) snapshots.set(name, snapshot);
+  }
+  const errors = new Map();
+  for (const error of previous?.errors || []) {
+    const name = String(error?.fullName || "").toLowerCase();
+    if (name && !retried.has(name)) errors.set(name, error);
+  }
+  for (const error of next?.errors || []) {
+    const name = String(error?.fullName || "").toLowerCase();
+    if (name) errors.set(name, error);
+  }
+  return {
+    snapshots: [...snapshots.values()],
+    errors: [...errors.values()],
+  };
+}
+
 export function withSnapshotPreviewTimeout(label, timeoutMs, operation) {
   const controller = new AbortController();
   let timer;

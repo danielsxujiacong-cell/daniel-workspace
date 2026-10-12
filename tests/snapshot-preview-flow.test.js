@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   missingCompleteRepositories,
+  missingPublicRepositoryVerifications,
+  mergePublicRepositoryVerification,
   reusablePublicRepositorySnapshot,
   snapshotGitHubActivityCacheKey,
   withSnapshotPreviewTimeout,
@@ -29,6 +31,31 @@ test("reuses only fresh public snapshots that match the linked repository", () =
   assert.equal(reusablePublicRepositorySnapshot({ ...snapshot, isPublic: false }, "acme/workspace", true), null);
   assert.equal(reusablePublicRepositorySnapshot(snapshot, "acme/other", true), null);
   assert.equal(reusablePublicRepositorySnapshot(snapshot, "acme/workspace", false), null);
+});
+
+test("snapshot retries only transient or missing repository checks", () => {
+  const snapshots = [{ repositoryName: "acme/complete", isPublic: true }];
+  const errors = [
+    { fullName: "acme/private", httpStatus: 404 },
+    { fullName: "acme/limited", httpStatus: 403 },
+  ];
+  assert.deepEqual(
+    missingPublicRepositoryVerifications(["acme/complete", "acme/private", "acme/limited", "acme/unknown"], snapshots, errors),
+    ["acme/limited", "acme/unknown"],
+  );
+});
+
+test("repository verification retries preserve successes and settled non-public results", () => {
+  const merged = mergePublicRepositoryVerification({
+    snapshots: [{ repositoryName: "acme/complete" }],
+    errors: [{ fullName: "acme/private", httpStatus: 404 }, { fullName: "acme/retry", httpStatus: 403 }],
+  }, {
+    snapshots: [{ repositoryName: "acme/retry" }],
+    errors: [{ fullName: "acme/unavailable", httpStatus: 500 }],
+  }, ["acme/retry"]);
+
+  assert.deepEqual(merged.snapshots.map(({ repositoryName }) => repositoryName), ["acme/complete", "acme/retry"]);
+  assert.deepEqual(merged.errors.map(({ fullName }) => fullName), ["acme/private", "acme/unavailable"]);
 });
 
 test("snapshot preview stage timeout aborts the request and provides a retryable error", async () => {

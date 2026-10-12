@@ -16,7 +16,7 @@ const {
   PUBLIC_SNAPSHOT_ACTIVITY_DAYS,
   PUBLIC_SNAPSHOT_COLLECTION_LABELS,
   selectedSnapshotCounts,
-} = await import("./public-snapshot.js?v=3.8-k");
+} = await import("./public-snapshot.js?v=3.8-l");
 let hydratedPublicData = publicSnapshotMode ? hydratePublicSnapshot(publishedSnapshot) : null;
 
 const {
@@ -33,7 +33,7 @@ const {
   saveData,
   saveLocalScanBaseline,
   saveLocalScanCache,
-} = publicSnapshotMode ? {} : await import("./store.js?v=3.8-k");
+} = publicSnapshotMode ? {} : await import("./store.js?v=3.8-l");
 const { buildAssistantContext } = publicSnapshotMode ? {} : await import("./ai/context.js");
 const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = publicSnapshotMode ? {} : await import("./ai/service.js?v=3.4.2");
 const { buildProjectNextStepContext, buildProjectNextStepPrompt, parseProjectNextStepResponse, verifiedProjectGitHubCommit } = publicSnapshotMode ? {} : await import("./ai/project-next-step.js?v=3.3.2");
@@ -43,10 +43,10 @@ const { fetchPrivateGitHubSnapshots, listPrivateGitHubRepositories } = publicSna
 const { localScanEndpointFor, shouldRenderDashboardGitHubActivity } = publicSnapshotMode ? { localScanEndpointFor: () => null, shouldRenderDashboardGitHubActivity: () => false } : await import("./local-companion.js?v=3.5-a.2");
 const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = await import("./suggestions.js");
 const { fetchPublicGitHubRepositories, fetchPublicGitHubRepository, GITHUB_CACHE_TTL_MS, isGitHubSnapshotFresh, parsePublicGitHubRepository } = publicSnapshotMode
-  ? await import("./github/public-api.js?v=3.8-k")
-  : await import("./github/public-api.js?v=3.8-k");
-const { fetchGitHubActivity, mergeGitHubActivityRetry, rateLimitedGitHubActivityNames, GITHUB_ACTIVITY_CACHE_TTL_MS } = publicSnapshotMode ? {} : await import("./github/activity.js?v=3.8-k");
-const { missingCompleteRepositories, reusablePublicRepositorySnapshot, snapshotGitHubActivityCacheKey, withSnapshotPreviewTimeout } = await import("./snapshot-preview-flow.js?v=3.8-k");
+  ? await import("./github/public-api.js?v=3.8-l")
+  : await import("./github/public-api.js?v=3.8-l");
+const { fetchGitHubActivity, mergeGitHubActivityRetry, rateLimitedGitHubActivityNames, GITHUB_ACTIVITY_CACHE_TTL_MS } = publicSnapshotMode ? {} : await import("./github/activity.js?v=3.8-l");
+const { mergePublicRepositoryVerification, missingCompleteRepositories, missingPublicRepositoryVerifications, reusablePublicRepositorySnapshot, snapshotGitHubActivityCacheKey, withSnapshotPreviewTimeout } = await import("./snapshot-preview-flow.js?v=3.8-l");
 const { deployedWebsiteUrl, humanizeProjectCommit, projectDescriptionAfterEdit, projectDescriptionForEdit, projectIntroduction, projectShowcase } = await import("./project-story.js?v=3.7-d");
 const { buildCloudDashboardModel, buildLocalDashboardModel, buildRecentProjectUpdates, chooseRecentCommit, compareLocalProjects, homeProjectField, projectTaskProgress, taskPriorityLabel } = await import("./dashboard.js?v=3.8");
 const { buildHomeActivity, projectStageBreakdown, projectStatusBreakdown, resolveActivityRange, shiftDateKey } = await import("./home-activity.js?v=3.8-e");
@@ -69,7 +69,7 @@ const {
   saveCloudChanges,
   setCloudProjectPinned,
 } = publicSnapshotMode ? {} : await import("./cloud/sync.js");
-const { loadProjectWorkLogs, loadWorkLogsForRange, loadWorkLogActivityForRange, saveWorkLogRecord, workLogCloudError } = publicSnapshotMode ? {} : await import("./cloud/work-logs.js?v=3.8-k");
+const { loadProjectWorkLogs, loadWorkLogsForRange, loadWorkLogActivityForRange, saveWorkLogRecord, workLogCloudError } = publicSnapshotMode ? {} : await import("./cloud/work-logs.js?v=3.8-l");
 
 const app = document.querySelector("#app");
 const emptyPublicData = { projects: [], tasks: [], workLogs: [], knowledge: [], decisions: [], activities: [], settings: { theme: "system" } };
@@ -2668,31 +2668,39 @@ async function generateSnapshotPreview() {
     const repositoryNames = snapshotRepositoryNames(repositoryProjects);
     const verificationCacheKey = repositoryNames.map((name) => name.toLowerCase()).sort().join(",");
     const cachedVerification = publicRepositoryVerificationCache.get(verificationCacheKey);
+    const previousVerification = cachedVerification && Date.now() - cachedVerification.fetchedAt < GITHUB_ACTIVITY_CACHE_TTL_MS
+      ? cachedVerification.data
+      : { snapshots: [], errors: [] };
+    const previousVerificationNames = new Set([
+      ...(previousVerification.snapshots || []).map((snapshot) => String(snapshot?.repositoryName || "").toLowerCase()),
+      ...(previousVerification.errors || []).map((error) => String(error?.fullName || "").toLowerCase()),
+    ]);
     const cachedPublicSnapshots = repositoryProjects.flatMap(({ project, repository }) => {
       const snapshot = project.githubData;
       const reusable = reusablePublicRepositorySnapshot(snapshot, repository.fullName, isGitHubSnapshotFresh(snapshot));
-      return reusable ? [reusable] : [];
+      return reusable && !previousVerificationNames.has(repository.fullName.toLowerCase()) ? [reusable] : [];
     });
-    const cachedPublicNames = new Set(cachedPublicSnapshots.map((snapshot) => String(snapshot.repositoryName).toLowerCase()));
-    let publicCheck = cachedVerification && Date.now() - cachedVerification.fetchedAt < GITHUB_ACTIVITY_CACHE_TTL_MS
-      ? cachedVerification.data
-      : null;
+    let publicCheck = mergePublicRepositoryVerification(previousVerification, { snapshots: cachedPublicSnapshots, errors: [] });
     let publicVerificationStageError = null;
-    if (!publicCheck && repositoryProjects.length) {
-      const repositoriesToVerify = repositoryProjects.filter(({ repository }) => !cachedPublicNames.has(repository.fullName.toLowerCase()));
-      publicCheck = { snapshots: cachedPublicSnapshots, errors: [] };
+    if (repositoryProjects.length) {
+      const repositoriesToVerify = missingPublicRepositoryVerifications(repositoryNames, publicCheck.snapshots, publicCheck.errors);
       if (repositoriesToVerify.length) {
-        setProgress("核验 GitHub 仓库公开状态", `复用 ${cachedPublicSnapshots.length}/${repositoryNames.length} 个未过期的公开仓库快照；分批核验剩余 ${repositoriesToVerify.length} 个。`);
+        const cachedPublicCount = repositoryNames.length - repositoriesToVerify.length;
+        const repositoryByName = new Map(repositoryProjects.map(({ repository }) => [repository.fullName.toLowerCase(), repository]));
+        setProgress("核验 GitHub 仓库公开状态", `复用 ${cachedPublicCount}/${repositoryNames.length} 个已核验结果；分批核验剩余 ${repositoriesToVerify.length} 个。`);
         try {
           const refreshed = await withSnapshotPreviewTimeout("GitHub 仓库公开状态核验", 60_000, (signal) =>
-            fetchPublicGitHubRepositories(repositoriesToVerify.map(({ repository }) => repository.url), workspaceAuth, {
+            fetchPublicGitHubRepositories(repositoriesToVerify.map((name) => repositoryByName.get(name.toLowerCase())?.url).filter(Boolean), workspaceAuth, {
               signal,
-              onProgress: ({ completed, total }) => setProgress("核验 GitHub 仓库公开状态", `已复用 ${cachedPublicSnapshots.length} 个缓存；新核验 ${completed}/${total} 个仓库。`),
+              onProgress: ({ completed, total }) => setProgress("核验 GitHub 仓库公开状态", `已复用 ${cachedPublicCount} 个已核验结果；新核验 ${completed}/${total} 个仓库。`),
             }));
-          publicCheck = { snapshots: [...cachedPublicSnapshots, ...(refreshed.snapshots || [])], errors: refreshed.errors || [] };
+          publicCheck = mergePublicRepositoryVerification(publicCheck, refreshed, repositoriesToVerify);
         } catch (error) {
           publicVerificationStageError = error;
-          publicCheck.errors = repositoriesToVerify.map(({ repository }) => ({ fullName: repository.fullName, code: error?.code || "github_repository_verification_failed", message: snapshotReadError(error) }));
+          publicCheck = mergePublicRepositoryVerification(publicCheck, {
+            snapshots: [],
+            errors: repositoriesToVerify.map((fullName) => ({ fullName, code: error?.code || "github_repository_verification_failed", message: snapshotReadError(error) })),
+          }, repositoriesToVerify);
         }
       }
       if (!publicVerificationStageError) {
@@ -2706,11 +2714,8 @@ async function generateSnapshotPreview() {
             message: "Worker 未返回该仓库的公开状态。",
           }))];
         }
-        const retryableVerificationErrors = (publicCheck.errors || []).filter((error) => error.httpStatus !== 404);
-        if (!retryableVerificationErrors.length && !missingNames.length) {
-          publicRepositoryVerificationCache.set(verificationCacheKey, { fetchedAt: Date.now(), data: publicCheck });
-        }
       }
+      publicRepositoryVerificationCache.set(verificationCacheKey, { fetchedAt: Date.now(), data: publicCheck });
     }
     if (!publicCheck) publicCheck = { snapshots: [], errors: [] };
     const verifiedRepos = (publicCheck.snapshots || []).filter((repo) => repo.isPublic === true);

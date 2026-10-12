@@ -1,4 +1,4 @@
-import { requestGitHubWorker } from "./worker-api.js?v=3.8-k";
+import { requestGitHubWorker } from "./worker-api.js?v=3.8-l";
 
 export const GITHUB_CACHE_TTL_MS = 60 * 60 * 1000;
 export const GITHUB_ACTIVITY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
