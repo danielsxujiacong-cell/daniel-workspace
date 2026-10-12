@@ -1,23 +1,56 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { resolveEntryMode } from "../src/auth/entry-mode.js";
+import { resolveEntryMode, shouldRestoreExistingSession } from "../src/auth/entry-mode.js";
 import { mountGuestDemo } from "../src/guest-demo.js";
 
 const gate = await readFile(new URL("../src/auth/gate.js", import.meta.url), "utf8");
 const guest = await readFile(new URL("../src/guest-demo.js", import.meta.url), "utf8");
 const index = await readFile(new URL("../index.html", import.meta.url), "utf8");
 
-test("public and explicit-login routes open without requiring a session; only default restores a valid session", () => {
+test("existing sessions never auto-open from the root; only the explicit private entry restores one", () => {
+  assert.equal(resolveEntryMode(""), "public");
   assert.equal(resolveEntryMode("?mode=guest"), "public");
   assert.equal(resolveEntryMode("?mode=login"), "login");
   assert.equal(resolveEntryMode("?mode=demo"), "demo");
-  assert.equal(resolveEntryMode("?unrelated=1"), "default");
-  assert.match(gate, /if \(entryMode === "demo"\)[\s\S]*?void startGuestDemo\(\);[\s\S]*?else if \(entryMode === "login"\)[\s\S]*?showLogin\(\);[\s\S]*?else \{\s*void startPublicDashboard\(entryMode === "default"\);/);
-  assert.match(gate, /async function startPublicDashboard\(restoreSession = false\)[\s\S]*?mountPublicDashboard\(\{ root: app \}\)[\s\S]*?if \(restoreSession\) void restoreExistingSession\(\);/);
-  assert.ok(gate.indexOf('if (entryMode === "demo")') < gate.lastIndexOf("startPublicDashboard"));
+  assert.equal(resolveEntryMode("?unrelated=1"), "public");
+  assert.equal(shouldRestoreExistingSession("public", true), false);
+  assert.equal(shouldRestoreExistingSession("login", false), false);
+  assert.equal(shouldRestoreExistingSession("login", true), true);
+  assert.match(gate, /if \(entryMode === "demo"\)[\s\S]*?void startGuestDemo\(\);[\s\S]*?else if \(entryMode === "login"\)[\s\S]*?startPrivateEntry\(\);[\s\S]*?else \{\s*void startPublicDashboard\(\);/);
+  assert.match(gate, /function startPrivateEntry\(\)[\s\S]*?showLogin\(\)[\s\S]*?shouldRestoreExistingSession\(entryMode, hasStoredAuthSession\(\)\)[\s\S]*?restoreExistingSession\(\)/);
+  assert.match(gate, /async function startPublicDashboard\(\)[\s\S]*?await import\("\.\.\/public-dashboard\.js\?v=3\.8-a"\)[\s\S]*?catch[\s\S]*?startup-failure/);
+  const publicStartup = gate.slice(gate.indexOf("async function startPublicDashboard"), gate.indexOf("function startPrivateEntry"));
+  assert.doesNotMatch(publicStartup, /hasStoredAuthSession|restoreExistingSession|initializeAuthClient|localStorage|config\.js/);
+  assert.match(index, /class="startup-screen"[\s\S]*?正在打开公开项目指挥中心/);
   assert.doesNotMatch(gate, /import\s*\{[^}]*SUPABASE_[^}]*\}\s*from\s*["']\.\/config\.js["']/);
   assert.match(gate, /function getSupabaseConfig\(\)[\s\S]*?import\("\.\/config\.js"\)/);
+});
+
+test("logout clears stored auth before reopening the public root; refreshing the root cannot redirect to private mode", () => {
+  const logoutFlow = gate.slice(gate.indexOf("async function handleLogout"), gate.indexOf('app.addEventListener("submit"'));
+  assert.ok(logoutFlow.indexOf("clearAuthSessionStorage()") < logoutFlow.indexOf('client.auth.signOut({ scope: "local" })'));
+  assert.match(logoutFlow, /window\.location\.replace\(window\.location\.pathname\)/);
+  assert.doesNotMatch(logoutFlow, /mode=login/);
+  assert.equal(shouldRestoreExistingSession(resolveEntryMode(""), false), false);
+  assert.equal(shouldRestoreExistingSession(resolveEntryMode(""), true), false);
+});
+
+test("fresh visitors and saved-session root refreshes both remain public; explicit login refresh restores only after user validation", () => {
+  const rootRoute = resolveEntryMode("");
+  const explicitPrivateRoute = resolveEntryMode("?mode=login");
+  assert.equal(shouldRestoreExistingSession(rootRoute, false), false);
+  assert.equal(shouldRestoreExistingSession(rootRoute, true), false);
+  assert.equal(shouldRestoreExistingSession(explicitPrivateRoute, false), false);
+  assert.equal(shouldRestoreExistingSession(explicitPrivateRoute, true), true);
+
+  const privateEntry = gate.slice(gate.indexOf("function startPrivateEntry"), gate.lastIndexOf('if (entryMode === "demo")'));
+  assert.match(privateEntry, /showLogin\(\)[\s\S]*?shouldRestoreExistingSession\(entryMode, hasStoredAuthSession\(\)\)[\s\S]*?restoreExistingSession\(\)/);
+  assert.doesNotMatch(privateEntry, /location\.replace/);
+  const authRestore = gate.slice(gate.indexOf("async function restoreExistingSession"), gate.indexOf("async function startGuestDemo"));
+  assert.ok(authRestore.indexOf("client.auth.getUser()") < authRestore.indexOf("isAllowedUser(user)") && authRestore.indexOf("isAllowedUser(user)") < authRestore.indexOf("enterWorkspace(user)"));
+  const workspaceEntry = gate.slice(gate.indexOf("async function enterWorkspace"), gate.indexOf("function lockWorkspace"));
+  assert.match(workspaceEntry, /if \(workspaceEntryPromise\) return workspaceEntryPromise/);
 });
 
 test("visitor UI has no imports or private data and service interfaces", () => {
@@ -34,7 +67,7 @@ test("visitor UI has no imports or private data and service interfaces", () => {
 
 test("public entry loads only the gate module", () => {
   const scripts = [...index.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map((match) => match[1]);
-  assert.deepEqual(scripts, ["./src/auth/gate.js?v=3.8-a"]);
+  assert.deepEqual(scripts, ["./src/auth/gate.js?v=3.8-b"]);
 });
 
 test("private login still signs in, verifies the user, and checks the allowlist before opening app", () => {
@@ -48,8 +81,8 @@ test("private login still signs in, verifies the user, and checks the allowlist 
   assert.match(gate, /async function enterWorkspace\(user\)\s*\{\s*if \(workspaceVisible\) return;\s*if \(!isAllowedUser\(user\)\) throw new Error\("Unauthorized user"\);[\s\S]*?import\("\.\.\/app\.js\?v=3\.8-a"\)/);
 
   const sessionRestore = gate.slice(gate.indexOf("async function restoreExistingSession"), gate.indexOf("async function startGuestDemo"));
-  const getSessionAt = sessionRestore.indexOf("authClient.auth.getSession()");
-  const restoreUserAt = sessionRestore.indexOf("authClient.auth.getUser()");
+  const getSessionAt = sessionRestore.indexOf("client.auth.getSession()");
+  const restoreUserAt = sessionRestore.indexOf("client.auth.getUser()");
   const restoreAllowlistAt = sessionRestore.indexOf("isAllowedUser(user)");
   const restoreWorkspaceAt = sessionRestore.indexOf("enterWorkspace(user)");
   assert.ok(getSessionAt >= 0 && getSessionAt < restoreUserAt && restoreUserAt < restoreAllowlistAt && restoreAllowlistAt < restoreWorkspaceAt);

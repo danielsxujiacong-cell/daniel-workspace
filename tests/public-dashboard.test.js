@@ -188,7 +188,8 @@ test("default public page imports no private Workspace modules and shares the au
   assert.match(publicPage, /credentials: "omit"/);
   assert.match(app, /import\("\.\/dashboard-layout\.js\?v=3\.8-a"\)/);
   assert.match(layout, /class="dashboard-home"><div class="dashboard-grid"/);
-  assert.match(gate, /startPublicDashboard\(entryMode === "default"\)/);
+  assert.match(gate, /else \{\s*void startPublicDashboard\(\);/);
+  assert.doesNotMatch(gate, /startPublicDashboard\([^)]*restoreExistingSession/);
   assert.match(gate, /import\("\.\.\/app\.js\?v=3\.8-a"\)/);
   assert.match(gate, /if \(!isAllowedUser\(user\)\) throw new Error\("Unauthorized user"\)/);
 });

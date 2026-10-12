@@ -3,5 +3,9 @@ export function resolveEntryMode(search = "") {
   if (mode === "guest") return "public";
   if (mode === "demo") return "demo";
   if (mode === "login") return "login";
-  return "default";
+  return "public";
+}
+
+export function shouldRestoreExistingSession(mode, hasStoredSession) {
+  return mode === "login" && Boolean(hasStoredSession);
 }

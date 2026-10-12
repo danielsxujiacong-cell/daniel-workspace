@@ -1,4 +1,4 @@
-import { resolveEntryMode } from "./entry-mode.js";
+import { resolveEntryMode, shouldRestoreExistingSession } from "./entry-mode.js?v=3.8-b";
 
 const app = document.querySelector("#app");
 const entryMode = resolveEntryMode(window.location.search);
@@ -10,9 +10,9 @@ let authConfig = { SUPABASE_ALLOWED_USER: "" };
 let workspaceModule = null;
 let publicDashboard = null;
 let workspaceVisible = false;
+let workspaceEntryPromise = null;
 let signInBusy = false;
 let signOutBusy = false;
-let authInitializationError = "";
 
 document.documentElement.dataset.theme = colorScheme.matches ? "light" : "dark";
 
@@ -64,10 +64,12 @@ async function initializeAuthClient() {
     },
   });
   client.auth.onAuthStateChange((event) => {
-    if (event === "SIGNED_OUT" && workspaceVisible) lockWorkspace("已退出登录。");
+    if (event !== "SIGNED_OUT" || !workspaceVisible) return;
+    lockWorkspace("登录已失效，请从公开首页重新进入。");
+    clearAuthSessionStorage();
+    window.location.replace(window.location.pathname);
   });
   authClient = client;
-  authInitializationError = "";
   return client;
 }
 
@@ -100,17 +102,27 @@ function loginErrorMessage(error) {
 async function enterWorkspace(user) {
   if (workspaceVisible) return;
   if (!isAllowedUser(user)) throw new Error("Unauthorized user");
-  publicDashboard?.destroy();
-  publicDashboard = null;
-  globalThis.DANIEL_WORKSPACE_AUTHENTICATED = true;
-  globalThis.DANIEL_WORKSPACE_AUTH = { client: authClient, userId: user.id };
+  if (workspaceEntryPromise) return workspaceEntryPromise;
+  workspaceEntryPromise = (async () => {
+    publicDashboard?.destroy();
+    publicDashboard = null;
+    globalThis.DANIEL_WORKSPACE_AUTHENTICATED = true;
+    globalThis.DANIEL_WORKSPACE_AUTH = { client: authClient, userId: user.id };
+    try {
+      workspaceModule = await import("../app.js?v=3.8-a");
+      workspaceVisible = true;
+    } catch (error) {
+      workspaceVisible = false;
+      workspaceModule = null;
+      globalThis.DANIEL_WORKSPACE_AUTHENTICATED = false;
+      globalThis.DANIEL_WORKSPACE_AUTH = null;
+      throw error;
+    }
+  })();
   try {
-    workspaceModule = await import("../app.js?v=3.8-a");
-    workspaceVisible = true;
-  } catch (error) {
-    globalThis.DANIEL_WORKSPACE_AUTHENTICATED = false;
-    globalThis.DANIEL_WORKSPACE_AUTH = null;
-    throw error;
+    await workspaceEntryPromise;
+  } finally {
+    workspaceEntryPromise = null;
   }
 }
 
@@ -186,8 +198,10 @@ async function handleLogin(form) {
     await enterWorkspace(user);
   } catch (error) {
     passwordInput.value = "";
-    if (!authClient) authInitializationError = `登录服务初始化失败：${loginErrorMessage(error)}`;
-    setLoginStatus(loginErrorMessage(error));
+    if (!workspaceVisible && !workspaceEntryPromise) {
+      showLogin();
+      setLoginStatus(loginErrorMessage(error));
+    }
   } finally {
     signInBusy = false;
     if (submit.isConnected) {
@@ -228,30 +242,50 @@ app.addEventListener("click", (event) => {
   void handleLogout();
 }, true);
 
+function hasStoredAuthSession() {
+  try { return Boolean(localStorage.getItem(AUTH_STORAGE_KEY)); }
+  catch { return false; }
+}
+
 async function restoreExistingSession() {
-  try {
-    if (!localStorage.getItem(AUTH_STORAGE_KEY)) return;
-  } catch {
-    return;
+  if (!(await isConfigured())) {
+    setLoginStatus("Supabase 登录配置不完整，暂时无法进入私人工作台。");
+    return false;
   }
-  if (!(await isConfigured())) return;
 
-  try {
-    await initializeAuthClient();
+  const client = await initializeAuthClient();
+  const { data: { session }, error } = await client.auth.getSession();
+  if (error) throw error;
+  if (!session) {
+    clearAuthSessionStorage();
+    setLoginStatus("", false);
+    return false;
+  }
 
-    const { data: { session }, error } = await authClient.auth.getSession();
-    if (error) throw error;
-    if (!session) return;
-    const { data: { user }, error: userError } = await authClient.auth.getUser();
-    if (userError || !user || !isAllowedUser(user)) {
-      await authClient.auth.signOut({ scope: "local" }).catch(() => {});
+  const { data: { user }, error: userError } = await client.auth.getUser();
+  if (userError) {
+    if ([401, 403].includes(Number(userError.status))) {
+      await client.auth.signOut({ scope: "local" }).catch(() => {});
       clearAuthSessionStorage();
-      return;
+      setLoginStatus("", false);
+      return false;
     }
-    await enterWorkspace(user);
-  } catch (error) {
-    authInitializationError = `登录服务初始化失败：${loginErrorMessage(error)}`;
+    throw userError;
   }
+  if (!user) {
+    clearAuthSessionStorage();
+    setLoginStatus("", false);
+    return false;
+  }
+  if (!isAllowedUser(user)) {
+    await client.auth.signOut({ scope: "local" }).catch(() => {});
+    clearAuthSessionStorage();
+    showLogin(unauthorizedMessage());
+    return false;
+  }
+
+  await enterWorkspace(user);
+  return true;
 }
 
 async function startGuestDemo() {
@@ -263,16 +297,31 @@ async function startGuestDemo() {
   });
 }
 
-async function startPublicDashboard(restoreSession = false) {
-  const { mountPublicDashboard } = await import("../public-dashboard.js?v=3.8-a");
-  publicDashboard = mountPublicDashboard({ root: app });
-  if (restoreSession) void restoreExistingSession();
+async function startPublicDashboard() {
+  try {
+    const { mountPublicDashboard } = await import("../public-dashboard.js?v=3.8-a");
+    publicDashboard = mountPublicDashboard({ root: app });
+  } catch {
+    app.innerHTML = `<main class="startup-screen startup-failure" role="alert"><section><div class="startup-skeleton-mark" aria-hidden="true">D</div><h1>项目指挥中心暂时无法加载</h1><p>请检查网络后重新打开页面。</p><a class="button small" href="./">重新加载</a> <a class="public-return-link" href="?mode=login">登录</a></section></main>`;
+  }
+}
+
+function startPrivateEntry() {
+  showLogin();
+  if (!shouldRestoreExistingSession(entryMode, hasStoredAuthSession())) return;
+  setLoginStatus("正在验证此设备已保存的登录…", false);
+  void restoreExistingSession().catch((error) => {
+    if (!workspaceVisible && !workspaceEntryPromise) {
+      showLogin();
+      setLoginStatus(loginErrorMessage(error));
+    }
+  });
 }
 
 if (entryMode === "demo") {
   void startGuestDemo();
 } else if (entryMode === "login") {
-  showLogin();
+  startPrivateEntry();
 } else {
-  void startPublicDashboard(entryMode === "default");
+  void startPublicDashboard();
 }
