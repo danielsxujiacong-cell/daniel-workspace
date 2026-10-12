@@ -14,6 +14,13 @@ export function missingCompleteRepositories(repositories, requiredNames) {
     .filter((name) => !complete.has(name.toLowerCase()));
 }
 
+export function reusablePublicRepositorySnapshot(snapshot, repositoryName, fresh) {
+  if (!snapshot || snapshot.source === "github-app" || snapshot.isPublic !== true || fresh !== true
+    || typeof snapshot.repositoryName !== "string" || typeof repositoryName !== "string"
+    || snapshot.repositoryName.toLowerCase() !== repositoryName.toLowerCase()) return null;
+  return snapshot;
+}
+
 export function withSnapshotPreviewTimeout(label, timeoutMs, operation) {
   const controller = new AbortController();
   let timer;

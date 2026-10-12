@@ -4,7 +4,7 @@ Daniel Workspace V3.8-C 使用统一的完整工作台界面和两种数据模�
 
 ## Status
 
-- **Stage:** V3.8-B.1 improves authenticated GitHub activity coverage and the responsive Dashboard heatmap on the V3.8-C shared workspace. The public snapshot remains unpublished until the owner reviews and explicitly publishes it. Verification and handoff are recorded in [HANDOFF](docs/HANDOFF.md).
+- **Stage:** V3.8-C.1 repairs the owner-only visitor snapshot preview flow on the V3.8-C shared workspace. Preview remains separate from publication; incomplete reads are marked and cannot be published. Verification and handoff are recorded in [HANDOFF](docs/HANDOFF.md).
 - **Last updated:** 2026-10-12
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -77,6 +77,12 @@ python local_companion.py
 - 只有私人账号所有者可以打开「预览访客快照」。预览读取 Supabase 已同步记录和只核验为公开的 GitHub 每日聚合，默认不选任何记录；敏感提示需逐项确认，最终发布另有数量范围确认。普通文本中的外链、邮箱、电话、路径、Token 和私钥会清理；证据链接、仓库提交原文/SHA、Companion 与私人仓库内容不进入快照。
 - Worker 只为经 `getUser()` 校验且 UUID 与 `WORKSPACE_USER_ID` 完全匹配的所有者接受发布 POST；拒绝额外字段、未通过清洗的内容和私有 GitHub 仓库。访客只能匿名 GET 快照；公开 Worker 路由不查询 Supabase 表，不提供私人记录 API。未修改数据库、RLS 或同步序列化。
 - 本地目标验收为桌面与 390px 手机视口可浏览，以及已有会话根网址、无痕未登录、退出回根页和刷新不循环；访客不触发 AI、Auth、Workspace localStorage、Companion 或写操作。用户须在预览页确认数据后主动发布；不得由部署流程自动发布快照。
+
+## V3.8-C.1 访客快照预览可靠性
+
+- 私人预览按 Supabase 工作记录、GitHub 仓库公开状态、GitHub 活动历史显示当前读取阶段与进度；每阶段都有截止时间、具体失败原因和安全重试入口。
+- 复用本机账号范围内完整的 GitHub 活动缓存，以及未过期且明确为公开的仓库快照；其余仓库每批最多核验 4 个，避免单次 Worker 子请求超限。缓存不完整或数据源失败时标明缺失范围并锁定发布。
+- 预览仅保存在当前页面内存中，不写私人数据库或访客 KV；发布仍需所有者逐条审核并明确确认。
 
 ## V2.5 登录配置
 

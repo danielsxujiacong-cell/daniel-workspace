@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   missingCompleteRepositories,
+  reusablePublicRepositorySnapshot,
   snapshotGitHubActivityCacheKey,
   withSnapshotPreviewTimeout,
 } from "../src/snapshot-preview-flow.js";
@@ -19,6 +20,15 @@ test("only complete, non-truncated repository results satisfy preview coverage",
     { fullName: "acme/truncated", complete: false, truncated: true },
   ], ["acme/complete", "acme/truncated", "acme/missing"]);
   assert.deepEqual(missing, ["acme/truncated", "acme/missing"]);
+});
+
+test("reuses only fresh public snapshots that match the linked repository", () => {
+  const snapshot = { repositoryName: "acme/workspace", isPublic: true, refreshedAt: "now" };
+  assert.equal(reusablePublicRepositorySnapshot(snapshot, "ACME/WORKSPACE", true), snapshot);
+  assert.equal(reusablePublicRepositorySnapshot({ ...snapshot, source: "github-app" }, "acme/workspace", true), null);
+  assert.equal(reusablePublicRepositorySnapshot({ ...snapshot, isPublic: false }, "acme/workspace", true), null);
+  assert.equal(reusablePublicRepositorySnapshot(snapshot, "acme/other", true), null);
+  assert.equal(reusablePublicRepositorySnapshot(snapshot, "acme/workspace", false), null);
 });
 
 test("snapshot preview stage timeout aborts the request and provides a retryable error", async () => {

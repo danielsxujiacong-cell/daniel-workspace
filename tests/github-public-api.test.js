@@ -70,6 +70,26 @@ test("sends public repository reads through the authenticated Worker, never the 
   assert.equal(result.errors.length, 0);
 });
 
+test("splits large public repository checks into bounded Worker batches and reports progress", async (t) => {
+  const requests = [];
+  const progress = [];
+  stubFetch(t, async (_url, options) => {
+    const repositories = JSON.parse(options.body).repositories;
+    requests.push(repositories.map(({ fullName }) => fullName));
+    return Response.json({ snapshots: repositories.map(({ fullName }) => ({ ...snapshot, repositoryName: fullName, repositoryUrl: `https://github.com/${fullName}` })), errors: [] });
+  });
+
+  const urls = Array.from({ length: 26 }, (_, index) => `https://github.com/acme/repository-${index + 1}`);
+  const result = await fetchPublicGitHubRepositories(urls, auth, { onProgress: (value) => progress.push(value) });
+
+  assert.deepEqual(requests.map((batch) => batch.length), [4, 4, 4, 4, 4, 4, 2]);
+  assert.ok(requests.every((batch) => batch.length <= 4));
+  assert.equal(new Set(requests.flat()).size, 26);
+  assert.equal(result.snapshots.length, 26);
+  assert.equal(result.errors.length, 0);
+  assert.deepEqual(progress.at(-1), { completed: 26, total: 26 });
+});
+
 test("surfaces a sanitized upstream HTTP status from the Worker", async (t) => {
   stubFetch(t, async () => Response.json({
     snapshots: [],

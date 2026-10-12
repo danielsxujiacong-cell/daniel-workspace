@@ -1,8 +1,8 @@
-import { requestGitHubWorker } from "./worker-api.js?v=3.8-j";
+import { requestGitHubWorker } from "./worker-api.js?v=3.8-k";
 
 export const GITHUB_CACHE_TTL_MS = 60 * 60 * 1000;
 export const GITHUB_ACTIVITY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
-const MAX_REPOSITORIES_PER_REQUEST = 30;
+const MAX_REPOSITORIES_PER_REQUEST = 4;
 
 export function isGitHubSnapshotFresh(snapshot, now = Date.now()) {
   const refreshedAt = new Date(snapshot?.refreshedAt || "").getTime();
@@ -45,7 +45,7 @@ function createRepositoryError(value) {
   throw error;
 }
 
-export async function fetchPublicGitHubRepositories(githubUrls, auth, { signal } = {}) {
+export async function fetchPublicGitHubRepositories(githubUrls, auth, { signal, onProgress } = {}) {
   const repositories = (Array.isArray(githubUrls) ? githubUrls : [])
     .map((url) => parsePublicGitHubRepository(url))
     .filter(Boolean);
@@ -54,13 +54,27 @@ export async function fetchPublicGitHubRepositories(githubUrls, auth, { signal }
   const errors = [];
   for (let index = 0; index < unique.length; index += MAX_REPOSITORIES_PER_REQUEST) {
     const chunk = unique.slice(index, index + MAX_REPOSITORIES_PER_REQUEST);
-    const result = await requestGitHubWorker("/api/github/public-snapshots", auth, {
-      method: "POST",
-      body: { repositories: chunk.map(({ fullName }) => ({ fullName })) },
-      signal,
-    });
-    if (Array.isArray(result.snapshots)) snapshots.push(...result.snapshots);
-    if (Array.isArray(result.errors)) errors.push(...result.errors);
+    if (signal?.aborted) {
+      errors.push(...chunk.map(({ fullName }) => ({ fullName, code: "github_request_aborted", message: "GitHub 公开状态核验阶段已超时。" })));
+      continue;
+    }
+    try {
+      const result = await requestGitHubWorker("/api/github/public-snapshots", auth, {
+        method: "POST",
+        body: { repositories: chunk.map(({ fullName }) => ({ fullName })) },
+        signal,
+      });
+      if (Array.isArray(result.snapshots)) snapshots.push(...result.snapshots);
+      if (Array.isArray(result.errors)) errors.push(...result.errors);
+    } catch (error) {
+      errors.push(...chunk.map(({ fullName }) => ({
+        fullName,
+        code: error?.code || "github_repository_verification_failed",
+        ...(Number.isInteger(error?.status) ? { httpStatus: error.status } : {}),
+        message: typeof error?.message === "string" ? error.message : "GitHub 公开状态核验失败。",
+      })));
+    }
+    try { onProgress?.({ completed: Math.min(index + chunk.length, unique.length), total: unique.length }); } catch { /* progress is best-effort */ }
   }
   return { snapshots, errors };
 }

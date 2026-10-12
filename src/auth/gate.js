@@ -110,7 +110,7 @@ async function enterWorkspace(user) {
     globalThis.DANIEL_WORKSPACE_AUTHENTICATED = true;
     globalThis.DANIEL_WORKSPACE_AUTH = { client: authClient, userId: user.id };
     try {
-      workspaceModule = await import("../app.js?v=3.8-j");
+      workspaceModule = await import("../app.js?v=3.8-k");
       workspaceVisible = true;
     } catch (error) {
       workspaceVisible = false;
@@ -307,10 +307,10 @@ async function startPublicDashboard() {
     globalThis.DANIEL_WORKSPACE_AUTH = null;
     globalThis.DANIEL_WORKSPACE_PUBLIC_SNAPSHOT = null;
     globalThis.DANIEL_WORKSPACE_PUBLIC_SNAPSHOT_ERROR = "正在读取已审核的公开快照…";
-    const snapshotPromise = import("../public-snapshot.js?v=3.8-j").then(({ fetchPublishedSnapshot }) => fetchPublishedSnapshot())
+    const snapshotPromise = import("../public-snapshot.js?v=3.8-k").then(({ fetchPublishedSnapshot }) => fetchPublishedSnapshot())
       .then((snapshot) => ({ snapshot, error: "" }))
       .catch((error) => ({ snapshot: null, error: typeof error?.message === "string" ? error.message : "公开快照暂不可用。" }));
-    await import("../app.js?v=3.8-j");
+    await import("../app.js?v=3.8-k");
     void snapshotPromise.then(({ snapshot, error }) => {
       globalThis.DANIEL_WORKSPACE_PUBLIC_SNAPSHOT = snapshot;
       globalThis.DANIEL_WORKSPACE_PUBLIC_SNAPSHOT_ERROR = error;

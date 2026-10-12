@@ -1,4 +1,4 @@
-import { requestGitHubWorker } from "./worker-api.js?v=3.8-j";
+import { requestGitHubWorker } from "./worker-api.js?v=3.8-k";
 
 export const GITHUB_ACTIVITY_CACHE_TTL_MS = 15 * 60 * 1000;
 // Keep each Worker invocation below Cloudflare's outbound subrequest limit
