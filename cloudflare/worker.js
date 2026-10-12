@@ -381,14 +381,27 @@ function publicRepositoryError(fullName, error) {
   const knownMessage = error?.publicMessage
     || (error?.message === "github_invalid_pagination_link" ? "GitHub 返回了格式无效或不安全的分页链接。"
       : error?.message === "github_invalid_activity_response" ? "GitHub 历史提交响应格式无效。"
-        : error?.message === "github_repository_pagination_limit_reached" ? "GitHub 授权仓库清单超过 100 页读取上限。"
-          : error?.message === "github_installation_pagination_limit_reached" ? "GitHub App 安装清单超过 100 页读取上限。"
-            : error?.name === "TimeoutError" || error?.name === "AbortError" ? "GitHub API 请求超时。请重试。"
-              : error?.name === "TypeError" ? "GitHub API 网络请求失败。请检查 Worker 到 GitHub 的连接后重试。"
-                : "GitHub 仓库读取失败，请稍后重试。");
+        : error?.message === "github_invalid_branch_response" ? "GitHub 分支列表响应格式无效。"
+          : error?.message === "github_activity_branch_limit_reached" ? `仓库分支超过 ${MAX_ACTIVITY_BRANCHES} 条读取上限。`
+            : error?.message === "github_activity_branch_pagination_limit_reached" ? `近 ${MAX_ACTIVITY_PAGES} 页后仍有 GitHub 分支清单结果。`
+              : error?.message === "github_activity_pagination_limit_reached" ? `分支提交历史超过 ${MAX_ACTIVITY_PAGES} 页读取上限。`
+                : error?.message === "github_repository_pagination_limit_reached" ? "GitHub 授权仓库清单超过 100 页读取上限。"
+                  : error?.message === "github_installation_pagination_limit_reached" ? "GitHub App 安装清单超过 100 页读取上限。"
+                    : error?.name === "TimeoutError" || error?.name === "AbortError" ? "GitHub API 请求超时。请重试。"
+                      : error?.name === "TypeError" ? "GitHub API 网络请求失败。请检查 Worker 到 GitHub 的连接后重试。"
+                        : "GitHub 仓库读取失败，请稍后重试。");
   return {
     fullName,
     code: error?.code || "github_unavailable",
+    reasonCategory: error?.reasonCategory || (error?.rateLimited
+      ? "rate_limited"
+      : /branch list/i.test(error?.upstreamOperation || "")
+        ? "branch_list_failed"
+        : /branch commit history/i.test(error?.upstreamOperation || "")
+          ? "branch_commit_history_failed"
+          : error?.code === "github_activity_repository_unavailable" || error?.code === "github_repo_not_in_app_scope"
+            ? "private_or_missing_outside_app_scope"
+            : "github_read_failed"),
     ...(httpStatus ? {
       httpStatus,
       operation: error?.upstreamOperation || "GitHub API",
@@ -438,6 +451,7 @@ async function publicGitHubRoute(request, env) {
 }
 
 const MAX_ACTIVITY_PAGES = 100;
+const MAX_ACTIVITY_BRANCHES = 200;
 const MAX_ACTIVITY_RANGE_DAYS = 366;
 
 function activityDateKey(value) {
@@ -461,20 +475,67 @@ function activityDateBounds(startDate, endDate) {
 
 async function activityGitHubJson(path, token, operation, { allowEmpty = false, allowAnonymousFallback = false, withPagination = false } = {}) {
   let response = await githubApi(path, token);
-  if (!response.ok && token && ([401, 404].includes(response.status) || (allowAnonymousFallback && response.status === 403))) response = await githubApi(path, null);
+  const anonymousFallbackAllowed = Boolean(token && allowAnonymousFallback && response.status === 403
+    && await githubRateLimitRetryDelay(response) === null);
+  if (!response.ok && token && ([401, 404].includes(response.status) || anonymousFallbackAllowed)) response = await githubApi(path, null);
   if (allowEmpty && response.status === 409) return withPagination ? { rows: [], nextPath: "" } : [];
   if (!response.ok) throw await githubUpstreamFailure(response, operation);
   const rows = await response.json();
   return withPagination ? { rows, nextPath: githubNextPagePath(response) } : rows;
 }
 
-async function readRepositoryActivity(fullName, authorized, startDate, endDate, requirePublic = false) {
+async function listActivityBranches(encoded, token, requirePublic) {
+  const branches = [];
+  let nextPath = `/repos/${encoded}/branches?per_page=100&page=1`;
+  let pagesRead = 0;
+  while (nextPath && pagesRead < MAX_ACTIVITY_PAGES) {
+    pagesRead += 1;
+    const page = await activityGitHubJson(
+      nextPath,
+      token,
+      "GitHub branch list read",
+      { allowEmpty: true, allowAnonymousFallback: requirePublic, withPagination: true },
+    );
+    if (!Array.isArray(page.rows)) throw new Error("github_invalid_branch_response");
+    for (const branch of page.rows) {
+      if (typeof branch?.name === "string" && branch.name) branches.push(branch.name);
+    }
+    nextPath = page.nextPath || (page.rows.length === 100
+      ? `/repos/${encoded}/branches?per_page=100&page=${pagesRead + 1}`
+      : "");
+    if (branches.length > MAX_ACTIVITY_BRANCHES) {
+      const error = new Error("github_activity_branch_limit_reached");
+      error.code = "github_activity_branch_limit_reached";
+      error.upstreamOperation = "GitHub branch list read";
+      error.publicMessage = `仓库分支超过 ${MAX_ACTIVITY_BRANCHES} 条读取上限；请缩短日期范围或减少分支后重试。`;
+      throw error;
+    }
+  }
+  if (nextPath) {
+    const error = new Error("github_activity_branch_pagination_limit_reached");
+    error.code = "github_activity_branch_pagination_limit_reached";
+    error.upstreamOperation = "GitHub branch list read";
+    error.publicMessage = `近 ${MAX_ACTIVITY_PAGES} 页后仍有 GitHub 分支清单结果。`;
+    throw error;
+  }
+  return [...new Set(branches)];
+}
+
+async function readRepositoryActivity(fullName, authorized, startDate, endDate, requirePublic = false, publicReadToken = null) {
   const encoded = fullName.split("/").map(encodeURIComponent).join("/");
   const authorizedEntry = authorized.get(fullName.toLowerCase());
-  const token = authorizedEntry?.token || null;
+  const token = authorizedEntry?.token || (requirePublic ? publicReadToken : null);
   let repo = authorizedEntry?.repo;
   if (!repo) {
-    repo = await activityGitHubJson(`/repos/${encoded}`, token, "GitHub activity repository read", { allowAnonymousFallback: requirePublic });
+    try {
+      repo = await activityGitHubJson(`/repos/${encoded}`, token, "GitHub activity repository read", { allowAnonymousFallback: requirePublic });
+    } catch (error) {
+      if (!authorizedEntry && error?.upstreamStatus === 404) {
+        error.code = "github_repo_not_in_app_scope";
+        error.publicMessage = "仓库不在 GitHub App 安装授权清单中，且匿名读取返回 404；它可能是私有仓库、已删除仓库或仓库名不匹配，GitHub 无法据此区分。";
+      }
+      throw error;
+    }
   }
   if (repo?.full_name?.toLowerCase() !== fullName.toLowerCase() || repo.private !== false && (requirePublic || !authorizedEntry)) {
     const error = new Error("当前仓库不在 GitHub App 授权范围内或不是公开仓库。");
@@ -486,59 +547,60 @@ async function readRepositoryActivity(fullName, authorized, startDate, endDate, 
   }
 
   const { since, until } = activityDateBounds(startDate, endDate);
-  const branch = typeof repo?.default_branch === "string" ? repo.default_branch : "";
+  const branches = await listActivityBranches(encoded, token, requirePublic);
   const seen = new Set();
   const counts = new Map();
-  let complete = false;
   let recordsValid = true;
   let pagesRead = 0;
-  let nextPath = `/repos/${encoded}/commits?per_page=100${branch ? `&sha=${encodeURIComponent(branch)}` : ""}&since=${encodeURIComponent(since)}&until=${encodeURIComponent(until)}&page=1`;
-  let pageRows = [];
-  for (; pagesRead < MAX_ACTIVITY_PAGES;) {
-    pagesRead += 1;
-    const page = await activityGitHubJson(
-      nextPath,
-      token,
-      "GitHub historical activity read",
-      { allowEmpty: true, allowAnonymousFallback: requirePublic, withPagination: true },
-    );
-    pageRows = page.rows;
-    if (!Array.isArray(pageRows)) throw new Error("github_invalid_activity_response");
-    for (const commit of pageRows) {
-      const sha = typeof commit?.sha === "string" && /^[a-f0-9]{40}$/i.test(commit.sha) ? commit.sha.toLowerCase() : "";
-      const committedAt = commit?.commit?.committer?.date || commit?.commit?.author?.date || "";
-      const timestamp = Date.parse(committedAt);
-      if (!sha || !Number.isFinite(timestamp)) {
-        recordsValid = false;
-        continue;
+  for (const branch of branches) {
+    let branchPagesRead = 0;
+    let nextPath = `/repos/${encoded}/commits?per_page=100&sha=${encodeURIComponent(branch)}&since=${encodeURIComponent(since)}&until=${encodeURIComponent(until)}&page=1`;
+    while (nextPath && branchPagesRead < MAX_ACTIVITY_PAGES) {
+      branchPagesRead += 1;
+      pagesRead += 1;
+      const page = await activityGitHubJson(
+        nextPath,
+        token,
+        `GitHub branch commit history read (${branch})`,
+        { allowEmpty: true, allowAnonymousFallback: requirePublic, withPagination: true },
+      );
+      if (!Array.isArray(page.rows)) throw new Error("github_invalid_activity_response");
+      for (const commit of page.rows) {
+        const sha = typeof commit?.sha === "string" && /^[a-f0-9]{40}$/i.test(commit.sha) ? commit.sha.toLowerCase() : "";
+        const committedAt = commit?.commit?.committer?.date || commit?.commit?.author?.date || "";
+        const timestamp = Date.parse(committedAt);
+        if (!sha || !Number.isFinite(timestamp)) {
+          recordsValid = false;
+          continue;
+        }
+        if (timestamp < Date.parse(since) || timestamp > Date.parse(until) || seen.has(sha)) continue;
+        seen.add(sha);
+        const date = activityDateKey(committedAt);
+        if (date) counts.set(date, (counts.get(date) || 0) + 1);
       }
-      if (timestamp < Date.parse(since) || timestamp > Date.parse(until) || seen.has(sha)) continue;
-      seen.add(sha);
-      const date = activityDateKey(committedAt);
-      if (date) counts.set(date, (counts.get(date) || 0) + 1);
+      nextPath = page.nextPath || (page.rows.length === 100
+        ? `/repos/${encoded}/commits?per_page=100&sha=${encodeURIComponent(branch)}&since=${encodeURIComponent(since)}&until=${encodeURIComponent(until)}&page=${branchPagesRead + 1}`
+        : "");
     }
-    const nextPage = page.nextPath || (pageRows.length === 100
-      ? `/repos/${encoded}/commits?per_page=100${branch ? `&sha=${encodeURIComponent(branch)}` : ""}&since=${encodeURIComponent(since)}&until=${encodeURIComponent(until)}&page=${pagesRead + 1}`
-      : "");
-    if (!nextPage) {
-      complete = true;
-      break;
+    if (nextPath) {
+      const error = new Error("github_activity_pagination_limit_reached");
+      error.code = "github_activity_pagination_limit_reached";
+      error.upstreamOperation = `GitHub branch commit history read (${branch})`;
+      error.publicMessage = `分支 ${branch} 近 ${MAX_ACTIVITY_PAGES} 页后仍有提交结果；该仓库历史不完整。`;
+      throw error;
     }
-    nextPath = nextPage;
   }
 
   const dailyCounts = [...counts.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([date, count]) => ({ date, count }));
-  const truncated = !complete || !recordsValid;
-  const incompleteReason = !recordsValid
-    ? "GitHub 返回了无效 Commit SHA 或提交时间；已标记为不完整。"
-    : !complete
-      ? `近 ${MAX_ACTIVITY_PAGES} 页后仍有 GitHub 分页结果；请缩短日期范围后重试。`
-      : "";
+  const complete = recordsValid;
+  const truncated = !complete;
+  const incompleteReason = !recordsValid ? "GitHub 返回了无效 Commit SHA 或提交时间；已标记为不完整。" : "";
   return {
     fullName: repo.full_name,
-    complete: complete && recordsValid,
+    complete,
     truncated,
     pagesRead,
+    branchesRead: branches.length,
     ...(incompleteReason ? { incompleteReason } : {}),
     commitsCount: [...counts.values()].reduce((sum, count) => sum + count, 0),
     dailyCounts,
@@ -578,6 +640,8 @@ async function githubActivityRoute(request, env) {
       if (error?.partialRepositories instanceof Map) authorized = error.partialRepositories;
     }
   }
+  let publicReadToken = [...authorized.values()].find((entry) => typeof entry?.token === "string")?.token || null;
+  if (!publicReadToken && githubConfigured(env) && !authorizationLookupError) publicReadToken = await createPublicReadToken(env);
 
   const repositories = [];
   const errors = [];
@@ -586,19 +650,29 @@ async function githubActivityRoute(request, env) {
     while (nextIndex < requested.length) {
       const fullName = requested[nextIndex++];
       try {
-        repositories.push(await readRepositoryActivity(fullName, authorized, body.startDate, body.endDate, !authorized.has(fullName.toLowerCase())));
+        repositories.push(await readRepositoryActivity(fullName, authorized, body.startDate, body.endDate, !authorized.has(fullName.toLowerCase()), publicReadToken));
       } catch (error) {
         if (authorizationLookupError && !authorized.has(fullName.toLowerCase())) {
           const inventoryError = Number.isInteger(authorizationLookupError?.upstreamStatus)
             ? `${authorizationLookupError.upstreamOperation} HTTP ${authorizationLookupError.upstreamStatus}: ${sanitizeGitHubMessage(authorizationLookupError.upstreamMessage)}`
             : sanitizeGitHubMessage(authorizationLookupError?.publicMessage || "GitHub App 仓库授权清单读取失败。");
           error.publicMessage = `${error?.upstreamOperation || "GitHub activity repository read"} 失败；GitHub App 授权清单也读取失败：${inventoryError}`;
+          error.reasonCategory = authorizationLookupError?.rateLimited
+            ? "rate_limited"
+            : authorizationLookupError?.code === "github_not_connected"
+              ? "app_not_connected"
+              : "app_authorization_lookup_failed";
           if (authorizationLookupError?.rateLimited) {
             error.code = "github_rate_limited";
             error.rateLimited = true;
             error.retryAfterSeconds = authorizationLookupError.retryAfterSeconds;
             error.rateLimitResetAt = authorizationLookupError.rateLimitResetAt;
           }
+        } else if (authorized.has(fullName.toLowerCase()) && error?.upstreamStatus && !error.reasonCategory
+          && !/branch list|branch commit history/i.test(error?.upstreamOperation || "")) {
+          error.reasonCategory = error?.rateLimited
+            ? "rate_limited"
+            : "github_app_authorized_repo_read_failed";
         }
         errors.push(publicRepositoryError(fullName, error));
       }

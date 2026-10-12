@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { loadGitHubActivityCache, saveGitHubActivityCache } from "../src/store.js";
 
-const CACHE_KEY = "daniel-workspace-github-activity-v1";
+const CACHE_KEY = "daniel-workspace-github-activity-v2";
 const USER_ID = "user-1";
 const RANGE_KEY = "2026-10-01|2026-10-30|acme/one,acme/two";
 const complete = (fullName) => ({ fullName, complete: true, truncated: false, pagesRead: 1, commitsCount: 0, dailyCounts: [] });

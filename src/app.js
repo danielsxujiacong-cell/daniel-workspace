@@ -31,7 +31,7 @@ const {
   saveData,
   saveLocalScanBaseline,
   saveLocalScanCache,
-} = publicSnapshotMode ? {} : await import("./store.js?v=3.8-d");
+} = publicSnapshotMode ? {} : await import("./store.js?v=3.8-e");
 const { buildAssistantContext } = publicSnapshotMode ? {} : await import("./ai/context.js");
 const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = publicSnapshotMode ? {} : await import("./ai/service.js?v=3.4.2");
 const { buildProjectNextStepContext, buildProjectNextStepPrompt, parseProjectNextStepResponse, verifiedProjectGitHubCommit } = publicSnapshotMode ? {} : await import("./ai/project-next-step.js?v=3.3.2");
@@ -46,7 +46,7 @@ const { fetchPublicGitHubRepositories, fetchPublicGitHubRepository, GITHUB_CACHE
 const { fetchGitHubActivity } = publicSnapshotMode ? {} : await import("./github/activity.js?v=3.8-d");
 const { deployedWebsiteUrl, humanizeProjectCommit, projectDescriptionAfterEdit, projectDescriptionForEdit, projectIntroduction, projectShowcase } = await import("./project-story.js?v=3.7-d");
 const { buildCloudDashboardModel, buildLocalDashboardModel, buildRecentProjectUpdates, chooseRecentCommit, compareLocalProjects, homeProjectField, projectTaskProgress, taskPriorityLabel } = await import("./dashboard.js?v=3.8");
-const { buildHomeActivity, projectStageBreakdown, projectStatusBreakdown, resolveActivityRange, shiftDateKey } = await import("./home-activity.js?v=3.8-d");
+const { buildHomeActivity, projectStageBreakdown, projectStatusBreakdown, resolveActivityRange, shiftDateKey } = await import("./home-activity.js?v=3.8-e");
 const { renderDashboardLayout } = await import("./dashboard-layout.js?v=3.8-a");
 const {
   countPinnedProjects,
@@ -460,7 +460,11 @@ async function loadHomeActivity({ force = false } = {}) {
     repositories: [],
     errors: repositories.map((fullName) => ({
       fullName,
-      code: "github_request_failed",
+      code: githubResult.reason?.code || "github_request_failed",
+      reasonCategory: githubResult.reason?.code === "github_session_required"
+        || githubResult.reason?.message?.includes("Supabase 登录已失效")
+        ? "workspace_session_required"
+        : "github_worker_request_failed",
       message: githubResult.reason?.message || "GitHub Worker 请求失败；请重试。",
     })),
   };
@@ -1371,23 +1375,9 @@ function activityDayLabel(day) {
   return parts.join(" · ");
 }
 
-function activityWeeks(days) {
-  const weeks = [];
-  let week = Array(7).fill(null);
-  for (const day of days) {
-    const weekday = (new Date(`${day.date}T00:00:00.000Z`).getUTCDay() + 6) % 7;
-    if (weekday === 0 && week.some(Boolean)) {
-      weeks.push(week);
-      week = Array(7).fill(null);
-    }
-    week[weekday] = day;
-    if (weekday === 6) {
-      weeks.push(week);
-      week = Array(7).fill(null);
-    }
-  }
-  if (week.some(Boolean)) weeks.push(week);
-  return weeks;
+function activityWeekdayLabel(dateKey) {
+  const day = new Date(`${dateKey}T00:00:00.000Z`).getUTCDay();
+  return ["日", "一", "二", "三", "四", "五", "六"][day];
 }
 
 function renderActivityRangeControl(activity, dataAvailable) {
@@ -1410,12 +1400,13 @@ function renderActivityStatus(activity, dataAvailable) {
 
   const coverage = activity.model.coverage;
   const githubText = coverage.githubRequested
-    ? `GitHub 完整读取 ${coverage.githubCompleteCount}/${coverage.githubRequested} 个仓库`
+    ? `GitHub 已关联仓库完整读取 ${coverage.githubCompleteCount}/${coverage.githubRequested}`
     : "未关联 GitHub 仓库";
   const workLogText = activity.workLogsStatus === "ready"
     ? `Workspace 工作记录 ${activity.model.totals.workLogs} 条`
     : "Workspace 工作记录读取失败，未按 0 计入";
   const warnings = [];
+  const notices = [];
   let affectedDetails = [];
   if (!coverage.githubRequested) {
     warnings.push("未关联 GitHub 仓库，无法统计提交；此来源未按零计入。");
@@ -1427,11 +1418,37 @@ function renderActivityStatus(activity, dataAvailable) {
     const affectedCount = coverage.githubRequested - coverage.githubCompleteCount;
     warnings.push(`GitHub 历史不完整：${affectedCount} 个仓库未完整读取；缺失日期不计为零。`);
   }
+  const unlinkedProjects = coverage.githubUnlinkedProjects || [];
+  const invalidProjects = coverage.githubInvalidProjects || [];
+  if (unlinkedProjects.length) notices.push(`${unlinkedProjects.length} 个项目未关联 GitHub 仓库，已排除在覆盖统计之外。`);
+  if (invalidProjects.length) notices.push(`${invalidProjects.length} 个项目的 GitHub 地址无效，未计入覆盖统计。`);
   if (!coverage.workLogsComplete) warnings.push("工作记录读取未完成；缺失日期不计为零。");
   const affectedList = affectedDetails.length
-    ? `<details class="dashboard-activity-gaps"><summary>查看 ${affectedDetails.length} 个受影响仓库及原因</summary><ul>${affectedDetails.map(({ fullName, reason }) => `<li><strong>${esc(fullName)}</strong><span>${esc(reason)}</span></li>`).join("")}</ul></details>`
+    ? `<details class="dashboard-activity-gaps"><summary>查看 ${affectedDetails.length} 个未完整仓库及原因</summary><ul>${affectedDetails.map(({ fullName, reason, reasonCategory, operation, httpStatus }) => `<li><strong>${esc(fullName)}</strong>${reasonCategory ? `<small>${esc(activityReasonLabel(reasonCategory))}</small>` : ""}<span>${esc([operation, httpStatus ? `HTTP ${httpStatus}` : "", reason].filter(Boolean).join(" · "))}</span></li>`).join("")}</ul></details>`
     : "";
-  return `<div class="dashboard-activity-status ${warnings.length ? "warning" : ""}" role="status"><span>${esc(`${githubText} · ${workLogText}`)}</span>${warnings.length ? `<span>${esc(warnings.join(" "))}</span>` : ""}${affectedList}</div>`;
+  const projectLinkIssues = [...unlinkedProjects, ...invalidProjects];
+  const projectLinkList = projectLinkIssues.length
+    ? `<details class="dashboard-activity-gaps"><summary>查看 ${projectLinkIssues.length} 个未纳入仓库统计的项目</summary><ul>${projectLinkIssues.map(({ projectName, reason }) => `<li><strong>${esc(projectName)}</strong><span>${esc(reason)}</span></li>`).join("")}</ul></details>`
+    : "";
+  return `<div class="dashboard-activity-status ${warnings.length ? "warning" : ""}" role="status"><span>${esc(`${githubText} · ${workLogText}`)}</span>${warnings.length ? `<span>${esc(warnings.join(" "))}</span>` : ""}${notices.length ? `<span class="dashboard-activity-note">${esc(notices.join(" "))}</span>` : ""}${affectedList}${projectLinkList}</div>`;
+}
+
+function activityReasonLabel(category) {
+  return ({
+    rate_limited: "GitHub API 限流",
+    app_not_connected: "GitHub App 未连接或没有可用安装",
+    app_authorization_lookup_failed: "GitHub App 授权清单读取失败",
+    private_or_missing_outside_app_scope: "App 未授权；私有、删除或名称不匹配的仓库无法区分",
+    github_app_authorized_repo_read_failed: "已授权仓库读取失败或缺少权限",
+    branch_list_failed: "分支清单读取失败",
+    branch_commit_history_failed: "分支 Commit 历史读取失败",
+    pagination_limit_reached: "GitHub 分页上限",
+    invalid_commit_data: "Commit 响应字段无效",
+    workspace_session_required: "Workspace 登录会话失效",
+    github_worker_request_failed: "GitHub Worker 请求失败",
+    github_worker_missing_result: "Worker 未返回仓库结果",
+    github_read_failed: "GitHub 读取失败",
+  })[category] || "GitHub 读取失败";
 }
 
 function renderActivityMetrics(activity) {
@@ -1448,21 +1465,22 @@ function renderActivityHeatmap(activity, dataAvailable) {
   const model = activity.model;
   if (!dataAvailable || !model) return `<section class="card dashboard-chart-card dashboard-heatmap-card grid-span-12"><header class="dashboard-chart-heading"><div><h2>开发活动</h2><p>GitHub 提交与 Workspace 工作记录</p></div>${renderActivityRangeControl(activity, dataAvailable)}</header>${renderActivityStatus(activity, dataAvailable)}<div class="dashboard-chart-empty">${activity.status === "loading" ? "活动数据读取中…" : publicSnapshotMode ? "等待已审核快照" : "等待云端数据"}</div></section>`;
   const maximum = Math.max(1, ...model.days.map((day) => day.githubCommits + day.workLogs));
-  const weeks = activityWeeks(model.days);
-  const cells = weeks.flatMap((week, weekIndex) => week.map((day, weekday) => {
-    if (!day) return `<span class="dashboard-heatmap-spacer" aria-hidden="true" data-week="${weekIndex}" data-weekday="${weekday}"></span>`;
+  const cells = model.days.map((day, index) => {
     const count = day.githubCommits + day.workLogs;
     const level = count ? Math.max(1, Math.min(4, Math.ceil(count / maximum * 4))) : 0;
     const selected = ui.selectedActivityDate === day.date ? "selected" : "";
     const state = count === 0 && day.partial ? "unknown" : day.partial ? `partial level-${level}` : `level-${level}`;
     const label = activityDayLabel(day);
-    return `<button type="button" class="dashboard-heatmap-cell ${state} ${selected}" data-action="select-home-activity-date" data-date="${day.date}" data-count="${count}" aria-label="${esc(label)}" title="${esc(label)}"></button>`;
-  })).join("");
+    const month = Number(day.date.slice(5, 7));
+    const showMonth = index === 0 || model.days[index - 1].date.slice(0, 7) !== day.date.slice(0, 7);
+    const monthMarker = showMonth ? ` data-month-label="${month}月"` : "";
+    return `<button type="button" class="dashboard-heatmap-cell ${state} ${selected}" data-action="select-home-activity-date" data-date="${day.date}" data-count="${count}" data-weekday="${activityWeekdayLabel(day.date)}"${monthMarker} aria-label="${esc(label)}" title="${esc(label)}" aria-pressed="${selected ? "true" : "false"}"><strong>${day.date.slice(-2)}</strong><small>${activityWeekdayLabel(day.date)}</small></button>`;
+  }).join("");
   const selectedDay = model.days.find((day) => day.date === ui.selectedActivityDate);
   const dayDetails = selectedDay
     ? `<div class="dashboard-activity-day-detail"><div><strong>${esc(selectedDay.date)}</strong><span>已读取 GitHub 提交 ${selectedDay.githubCommits} 条</span><span>已读取 Workspace 工作记录 ${selectedDay.workLogs} 条</span></div>${selectedDay.githubProjects.length ? `<p>GitHub 关联项目：${esc(selectedDay.githubProjects.join("、"))}</p>` : ""}${selectedDay.workLogProjects.length ? `<p>工作记录项目：${esc(selectedDay.workLogProjects.map((item) => `${item.name}（${item.count} 条）`).join("、"))}</p>` : ""}${selectedDay.githubCommits + selectedDay.workLogs === 0 ? `<p>${selectedDay.partial ? "来源读取不完整，无法判断这一天是否没有活动。" : "所选来源在这一天没有活动记录。"}</p>` : ""}</div>`
     : `<p class="dashboard-activity-day-hint">悬停或点击日期查看来源数量与关联项目。</p>`;
-  return `<section class="card dashboard-chart-card dashboard-heatmap-card grid-span-12"><header class="dashboard-chart-heading"><div><h2>开发活动</h2><p>${esc(model.startDate)} 至 ${esc(model.endDate)} · GitHub 提交与 Workspace 工作记录</p></div>${renderActivityRangeControl(activity, dataAvailable)}</header>${renderActivityStatus(activity, dataAvailable)}${renderActivityMetrics(activity)}<div class="dashboard-heatmap-scroll"><div class="dashboard-heatmap-layout"><div class="dashboard-heatmap-weekdays" aria-hidden="true"><span>一</span><span></span><span>三</span><span></span><span>五</span><span></span><span>日</span></div><div class="dashboard-heatmap-grid" style="--heatmap-weeks:${weeks.length}">${cells}</div></div></div><div class="dashboard-heatmap-legend"><span>少</span><i class="level-0"></i><i class="level-1"></i><i class="level-2"></i><i class="level-3"></i><i class="level-4"></i><span>多</span><span class="unknown-key">斜纹表示历史不完整</span></div>${dayDetails}<p class="dashboard-chart-footnote">统计记录数量，不代表独立完成成果；工作记录与 Commit 分开标注，不强行合并。</p></section>`;
+  return `<section class="card dashboard-chart-card dashboard-heatmap-card grid-span-12"><header class="dashboard-chart-heading"><div><h2>开发活动</h2><p>${esc(model.startDate)} 至 ${esc(model.endDate)} · GitHub 提交与 Workspace 工作记录</p></div>${renderActivityRangeControl(activity, dataAvailable)}</header>${renderActivityStatus(activity, dataAvailable)}${renderActivityMetrics(activity)}<div class="dashboard-heatmap-scroll"><div class="dashboard-heatmap-grid" role="group" aria-label="按日期排列的开发活动；每个日期方块标注星期，月份变化处显示月份">${cells}</div></div><div class="dashboard-heatmap-legend"><span>少</span><i class="level-0"></i><i class="level-1"></i><i class="level-2"></i><i class="level-3"></i><i class="level-4"></i><span>多</span><span class="unknown-key">斜纹表示历史不完整</span></div>${dayDetails}<p class="dashboard-chart-footnote">统计记录数量，不代表独立完成成果；工作记录与 Commit 分开标注，不强行合并。</p></section>`;
 }
 
 function renderActivityTrend(activity, dataAvailable) {

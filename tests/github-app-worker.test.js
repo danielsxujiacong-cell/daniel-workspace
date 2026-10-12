@@ -149,6 +149,220 @@ test("GitHub App installation and authorized repository inventories follow Link 
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test("GitHub activity reads every paginated branch and deduplicates full SHAs per repository", async () => {
+  const { env } = await testEnv();
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  const sharedSha = "a".repeat(40);
+  const paginatedSha = "c".repeat(40);
+  const featureSha = "b".repeat(40);
+  const commit = (sha, date) => ({ sha, commit: { committer: { date } } });
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    calls.push({ url, method: init.method || "GET" });
+    if (url.pathname === "/auth/v1/user") return Response.json({ id: uid });
+    if (url.pathname === "/app/installations") return Response.json([{ id: 987654, app_id: 12345 }]);
+    if (url.pathname.endsWith("/access_tokens")) return Response.json({ token: installationToken });
+    if (url.pathname === "/installation/repositories") return Response.json({ repositories: [{
+      full_name: "acme/private-one", name: "private-one", owner: { login: "acme" }, private: true,
+      default_branch: "main", html_url: "https://github.com/acme/private-one",
+    }] });
+    if (url.pathname === "/repos/acme/private-one/branches" && url.searchParams.get("page") === "1") {
+      return Response.json([{ name: "main" }], { headers: { Link: '<https://api.github.com/repos/acme/private-one/branches?per_page=100&page=2>; rel="next"' } });
+    }
+    if (url.pathname === "/repos/acme/private-one/branches" && url.searchParams.get("page") === "2") {
+      return Response.json([{ name: "feature/activity" }]);
+    }
+    if (url.pathname === "/repos/acme/private-one/commits" && url.searchParams.get("sha") === "main" && url.searchParams.get("page") === "1") {
+      const next = new URL(url);
+      next.searchParams.set("page", "2");
+      return Response.json([commit(sharedSha, "2026-10-11T08:00:00Z")], { headers: { Link: `<${next.href}>; rel="next"` } });
+    }
+    if (url.pathname === "/repos/acme/private-one/commits" && url.searchParams.get("sha") === "main" && url.searchParams.get("page") === "2") {
+      return Response.json([commit(paginatedSha, "2026-10-10T08:00:00Z")]);
+    }
+    if (url.pathname === "/repos/acme/private-one/commits" && url.searchParams.get("sha") === "feature/activity") {
+      return Response.json([
+        commit(sharedSha, "2026-10-11T08:00:00Z"),
+        commit(featureSha, "2026-10-12T08:00:00Z"),
+      ]);
+    }
+    return new Response(`unexpected ${init.method || "GET"} ${url}`, { status: 500 });
+  };
+  try {
+    const response = await worker.fetch(req("/api/github/activity", {
+      method: "POST",
+      body: { repositories: [{ fullName: "acme/private-one" }], startDate: "2026-10-10", endDate: "2026-10-12" },
+    }), env);
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.repositories[0].complete, true);
+    assert.equal(payload.repositories[0].branchesRead, 2);
+    assert.equal(payload.repositories[0].commitsCount, 3);
+    assert.deepEqual(payload.repositories[0].dailyCounts, [
+      { date: "2026-10-10", count: 1 },
+      { date: "2026-10-11", count: 1 },
+      { date: "2026-10-12", count: 1 },
+    ]);
+    assert.deepEqual(calls.filter(({ url }) => url.pathname.endsWith("/branches")).map(({ url }) => url.searchParams.get("page")), ["1", "2"]);
+    assert.deepEqual(calls.filter(({ url }) => url.pathname.endsWith("/commits")).map(({ url }) => [url.searchParams.get("sha"), url.searchParams.get("page")]), [["main", "1"], ["main", "2"], ["feature/activity", "1"]]);
+    assert.equal(Object.hasOwn(payload.repositories[0], "branchNames"), false);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("GitHub activity reports branch-history permission failures separately from authorization gaps", async () => {
+  const { env } = await testEnv();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/auth/v1/user") return Response.json({ id: uid });
+    if (url.pathname === "/app/installations") return Response.json([{ id: 987654, app_id: 12345 }]);
+    if (url.pathname.endsWith("/access_tokens")) return Response.json({ token: installationToken });
+    if (url.pathname === "/installation/repositories") return Response.json({ repositories: [{
+      full_name: "acme/private-one", name: "private-one", owner: { login: "acme" }, private: true,
+      default_branch: "main", html_url: "https://github.com/acme/private-one",
+    }] });
+    if (url.pathname === "/repos/acme/private-one/branches") return Response.json([{ name: "main" }]);
+    if (url.pathname === "/repos/acme/private-one/commits") return Response.json({ message: "Resource not accessible by integration" }, { status: 403 });
+    return new Response(`unexpected ${url}`, { status: 500 });
+  };
+  try {
+    const response = await worker.fetch(req("/api/github/activity", {
+      method: "POST",
+      body: { repositories: [{ fullName: "acme/private-one" }], startDate: "2026-10-10", endDate: "2026-10-12" },
+    }), env);
+    const payload = await response.json();
+    assert.equal(payload.errors[0].reasonCategory, "branch_commit_history_failed");
+    assert.equal(payload.errors[0].operation, "GitHub branch commit history read (main)");
+    assert.equal(payload.errors[0].httpStatus, 403);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("GitHub activity identifies upstream rate limits while reading branch lists", async () => {
+  const { env } = await testEnv();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/auth/v1/user") return Response.json({ id: uid });
+    if (url.pathname === "/app/installations") return Response.json([{ id: 987654, app_id: 12345 }]);
+    if (url.pathname.endsWith("/access_tokens")) return Response.json({ token: installationToken });
+    if (url.pathname === "/installation/repositories") return Response.json({ repositories: [{
+      full_name: "acme/private-one", name: "private-one", owner: { login: "acme" }, private: true,
+      default_branch: "main", html_url: "https://github.com/acme/private-one",
+    }] });
+    if (url.pathname === "/repos/acme/private-one/branches") return Response.json({ message: "API rate limit exceeded" }, {
+      status: 403,
+      headers: { "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": String(Math.ceil(Date.now() / 1000) + 600) },
+    });
+    return new Response(`unexpected ${url}`, { status: 500 });
+  };
+  try {
+    const response = await worker.fetch(req("/api/github/activity", {
+      method: "POST",
+      body: { repositories: [{ fullName: "acme/private-one" }], startDate: "2026-10-10", endDate: "2026-10-12" },
+    }), env);
+    const payload = await response.json();
+    assert.equal(payload.errors[0].reasonCategory, "rate_limited");
+    assert.equal(payload.errors[0].httpStatus, 403);
+    assert.equal(payload.errors[0].operation, "GitHub branch list read");
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("GitHub activity marks inaccessible repositories outside the App installation as ambiguous private-or-missing", async () => {
+  const { env } = await testEnv();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/auth/v1/user") return Response.json({ id: uid });
+    if (url.pathname === "/app/installations") return Response.json([{ id: 987654, app_id: 12345 }]);
+    if (url.pathname.endsWith("/access_tokens")) return Response.json({ token: installationToken });
+    if (url.pathname === "/installation/repositories") return Response.json({ repositories: [] });
+    if (url.pathname === "/repos/acme/private-missing") return Response.json({ message: "Not Found" }, { status: 404 });
+    return new Response(`unexpected ${url}`, { status: 500 });
+  };
+  try {
+    const response = await worker.fetch(req("/api/github/activity", {
+      method: "POST",
+      body: { repositories: [{ fullName: "acme/private-missing" }], startDate: "2026-10-10", endDate: "2026-10-12" },
+    }), env);
+    const payload = await response.json();
+    assert.equal(payload.errors[0].reasonCategory, "private_or_missing_outside_app_scope");
+    assert.match(payload.errors[0].message, /私有仓库、已删除仓库或仓库名不匹配/);
+    assert.equal(payload.errors[0].httpStatus, 404);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("GitHub activity uses an existing installation token for public repositories outside its repository list", async () => {
+  const { env } = await testEnv();
+  const originalFetch = globalThis.fetch;
+  const publicReadAuthorizations = [];
+  const sha = "d".repeat(40);
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    const authorization = new Headers(init.headers).get("Authorization");
+    if (url.pathname === "/auth/v1/user") return Response.json({ id: uid });
+    if (url.pathname === "/app/installations") return Response.json([{ id: 987654, app_id: 12345 }]);
+    if (url.pathname.endsWith("/access_tokens")) return Response.json({ token: installationToken });
+    if (url.pathname === "/installation/repositories") return Response.json({ repositories: [{
+      full_name: "acme/private-one", name: "private-one", owner: { login: "acme" }, private: true,
+      default_branch: "main", html_url: "https://github.com/acme/private-one",
+    }] });
+    if (["/repos/acme/public-one", "/repos/acme/public-one/branches", "/repos/acme/public-one/commits"].includes(url.pathname)) {
+      publicReadAuthorizations.push(authorization);
+    }
+    if (url.pathname === "/repos/acme/public-one") return Response.json({ full_name: "acme/public-one", private: false });
+    if (url.pathname === "/repos/acme/public-one/branches") return Response.json([{ name: "main" }]);
+    if (url.pathname === "/repos/acme/public-one/commits") return Response.json([{ sha, commit: { committer: { date: "2026-10-12T08:00:00Z" } } }]);
+    return new Response(`unexpected ${url}`, { status: 500 });
+  };
+  try {
+    const response = await worker.fetch(req("/api/github/activity", {
+      method: "POST",
+      body: { repositories: [{ fullName: "acme/public-one" }], startDate: "2026-10-12", endDate: "2026-10-12" },
+    }), env);
+    const payload = await response.json();
+    assert.equal(payload.repositories[0].complete, true);
+    assert.equal(payload.repositories[0].commitsCount, 1);
+    assert.deepEqual(publicReadAuthorizations, [
+      `Bearer ${installationToken}`,
+      `Bearer ${installationToken}`,
+      `Bearer ${installationToken}`,
+    ]);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("GitHub activity preserves an authenticated rate-limit error instead of retrying anonymously", async () => {
+  const { env } = await testEnv();
+  const originalFetch = globalThis.fetch;
+  const publicReadAuthorizations = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    const authorization = new Headers(init.headers).get("Authorization");
+    if (url.pathname === "/auth/v1/user") return Response.json({ id: uid });
+    if (url.pathname === "/app/installations") return Response.json([{ id: 987654, app_id: 12345 }]);
+    if (url.pathname.endsWith("/access_tokens")) return Response.json({ token: installationToken });
+    if (url.pathname === "/installation/repositories") return Response.json({ repositories: [] });
+    if (url.pathname === "/repos/acme/public-one") {
+      publicReadAuthorizations.push(authorization);
+      return Response.json({ message: "API rate limit exceeded" }, {
+        status: 403,
+        headers: { "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": String(Math.ceil(Date.now() / 1000) + 600) },
+      });
+    }
+    return new Response(`unexpected ${url}`, { status: 500 });
+  };
+  try {
+    const response = await worker.fetch(req("/api/github/activity", {
+      method: "POST",
+      body: { repositories: [{ fullName: "acme/public-one" }], startDate: "2026-10-12", endDate: "2026-10-12" },
+    }), env);
+    const payload = await response.json();
+    assert.equal(payload.errors[0].reasonCategory, "rate_limited");
+    assert.ok(publicReadAuthorizations.length >= 1);
+    assert.ok(publicReadAuthorizations.every((authorization) => authorization === `Bearer ${installationToken}`));
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("GitHub upstream HTTP failures are reported with a redacted status and message", async () => {
   const { env } = await testEnv();
   const originalFetch = globalThis.fetch;

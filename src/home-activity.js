@@ -133,6 +133,17 @@ export function buildHomeActivity({
     return fullName ? [[fullName, error]] : [];
   }));
 
+  const projectList = Array.isArray(projects) ? projects.filter((project) => project?.id && project?.name) : [];
+  const linkedProjectIds = new Set((Array.isArray(projectRepositories) ? projectRepositories : [])
+    .filter((entry) => entry?.projectId)
+    .map((entry) => String(entry.projectId)));
+  const githubUnlinkedProjects = projectList
+    .filter((project) => !String(project.github || "").trim())
+    .map((project) => ({ projectId: String(project.id), projectName: String(project.name), reason: "未填写 GitHub 仓库地址；不纳入仓库覆盖统计。" }));
+  const githubInvalidProjects = projectList
+    .filter((project) => String(project.github || "").trim() && !linkedProjectIds.has(String(project.id)))
+    .map((project) => ({ projectId: String(project.id), projectName: String(project.name), reason: "GitHub 地址无法识别为 github.com 仓库；不纳入仓库覆盖统计。" }));
+
   const githubKnown = githubStatus === "ready" && repoProjects.size > 0;
   const githubComplete = githubKnown
     && resultsByRepo.size === repoProjects.size
@@ -154,6 +165,22 @@ export function buildHomeActivity({
         : typeof result?.incompleteReason === "string" && result.incompleteReason.trim()
           ? result.incompleteReason.trim()
           : "GitHub Worker 未返回该仓库的完整结果。",
+      reasonCategory: typeof error?.reasonCategory === "string"
+        ? error.reasonCategory
+        : error?.rateLimited === true || error?.code === "github_rate_limited"
+          ? "rate_limited"
+          : error?.code === "github_repo_not_in_app_scope" || error?.code === "github_activity_repository_unavailable"
+            ? "private_or_missing_outside_app_scope"
+            : result?.truncated === true
+              ? "pagination_limit_reached"
+        : result?.incompleteReason
+          ? "invalid_commit_data"
+          : error
+            ? "github_read_failed"
+            : "github_worker_missing_result",
+      code: typeof error?.code === "string" ? error.code : "",
+      operation: typeof error?.operation === "string" ? error.operation : "",
+      httpStatus: Number.isInteger(error?.httpStatus) ? error.httpStatus : null,
     };
   });
 
@@ -212,6 +239,8 @@ export function buildHomeActivity({
         const result = resultsByRepo.get(name);
         return result?.complete === true && result?.truncated !== true && !errorsByRepo.has(name);
       }).length,
+      githubUnlinkedProjects,
+      githubInvalidProjects,
       githubIncompleteNames,
       githubIncompleteDetails,
       githubErrors: [...errorsByRepo.values()],

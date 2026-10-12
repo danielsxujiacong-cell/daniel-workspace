@@ -4,7 +4,7 @@ Daniel Workspace V3.8-C 使用统一的完整工作台界面和两种数据模�
 
 ## Status
 
-- **Stage:** V3.8-C unifies the shared Dashboard and detail pages across public snapshot and authenticated live modes. The public snapshot remains unpublished until the owner reviews and explicitly publishes it. Verification and handoff are recorded in [HANDOFF](docs/HANDOFF.md).
+- **Stage:** V3.8-B.1 improves authenticated GitHub activity coverage and the responsive Dashboard heatmap on the V3.8-C shared workspace. The public snapshot remains unpublished until the owner reviews and explicitly publishes it. Verification and handoff are recorded in [HANDOFF](docs/HANDOFF.md).
 - **Last updated:** 2026-10-12
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -58,8 +58,8 @@ python local_companion.py
 ## V3.8 Project Control Dashboard
 
 - Home 按顺序展示 Supabase 项目/任务 KPI、近 30 天默认的 GitHub 风格活动热力图与每日趋势、当前项目状态占比、已保存阶段分布、最多五个置顶项目，以及默认折叠的 AI 总结。
-- GitHub 活动通过已认证的 Cloudflare Worker 按 GitHub `Link` 分页读取；提交限定到仓库默认分支、按仓库和完整 SHA 去重，只返回每日计数。每仓库最多读取 100 页；达到上限、限流或读取失败时显示具体仓库和原因，缺失数据不按零计算。工作记录图表读取全部云端项目对应日期范围内的记录 ID、项目 ID 和日期，不读取正文或证据链接；两类来源分别统计和显示。
-- 日期范围支持近 7/30/90 天和不超过 366 天的自定义范围。仓库读取失败或达到分页上限时标记历史不完整，缺口日期不解释为零；没有保存阶段时显示「未分类」，重点项目只显示已保存状态、阶段、下一步和真实任务数，不显示百分比。
+- GitHub 活动通过已认证的 Cloudflare Worker 分页读取 App 安装仓库清单、各仓库所有分支和分支 Commit 历史；按仓库和完整 SHA 去重，只返回每日计数。每个分支最多读取 100 页、每仓库最多读取 200 个分支；达到上限、限流、授权清单失败、分支读取失败或仓库 404 时显示仓库、操作和原因。App 范围外的 404 可能是未授权私有仓库、已删除仓库或名称不匹配，GitHub 不会披露更细原因。缺失数据不按零计算。工作记录图表读取全部云端项目对应日期范围内的记录 ID、项目 ID 和日期，不读取正文或证据链接；热力图和每日趋势复用同一份每日统计，来源分别标注。
+- 日期范围支持近 7/30/90 天和不超过 366 天的自定义范围。横向日历热力图按日期顺序填满可用宽度，标出月份和星期，支持悬停/点击查看数量；手机端自动换行。仓库读取失败或达到分页上限时标记历史不完整，缺口日期不解释为零；没有保存阶段时显示「未分类」，重点项目只显示已保存状态、阶段、下一步和真实任务数，不显示百分比。
 - 不增加 Supabase 迁移或修改业务行；GitHub 活动只缓存已完整读取所有关联仓库的结果，缓存按账号和筛选范围保存在本机最多 15 分钟，其他设备从相同云端项目和 Worker 独立读取。
 
 ## V3.8-A 公开只读 Dashboard

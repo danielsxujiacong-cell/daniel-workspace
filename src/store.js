@@ -5,7 +5,7 @@ const LOCAL_SCAN_BASELINE_KEY = "daniel-workspace-local-scan-baseline-v1";
 const LOCAL_SCAN_CACHE_KEY = "daniel-workspace-local-scan-cache-v1";
 const CLOUD_CACHE_KEY = "daniel-workspace-cloud-cache-v1";
 const CLOUD_MIGRATION_KEY = "daniel-workspace-v2.6-migration-v1";
-const GITHUB_ACTIVITY_CACHE_KEY = "daniel-workspace-github-activity-v1";
+const GITHUB_ACTIVITY_CACHE_KEY = "daniel-workspace-github-activity-v2";
 
 export function loadData() {
   try {

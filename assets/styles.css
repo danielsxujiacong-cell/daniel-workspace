@@ -189,22 +189,25 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 .dashboard-activity-status.warning { color: #98713e; }
 .dashboard-activity-status.error { color: var(--danger); }
 .dashboard-activity-status > span { flex-basis: 100%; }
+.dashboard-activity-status .dashboard-activity-note { color: var(--muted); }
 .dashboard-activity-gaps { flex-basis: 100%; color: var(--muted); }
 .dashboard-activity-gaps summary { width: fit-content; cursor: pointer; font-size: 9px; }
 .dashboard-activity-gaps > span { display: block; margin-top: 4px; overflow-wrap: anywhere; }
 .dashboard-activity-gaps ul { display: grid; gap: 5px; margin: 5px 0 0; padding-left: 17px; }
 .dashboard-activity-gaps li { display: grid; gap: 2px; overflow-wrap: anywhere; font-size: 10px; }
 .dashboard-activity-gaps li span { color: var(--muted); }
+.dashboard-activity-gaps li small { color: var(--text); font-size: 9px; }
 .dashboard-activity-metrics { display: flex; flex-wrap: wrap; gap: 9px; }
 .activity-metric { display: flex; align-items: baseline; gap: 6px; padding: 6px 9px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--panel-raised); }
 .activity-metric strong { color: var(--text); font: 650 16px/1 Manrope, sans-serif; letter-spacing: -.035em; }
 .activity-metric small { color: var(--muted); font-size: 9px; }
 .activity-metric.pending { color: var(--muted); font-size: 10px; }
-.dashboard-heatmap-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; padding-bottom: 3px; }
-.dashboard-heatmap-layout { display: flex; align-items: flex-start; gap: 8px; width: max-content; min-width: 100%; }
-.dashboard-heatmap-weekdays { display: grid; grid-template-rows: repeat(7, 14px); gap: 4px; width: 14px; color: var(--muted); font-size: 8px; line-height: 14px; text-align: center; }
-.dashboard-heatmap-grid { display: grid; grid-template-rows: repeat(7, 14px); grid-auto-columns: 14px; grid-auto-flow: column; gap: 4px; width: max-content; }
-.dashboard-heatmap-cell, .dashboard-heatmap-spacer { display: block; width: 14px; height: 14px; padding: 0; border: 0; border-radius: 3px; }
+.dashboard-heatmap-scroll { width: 100%; max-width: 100%; overflow: visible; padding: 12px 1px 3px; }
+.dashboard-heatmap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(36px, 1fr)); grid-auto-rows: 36px; gap: 13px 6px; width: 100%; min-width: 0; }
+.dashboard-heatmap-cell { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; width: 100%; min-width: 0; height: 36px; padding: 2px; border: 0; border-radius: 7px; }
+.dashboard-heatmap-cell::before { content: attr(data-month-label); position: absolute; top: -12px; left: 2px; color: var(--muted); font-size: 8px; font-weight: 600; white-space: nowrap; }
+.dashboard-heatmap-cell strong { color: var(--text); font: 650 11px/1 Manrope, sans-serif; }
+.dashboard-heatmap-cell small { color: color-mix(in srgb, var(--text) 68%, transparent); font-size: 7px; line-height: 1; }
 .dashboard-heatmap-cell { cursor: pointer; outline-offset: 2px; transition: transform .12s ease, box-shadow .12s ease; }
 .dashboard-heatmap-cell:hover { z-index: 1; transform: scale(1.18); box-shadow: 0 0 0 1px var(--text); }
 .dashboard-heatmap-cell.selected { box-shadow: 0 0 0 2px var(--text); }
@@ -696,6 +699,14 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
   .dashboard-activity-controls { justify-content: flex-start; width: 100%; }
   .dashboard-activity-controls select { width: 108px; }
   .dashboard-activity-controls input { width: 116px; }
+  .dashboard-heatmap-scroll { padding-top: 11px; }
+  .dashboard-heatmap-grid { grid-template-columns: repeat(auto-fill, minmax(24px, 1fr)); grid-auto-rows: 24px; gap: 11px 5px; }
+  .dashboard-heatmap-cell { height: 24px; gap: 1px; padding: 1px; border-radius: 5px; }
+  .dashboard-heatmap-cell::before { top: -10px; left: 1px; font-size: 7px; }
+  .dashboard-heatmap-cell strong { font-size: 9px; }
+  .dashboard-heatmap-cell small { font-size: 7px; }
+  .dashboard-heatmap-legend { flex-wrap: wrap; }
+  .dashboard-heatmap-legend .unknown-key { margin-left: 0; flex-basis: 100%; }
   .dashboard-status-body { grid-template-columns: minmax(105px, .9fr) minmax(115px, 1.1fr); gap: 7px; }
   .dashboard-stage-row { grid-template-columns: minmax(62px, 100px) minmax(50px, 1fr) 24px; gap: 7px; }
   .dashboard-activity-day-detail > div { align-items: flex-start; flex-direction: column; gap: 4px; }

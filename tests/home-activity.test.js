@@ -91,6 +91,10 @@ test("unreadable GitHub history marks empty dates as incomplete instead of zero 
   assert.deepEqual(model.coverage.githubIncompleteDetails, [{
     fullName: "acme/app",
     reason: "GitHub 历史读取 HTTP 403：API rate limit exceeded",
+    reasonCategory: "rate_limited",
+    code: "github_rate_limited",
+    operation: "",
+    httpStatus: null,
   }]);
   assert.deepEqual(model.totals, { githubCommits: 0, workLogs: 0, activityRecords: 0, activeDays: 0 });
 });
@@ -111,5 +115,25 @@ test("truncated GitHub history identifies the affected repository and the pagina
 
   assert.deepEqual(model.coverage.githubIncompleteDetails, [{
     fullName: "acme/app", reason: "近 100 页后仍有 GitHub 分页结果。",
+    reasonCategory: "pagination_limit_reached", code: "", operation: "", httpStatus: null,
   }]);
+});
+
+test("activity coverage keeps unlinked and invalid project URLs out of the repository count", () => {
+  const model = buildHomeActivity({
+    startDate: "2026-10-10",
+    endDate: "2026-10-10",
+    projects: [
+      { id: "p1", name: "无仓库项目", github: "" },
+      { id: "p2", name: "无效地址项目", github: "https://example.com/source" },
+      { id: "p3", name: "已关联项目", github: "https://github.com/acme/app" },
+    ],
+    projectRepositories: [{ fullName: "acme/app", projectId: "p3", projectName: "已关联项目" }],
+    githubResults: [{ fullName: "acme/app", complete: true, commitsCount: 0, dailyCounts: [] }],
+    githubStatus: "ready",
+  });
+
+  assert.equal(model.coverage.githubRequested, 1);
+  assert.deepEqual(model.coverage.githubUnlinkedProjects.map(({ projectName }) => projectName), ["无仓库项目"]);
+  assert.deepEqual(model.coverage.githubInvalidProjects.map(({ projectName }) => projectName), ["无效地址项目"]);
 });
