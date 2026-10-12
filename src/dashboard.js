@@ -1,3 +1,6 @@
+import { humanizeProjectCommit } from "./project-story.js";
+import { parsePublicGitHubRepository } from "./github/public-api.js";
+
 export const STALE_PROJECT_DAYS = 30;
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -131,6 +134,76 @@ export function chooseRecentCommit(remoteCommit, localCommit) {
   return timestamp(localCommit.committedAt) > timestamp(remoteCommit.committedAt)
     ? { ...localCommit, source: "本机" }
     : { ...remoteCommit, source: "GitHub" };
+}
+
+function verifiedRecentCommits(project) {
+  const repository = parsePublicGitHubRepository(project?.github);
+  const snapshot = project?.githubData;
+  if (!repository || !snapshot
+    || String(snapshot.repositoryName || "").toLowerCase() !== repository.fullName.toLowerCase()
+    || !(snapshot.isPublic === true || (snapshot.isPublic === false && snapshot.source === "github-app"))) return [];
+
+  const records = Array.isArray(snapshot.recentCommits)
+    ? snapshot.recentCommits
+    : snapshot.recentSevenDayCommitCount === 0 ? [] : [snapshot.latestCommit].filter(Boolean);
+  return records.flatMap((commit) => {
+    const sha = typeof commit?.sha === "string" ? commit.sha : "";
+    const url = typeof commit?.url === "string" ? commit.url : "";
+    const committedAt = typeof commit?.committedAt === "string" ? commit.committedAt : "";
+    const urlSha = url.startsWith(`${repository.url}/commit/`) ? url.slice(`${repository.url}/commit/`.length) : "";
+    const timestamp = Date.parse(committedAt);
+    const text = humanizeProjectCommit(project, commit);
+    if (!text || !/^[a-f0-9]{7,40}$/i.test(sha) || !/^[a-f0-9]{7,40}$/i.test(urlSha)
+      || !urlSha.toLowerCase().startsWith(sha.toLowerCase()) || !Number.isFinite(timestamp)) return [];
+    return [{
+      id: `commit:${project.id}:${sha.toLowerCase()}`,
+      projectId: project.id,
+      projectName: project.name,
+      text,
+      rawMessage: commit.message,
+      source: "GitHub 提交",
+      at: committedAt,
+      url,
+      sha,
+      timestamp,
+    }];
+  });
+}
+
+export function buildRecentProjectUpdates(projects = [], workLogs = [], limit = 5) {
+  const projectById = new Map((projects || []).map((project) => [String(project.id), project]));
+  const updates = (projects || []).flatMap(verifiedRecentCommits);
+  for (const log of Array.isArray(workLogs) ? workLogs : []) {
+    const project = projectById.get(String(log?.projectId || ""));
+    const date = typeof log?.workDate === "string" ? log.workDate : "";
+    const completed = typeof log?.completedItems === "string" ? log.completedItems.trim() : "";
+    if (!project || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !completed) continue;
+    const outcome = typeof log.outcomes === "string" ? log.outcomes.trim() : "";
+    const text = outcome && !completed.includes(outcome)
+      ? `${completed.slice(0, 180)}${completed.length > 180 ? "…" : ""}（成果：${outcome.slice(0, 120)}${outcome.length > 120 ? "…" : ""}）`
+      : `${completed.slice(0, 260)}${completed.length > 260 ? "…" : ""}`;
+    const timestamp = Date.parse(`${date}T12:00:00+08:00`);
+    if (!Number.isFinite(timestamp)) continue;
+    updates.push({
+      id: `work-log:${project.id}:${log.id || date}`,
+      projectId: project.id,
+      projectName: project.name,
+      text,
+      source: "工作记录",
+      at: date,
+      url: "",
+      timestamp,
+    });
+  }
+  const unique = new Map();
+  for (const update of updates) {
+    const key = update.sha ? `commit:${update.sha.toLowerCase()}` : update.id;
+    const existing = unique.get(key);
+    if (!existing || update.timestamp > existing.timestamp) unique.set(key, update);
+  }
+  return [...unique.values()]
+    .sort((left, right) => right.timestamp - left.timestamp || left.projectName.localeCompare(right.projectName, "zh-CN"))
+    .slice(0, Math.max(0, Math.min(5, Number.isFinite(Number(limit)) ? Number(limit) : 5)));
 }
 
 function latestTimestamp(...values) {

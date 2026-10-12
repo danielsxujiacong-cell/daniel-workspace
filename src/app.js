@@ -26,7 +26,8 @@ const { fetchPrivateGitHubSnapshots, listPrivateGitHubRepositories } = await imp
 const { localScanEndpointFor, shouldRenderDashboardGitHubActivity } = await import("./local-companion.js?v=3.5-a.2");
 const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = await import("./suggestions.js");
 const { fetchPublicGitHubRepositories, fetchPublicGitHubRepository, GITHUB_CACHE_TTL_MS, isGitHubSnapshotFresh, parsePublicGitHubRepository } = await import("./github/public-api.js?v=3.5-b.4");
-const { buildCloudDashboardModel, buildLocalDashboardModel, chooseRecentCommit, compareLocalProjects, taskPriorityLabel } = await import("./dashboard.js?v=3.7");
+const { humanizeProjectCommit, projectDescriptionAfterEdit, projectDescriptionForEdit, projectIntroduction } = await import("./project-story.js?v=3.7-c");
+const { buildCloudDashboardModel, buildLocalDashboardModel, buildRecentProjectUpdates, chooseRecentCommit, compareLocalProjects, taskPriorityLabel } = await import("./dashboard.js?v=3.7-c");
 const {
   countPinnedProjects,
   getHomePinnedProjects,
@@ -61,6 +62,7 @@ let cloudSyncRequested = false;
 let cloudSyncTimer = null;
 let cloudInitializationRunning = false;
 let workspaceDataRevision = 0;
+let dashboardWorkLogsRequestId = 0;
 let migrationState = loadCloudMigrationState(workspaceAuth.userId);
 let scanCache = loadLocalScanCache();
 const localScanEndpoint = localScanEndpointFor(window.location);
@@ -96,6 +98,7 @@ const ui = {
   weeklySummary: null,
   weeklySummaryStatus: "idle",
   aiSummaryExpanded: false,
+  dashboardWorkLogs: { key: "", status: "idle", items: [] },
   projectWorkLogs: { projectId: null, status: "idle", items: [], error: "", editingId: "", saving: false, formOpen: false },
   projectNextStep: null,
   createdSuggestionKeys: [],
@@ -313,6 +316,35 @@ function activateCloudWorkspace(remote, localState, mergePending = false) {
   ui.cloud.migrationAvailable = false;
   const saved = saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt, ui.projectPinningAvailable);
   if (!saved) ui.cloud.error = "云端可用，但浏览器未能保存离线缓存";
+  void loadDashboardWorkLogs();
+}
+
+async function loadDashboardWorkLogs({ force = false } = {}) {
+  if (!workspaceActive || !cloudWorkspaceAvailable()) return;
+  const requestId = ++dashboardWorkLogsRequestId;
+  const projects = getHomePinnedProjects(db.projects).slice(0, 5);
+  const projectIds = projects.map((project) => project.id).filter(Boolean);
+  const range = getRecentWorkLogRange();
+  const key = `${projectIds.slice().sort().join(",")}|${range.startDate}|${range.endDate}`;
+  if (!projectIds.length) {
+    ui.dashboardWorkLogs = { key, status: "ready", items: [] };
+    return;
+  }
+  if (!force && ui.dashboardWorkLogs.key === key && ["loading", "ready"].includes(ui.dashboardWorkLogs.status)) return;
+  ui.dashboardWorkLogs = { key, requestId, status: "loading", items: ui.dashboardWorkLogs.items || [] };
+  try {
+    const items = await loadWorkLogsForRange(workspaceAuth.client, workspaceAuth.userId, {
+      ...range,
+      projectIds,
+      limit: 100,
+    });
+    if (!workspaceActive || ui.dashboardWorkLogs.requestId !== requestId) return;
+    ui.dashboardWorkLogs = { key, requestId, status: "ready", items };
+  } catch {
+    if (!workspaceActive || ui.dashboardWorkLogs.requestId !== requestId) return;
+    ui.dashboardWorkLogs = { key, requestId, status: "error", items: [] };
+  }
+  if (workspaceActive) render();
 }
 
 async function initializeCloudSync() {
@@ -486,6 +518,7 @@ window.addEventListener("offline", () => {
 export function clearPrivateWorkspace() {
   if (!workspaceActive) return;
   workspaceActive = false;
+  dashboardWorkLogsRequestId += 1;
   cloudSyncEnabled = false;
   cloudCacheActive = false;
   cloudBaseline = null;
@@ -504,6 +537,8 @@ export function clearPrivateWorkspace() {
   ui.localProjectsStatus = "unavailable";
   ui.localComparison = null;
   ui.localScanAttemptAt = "";
+  ui.dashboardWorkLogs = { key: "", status: "idle", items: [] };
+  ui.projectWorkLogs = { projectId: null, status: "idle", items: [], error: "", editingId: "", saving: false, formOpen: false };
   ui.dashboardSuggestion = null;
   ui.dashboardSuggestionKey = "";
   ui.dashboardSuggestionStatus = "idle";
@@ -1138,7 +1173,7 @@ function renderDashboardFocusProjects(projects, dataAvailable) {
     const next = typeof project.next === "string" ? project.next.trim() : "";
     const hasStage = stage && stage !== "未填写";
     const hasNext = next && next !== "未填写";
-    const description = typeof project.description === "string" ? project.description.trim() : "";
+    const description = projectIntroduction(project);
     return `<article class="dashboard-focus-card"><div class="dashboard-focus-top"><span class="project-glyph">${esc(initials(project.name))}</span>${statusPill(project.status)}</div><button class="dashboard-focus-name" data-action="view-project" data-id="${esc(project.id)}">${esc(project.name)}</button>${description ? `<p class="dashboard-project-description">${esc(description)}</p>` : ""}${hasStage ? `<div class="dashboard-project-detail"><small>当前阶段</small><span>${esc(stage)}</span></div>` : ""}${hasNext ? `<div class="dashboard-project-detail"><small>下一步</small><span>${esc(next)}</span></div>` : ""}<div class="dashboard-focus-actions"><button class="button quiet small" data-action="view-project" data-id="${esc(project.id)}">打开项目</button></div></article>`;
   }).join("");
   const empty = !dataAvailable
@@ -1155,14 +1190,15 @@ function latestProjectCommit(project, localProject = null) {
 }
 
 function projectRecentProgressCandidates(project, localProject = null) {
+  const state = project?.id && ui.projectWorkLogs.projectId === project.id ? ui.projectWorkLogs : null;
+  const summarized = buildRecentProjectUpdates(project ? [project] : [], state?.items || [], 5);
+  if (summarized.length) return summarized;
   const candidates = [];
   const commit = latestProjectCommit(project, localProject);
-  if (commit?.message) candidates.push({ text: commit.message, source: `${commit.source} Commit`, at: commit.committedAt, url: commit.url || "" });
-  const state = project?.id && ui.projectWorkLogs.projectId === project.id ? ui.projectWorkLogs : null;
+  const commitSummary = humanizeProjectCommit(project, commit);
+  if (commit?.message && commitSummary) candidates.push({ text: commitSummary, source: `${commit.source} Commit`, at: commit.committedAt, url: commit.url || "" });
   const latestLog = [...(state?.items || [])].sort((left, right) => right.workDate.localeCompare(left.workDate))[0];
   if (latestLog?.completedItems) candidates.push({ text: latestLog.completedItems, source: "工作记录", at: `${latestLog.workDate}T23:59:59`, url: "" });
-  const latestActivity = project?.id ? db.activities.filter((item) => item.projectId === project.id).sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))[0] : null;
-  if (latestActivity?.title) candidates.push({ text: latestActivity.title, source: "项目活动", at: latestActivity.createdAt, url: "" });
   return candidates.sort((left, right) => (new Date(right.at || "").getTime() || 0) - (new Date(left.at || "").getTime() || 0));
 }
 
@@ -1174,22 +1210,10 @@ function renderProjectRecentProgress(project, localProject = null) {
 }
 
 function renderDashboardRecentProgress(projects, dataAvailable) {
-  const rows = [];
-  if (dataAvailable) {
-    for (const project of projects) {
-      const commit = latestProjectCommit(project);
-      if (commit?.message) rows.push({ projectId: project.id, projectName: project.name, text: commit.message, source: `${commit.source} Commit`, at: commit.committedAt, url: commit.url || "" });
-    }
-    for (const activity of db.activities) {
-      const project = projectById(activity.projectId);
-      if (project && activity.title) rows.push({ projectId: project.id, projectName: project.name, text: activity.title, source: "项目活动", at: activity.createdAt, url: "" });
-    }
-  }
-  rows.sort((left, right) => (new Date(right.at || "").getTime() || 0) - (new Date(left.at || "").getTime() || 0));
-  const visible = rows.slice(0, 6);
+  const visible = dataAvailable ? buildRecentProjectUpdates(projects, ui.dashboardWorkLogs.items, 5) : [];
   const content = visible.length ? `<div class="dashboard-progress-list">${visible.map((item) => {
     const url = safeExternal(item.url);
-    return `<article class="dashboard-progress-item"><div><strong>${esc(item.projectName)}</strong><p>${esc(item.text)}</p><small>${esc(item.source)}${item.at ? ` · ${esc(timeAgoIfKnown(item.at))}` : ""}</small></div>${url ? `<a class="button quiet small" href="${esc(url)}" target="_blank" rel="noopener noreferrer" aria-label="查看 ${esc(item.projectName)} Commit">${icon("external")}</a>` : `<button class="button quiet small" data-action="view-project" data-id="${esc(item.projectId)}" aria-label="打开 ${esc(item.projectName)}">${icon("chevron")}</button>`}</article>`;
+    return `<article class="dashboard-progress-item"><div><strong>${esc(item.projectName)}</strong><p>${esc(item.text)}</p><small>${esc(item.source)}${item.at ? ` · ${esc(timeAgoIfKnown(item.at))}` : ""}</small></div>${url ? `<a class="button quiet small" href="${esc(url)}" target="_blank" rel="noopener noreferrer" aria-label="查看 ${esc(item.projectName)} 原始 GitHub 提交">查看 Commit ${icon("external")}</a>` : `<button class="button quiet small" data-action="view-project" data-id="${esc(item.projectId)}" aria-label="打开 ${esc(item.projectName)} 工作记录">打开 ${icon("chevron")}</button>`}</article>`;
   }).join("")}</div>` : `<div class="empty-state">${dataAvailable ? "暂时没有可显示的进展。" : "项目资料暂不可用。"}</div>`;
   return `<section class="card card-pad dashboard-recent-progress grid-span-12"><div class="card-header"><h2>最近进展</h2></div>${content}</section>`;
 }
@@ -1375,7 +1399,8 @@ function renderDashboard() {
   const projects = dataAvailable ? db.projects : [];
   const today = cloudModel.todayContinue;
   const suggestion = suggestionForDashboard(today);
-  return `<div class="dashboard-home"><div class="dashboard-grid">${renderDashboardFocusProjects(projects, dataAvailable)}${renderDashboardRecentProgress(projects, dataAvailable)}${renderDashboardSections(cloudModel, dataAvailable)}${renderDashboardAISummary(today, suggestion)}</div></div>`;
+  const pinnedProjects = dataAvailable ? getHomePinnedProjects(projects).slice(0, 5) : [];
+  return `<div class="dashboard-home"><div class="dashboard-grid">${renderDashboardFocusProjects(projects, dataAvailable)}${renderDashboardRecentProgress(pinnedProjects, dataAvailable)}${renderDashboardSections(cloudModel, dataAvailable)}${renderDashboardAISummary(today, suggestion)}</div></div>`;
 }
 
 function renderProjects() {
@@ -1399,7 +1424,7 @@ function renderProjects() {
   const projectCards = projects.map((project) => {
     const stage = typeof project.stage === "string" ? project.stage.trim() : "";
     const next = typeof project.next === "string" ? project.next.trim() : "";
-    const description = typeof project.description === "string" ? project.description.trim() : "";
+    const description = projectIntroduction(project);
     const hasStage = stage && stage !== "未填写";
     const hasNext = next && next !== "未填写";
     const pending = ui.projectPinUpdatingId === project.id;
@@ -1709,6 +1734,7 @@ async function submitProjectWorkLog(form) {
     const items = [saved, ...ui.projectWorkLogs.items.filter((item) => item.id !== saved.id)]
       .sort((left, right) => right.workDate.localeCompare(left.workDate) || right.updatedAt.localeCompare(left.updatedAt));
     ui.projectWorkLogs = { ...ui.projectWorkLogs, status: "ready", items, editingId: "", saving: false, error: "", formOpen: false };
+    void loadDashboardWorkLogs({ force: true });
     toast(existing ? "工作记录已更新并同步" : "工作记录已保存并同步");
   } catch (error) {
     if (!workspaceActive || ui.projectId !== projectId) return;
@@ -1744,7 +1770,7 @@ function renderProjectDetail() {
     next && next !== "未填写" ? `<div class="card meta-card"><div class="meta-label">下一步</div><div class="meta-value">${esc(next)}</div></div>` : "",
     tasks.length ? `<div class="card meta-card"><div class="meta-label">任务进度</div><div class="meta-value">${tasks.filter((task) => task.status === "done").length} / ${tasks.length} 项完成</div></div>` : "",
   ].filter(Boolean).join("");
-  const description = typeof project.description === "string" ? project.description.trim() : "";
+  const description = projectIntroduction(project);
   return `<div class="detail-topline"><button class="icon-button" data-page="projects" aria-label="返回项目">${icon("back")}</button><span>Projects</span>${icon("chevron")}<span>${esc(project.name)}</span></div>
     <section class="card detail-hero"><div class="detail-hero-head"><div class="detail-hero-copy">${statusPill(project.status)}<h2 style="margin-top:11px">${esc(project.name)}</h2>${description ? `<p>${esc(description)}</p>` : ""}</div><div class="detail-actions"><button class="button" data-action="edit-project" data-id="${esc(project.id)}">${icon("edit")} 编辑项目</button><button class="button quiet danger" data-action="delete-project" data-id="${esc(project.id)}">${icon("trash")} 删除</button></div></div><div class="detail-links">${live ? `<a class="detail-link" href="${esc(live)}" target="_blank" rel="noreferrer">${icon("external")} 在线网址</a>` : ""}${github ? `<a class="detail-link" href="${esc(github)}" target="_blank" rel="noreferrer">${icon("external")} GitHub</a>` : ""}</div></section>
     ${meta ? `<div class="detail-meta-grid">${meta}</div>` : ""}
@@ -1919,8 +1945,9 @@ function renderModal() {
   let title = "", subtitle = "", form = "", wide = "";
 
   if (kind === "project") {
-    title = isEdit ? "编辑项目" : "新建项目"; subtitle = "项目基础资料随账号同步；本机路径只保存在此设备。";
-    form = `<div class="form-grid">${field("项目名称", "name", existing?.name || "", { full: true })}${field("项目简介", "description", existing?.description || "", { full: true, textarea: true, short: true, required: false, placeholder: "这个项目要解决什么问题？" })}${field("当前状态", "status", existing?.status || "计划中", { select: ["计划中", "进行中", "暂停", "已完成"].map((x) => `<option ${x === (existing?.status || "计划中") ? "selected" : ""}>${x}</option>`).join("") })}${field("当前阶段", "stage", existing?.stage || "", { placeholder: "例如：原型验证" })}${field("本地路径（仅此设备）", "path", existing?.path || "", { full: true, optional: true, required: false, placeholder: "本机项目路径" })}${field("GitHub 地址", "github", existing?.github || "", { optional: true, required: false, placeholder: "https://github.com/..." })}${field("在线网址", "url", existing?.url || "", { optional: true, required: false, placeholder: "https://..." })}${field("下一步", "next", existing?.next || "", { full: true, textarea: true, short: true, required: false })}${field("手工备注", "notes", existing?.notes || "", { full: true, textarea: true, short: true, optional: true, required: false, placeholder: "跨设备保留的项目背景或补充信息" })}</div>`;
+    title = isEdit ? "编辑项目" : "新建项目"; subtitle = "项目简介可以逐个修改；首页展示调整不会批量改写 Supabase 资料。";
+    const formDescription = existing ? projectDescriptionForEdit(existing) : "";
+    form = `<div class="form-grid">${field("项目名称", "name", existing?.name || "", { full: true })}${field("项目简介", "description", formDescription, { full: true, textarea: true, short: true, required: false, placeholder: "用一句话说明项目做什么、解决什么问题" })}${field("当前状态", "status", existing?.status || "计划中", { select: ["计划中", "进行中", "暂停", "已完成"].map((x) => `<option ${x === (existing?.status || "计划中") ? "selected" : ""}>${x}</option>`).join("") })}${field("当前阶段", "stage", existing?.stage || "", { placeholder: "例如：原型验证" })}${field("本地路径（仅此设备）", "path", existing?.path || "", { full: true, optional: true, required: false, placeholder: "本机项目路径" })}${field("GitHub 地址", "github", existing?.github || "", { optional: true, required: false, placeholder: "https://github.com/..." })}${field("在线网址", "url", existing?.url || "", { optional: true, required: false, placeholder: "https://..." })}${field("下一步", "next", existing?.next || "", { full: true, textarea: true, short: true, required: false })}${field("手工备注", "notes", existing?.notes || "", { full: true, textarea: true, short: true, optional: true, required: false, placeholder: "跨设备保留的项目背景或补充信息" })}</div>`;
   } else if (kind === "task") {
     title = isEdit ? "编辑任务" : "新建任务"; subtitle = "任务自动保存到此账号的云端工作区。";
     const selectedProject = existing?.projectId || ui.modal.projectId || "";
@@ -2167,6 +2194,7 @@ function submitRecord(form) {
   const now = new Date().toISOString();
 
   if (kind === "project") {
+    if (existing) values.description = projectDescriptionAfterEdit(existing, values.description);
     const item = { ...values, ...(typeof existing?.isPinned === "boolean" ? { isPinned: existing.isPinned } : {}), id: existing?.id || uid("project"), createdAt: existing?.createdAt || now, updatedAt: now, status: values.status || "计划中" };
     if (existing) {
       const repositoryChanged = existing.github !== item.github;
@@ -2390,6 +2418,7 @@ async function toggleProjectPinInCloud(projectId) {
     if (!saveCloudCache(workspaceAuth.userId, db, cloudBaseline, ui.cloud.lastSyncedAt, ui.projectPinningAvailable)) {
       ui.cloud.error = "置顶已保存到云端，但浏览器未能更新离线缓存";
     }
+    void loadDashboardWorkLogs({ force: true });
     toast(result.isPinned ? "已置顶到首页，并同步到其他设备" : "已取消置顶，并同步到其他设备");
   } catch (error) {
     if (!workspaceActive) return;

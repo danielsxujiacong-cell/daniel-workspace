@@ -1,11 +1,11 @@
 # Daniel Workspace
 
-私人 AI 工作台 V3.7。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI。首页按重点项目、最近进展和待办排列；AI 今日简报、每周总结与下一步建议收进默认折叠的「AI 总结」。Projects 默认展示云端项目，本机扫描单独切换；项目技术状态默认折叠，工作记录表单按需展开。
+私人 AI 工作台 V3.7-C。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI。首页按重点项目、最近进展和待办排列；置顶项目简介与近期成果用普通中文呈现，并保留 GitHub 原始提交链接。AI 今日简报、每周总结与下一步建议收进默认折叠的「AI 总结」，由用户主动生成。Projects 默认展示云端项目，本机扫描单独切换；项目技术状态默认折叠，工作记录表单按需展开。
 
 ## Status
 
-- **Stage:** V3.7 UI reduction; existing Supabase migration and data flow remain unchanged. Signed-in UI and mobile acceptance are recorded in [HANDOFF](docs/HANDOFF.md).
-- **Last updated:** 2026-10-11
+- **Stage:** V3.7-C project descriptions and recent progress use verified, reader-friendly copy; existing Supabase migration and data flow remain unchanged. Browser acceptance is recorded in [HANDOFF](docs/HANDOFF.md).
+- **Last updated:** 2026-10-12
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
 ## Quick start
@@ -28,6 +28,12 @@ python local_companion.py
 - 首页 AI 今日简报在点击后刷新置顶项目的 GitHub 真实提交，结合项目状态、近 7 天工作记录和可选的 Companion 元数据生成行动建议。简报只走已配置的真实 GLM Worker，输出必须匹配来源日期和原文依据；证据链接地址不会发送给模型。
 - AI 每周总结按需汇总本周（Asia/Shanghai 周一至今天）的工作记录、当前项目状态与 GitHub 提交，分为本周成果、项目推进、问题与阻塞、下周计划，并支持复制。无法通过来源核验的内容会被丢弃。
 - Supabase 只读核对：现有 26 个 Workspace 项目、5 个置顶项目保持不变，新工作记录表初始为 0 行。当前用户可在登录态手动验证保存、刷新后读取及另一设备同步；未进行模拟写入。
+
+## V3.7-C 项目介绍与近期进展
+
+- 首页和项目详情会把已核实的五个重点项目介绍成一句普通中文；扫描器留下的 README 版本标记只影响展示，不会批量改写云端项目资料。项目介绍仍可在项目编辑表单中逐项修改。
+- 首页最近进展默认最多显示五条有依据的更新，按时间合并置顶项目最近 GitHub 提交和近七天工作记录。提交继续链接到原始 GitHub 记录；无法核实的英文提交标题不会直接当作成果展示。
+- 项目介绍和成果摘要在页面渲染时不调用 AI。每日简报、每周总结和下一步建议仍须由用户主动生成。
 
 ## V2.5 登录配置
 
@@ -141,6 +147,7 @@ node .\node_modules\wrangler\bin\wrangler.js secret put AI_API_KEY --config .\cl
 | `src/ai/service.js` | 统一 chat 接口、provider 状态与错误处理 |
 | `src/ai/context.js` | 从当前页面构造裁剪后的相关上下文 |
 | `src/dashboard.js` | 首页健康统计、继续建议优先级和扫描状态比较 |
+| `src/project-story.js` | 五个重点项目的事实核对简介及近期提交的人话化展示文案 |
 | `src/ai/providers/` | 本地 Mock Provider 与 Cloudflare Worker HTTP Provider |
 | `cloudflare/` | 独立 `daniel-workspace-api` Worker、BigModel 转发和 Wrangler 配置 |
 | `src/github/public-api.js` | 公开 GitHub 仓库只读 API 与响应归一化 |

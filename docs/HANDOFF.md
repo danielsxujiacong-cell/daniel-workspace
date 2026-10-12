@@ -2,8 +2,10 @@
 
 ## Current state
 
-- **Updated:** 2026-10-11
-- **Stage:** V3.7 reduces the Home, Projects, project detail, work-log form, empty states, and navigation. It changes only frontend presentation; the existing Supabase schema and Supabase/GitHub/AI request paths remain unchanged.
+- **Updated:** 2026-10-12
+- **Stage:** V3.7-C humanizes the five pinned project introductions and recent progress. Changes remain in the frontend presentation; Supabase schema, project rows, sync, auth, GitHub authorization, and AI service boundaries are unchanged.
+- **V3.7-C behavior:** Home and cloud project details show concise, verified one-line copy for the five known pinned projects when their saved description is blank or a README/scan marker. A real saved description remains visible; editing one project remains available in the existing project form, and saving another field preserves the original text if the displayed fallback was not changed. Home shows up to five recent, evidence-backed GitHub commits/work logs from the pinned set, with original GitHub commit links. Unreviewed English commit titles are omitted. No AI request runs during page rendering; AI summaries remain user-triggered.
+- **V3.7-C verification:** Focused dashboard/story tests pass 5/5; changed JavaScript syntax checks and `git diff --check` pass. No Supabase records, schema, GitHub snapshots, or work logs were modified. Signed-in browser acceptance remains pending; the current Chrome tab could not be inspected because Computer Use could not determine its URL with sufficient confidence.
 - **V3.7 UI:** Home order is focus projects → recent progress → pending tasks only when present → collapsed AI Summary. Projects defaults to cloud records with a separate local-scan view; project technical details are collapsed; Knowledge and Decisions are under More; work-log form is collapsed and only completion text is required. Same GitHub/local commits are deduplicated by SHA or message, with the newest distinct commit shown.
 - **V3.7 verification:** Local syntax checks and focused tests passed 17/17; `git diff --check` passed. Commit `a13e61d` is pushed to `main`. Cache-busted requests for the entry page, auth gate, app, dashboard helper, and stylesheet on `workspace.danielxu.cn` returned HTTP 200 with V3.7 markers. The current Codex in-app browser had no tabs, so signed-in visual acceptance remains pending.
 - **Stage before V3.7:** V3.6 adds per-project work logs and evidence-grounded daily/weekly AI summaries. The additive Supabase migration is applied and the V3.6 source was live on both configured static hosts.
@@ -18,4 +20,4 @@
 
 ## Next action
 
-Use the user's existing login to review signed-in Home/Projects/project-detail/work-log layouts on desktop and a 390px mobile viewport. No live records or AI requests are needed for these UI checks.
+Use the existing login to review Home and project details on desktop and a 390px mobile viewport. Confirm five pinned introductions, up to five Chinese updates with their original GitHub links, and that the project editor can change a single description. Do not save synthetic project or work-log records; no AI request is needed for these checks.
