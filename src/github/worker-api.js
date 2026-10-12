@@ -8,13 +8,14 @@ export async function requestGitHubWorker(path, auth, { method = "GET", body, si
   if (signal?.aborted) throw new Error("GitHub Worker 请求已取消。");
 
   const controller = new AbortController();
+  const requestTimeoutMs = Math.max(1, Number(timeoutMs) || DEFAULT_WORKER_TIMEOUT_MS);
   let timedOut = false;
   const abortFromParent = () => controller.abort(signal.reason);
   signal?.addEventListener("abort", abortFromParent, { once: true });
   const timeout = setTimeout(() => {
     timedOut = true;
     controller.abort();
-  }, Math.max(1, Number(timeoutMs) || DEFAULT_WORKER_TIMEOUT_MS));
+  }, requestTimeoutMs);
   try {
     const response = await fetch(`${WORKER_BASE}${path}`, {
       method,
@@ -36,7 +37,7 @@ export async function requestGitHubWorker(path, auth, { method = "GET", body, si
     return result;
   } catch (error) {
     if (timedOut) {
-      const failure = new Error(`GitHub Worker 请求超时（${Math.ceil(timeoutMs / 1000)} 秒），请重试。`);
+      const failure = new Error(`GitHub Worker 请求超时（${Math.ceil(requestTimeoutMs / 1000)} 秒），请重试。`);
       failure.code = "github_worker_timeout";
       throw failure;
     }

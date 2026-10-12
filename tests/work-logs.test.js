@@ -23,7 +23,7 @@ function fakeClient(data = []) {
     order(key, value) { calls.push(["order", key, value]); return this; },
     limit(value) { calls.push(["limit", value]); return this; },
     range(start, end) { calls.push(["range", start, end]); this.selectedRange = [start, end]; return this; },
-    abortSignal() { return this; },
+    abortSignal(signal) { this.signal = signal; return this; },
     then(resolve, reject) {
       const rows = this.selectedRange ? data.slice(this.selectedRange[0], this.selectedRange[1] + 1) : data;
       return Promise.resolve({ data: rows, error: null }).then(resolve, reject);
@@ -69,6 +69,31 @@ test("project work log reads are scoped to the validated user and project", asyn
   assert.equal(logs[0].completedItems, "完成跨设备记录");
   assert.ok(client.calls.some((call) => call[0] === "eq" && call[1] === "user_id" && call[2] === "user-1"));
   assert.ok(client.calls.some((call) => call[0] === "eq" && call[1] === "project_id" && call[2] === "project-1"));
+});
+
+test("project work log read honors the preview stage abort signal", async () => {
+  let querySignal;
+  const client = {
+    from() {
+      const query = {
+        select() { return this; },
+        eq() { return this; },
+        order() { return this; },
+        limit() { return this; },
+        abortSignal(signal) { querySignal = signal; return this; },
+        then(resolve, reject) {
+          return new Promise((_, rejectAbort) => querySignal.addEventListener("abort", () => rejectAbort(new Error("aborted")), { once: true }))
+            .then(resolve, reject);
+        },
+      };
+      return query;
+    },
+  };
+  const controller = new AbortController();
+  const request = loadProjectWorkLogs(client, "user-1", "project-1", { signal: controller.signal });
+  controller.abort();
+  await assert.rejects(request, /工作记录云端读取超时/);
+  assert.equal(querySignal.aborted, true);
 });
 
 test("date range reads stay within supplied projects and week bounds", async () => {

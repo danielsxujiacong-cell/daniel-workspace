@@ -133,6 +133,25 @@ test("a partially read snapshot draft cannot be converted into a publishable sna
   assert.throws(() => buildPublishableSnapshot(draft), /数据源读取不完整/);
 });
 
+test("snapshot draft records missing read scopes and marks the preview incomplete", () => {
+  const draft = createSnapshotReviewDraft({
+    data: { projects: [{ id: "p1", name: "Project" }] },
+    githubActivity: {
+      repositories: [],
+      errors: [{ fullName: "acme/public-demo" }],
+      complete: false,
+      workLogsComplete: false,
+      workLogIssues: ["工作记录：Project 未完整读取（读取超时）"],
+      issues: ["GitHub 活动：acme/public-demo 未完整读取（Worker 超时）"],
+    },
+  });
+  assert.equal(draft.completeness.complete, false);
+  assert.deepEqual(draft.completeness.issues, [
+    "工作记录：Project 未完整读取（读取超时）",
+    "GitHub 活动：acme/public-demo 未完整读取（Worker 超时）",
+  ]);
+});
+
 test("public GET reads only the isolated KV snapshot and returns 404 until one is published", async () => {
   const empty = testEnv();
   const missing = await worker.fetch(request("/api/public/snapshot"), empty.env);
@@ -184,10 +203,10 @@ test("the visitor shell starts the shared app before snapshot fetch settles and 
   const gate = await (await import("node:fs/promises")).readFile(new URL("../src/auth/gate.js", import.meta.url), "utf8");
   const app = await (await import("node:fs/promises")).readFile(new URL("../src/app.js", import.meta.url), "utf8");
   const publicStart = gate.slice(gate.indexOf("async function startPublicDashboard"), gate.indexOf("function startPrivateEntry"));
-  assert.ok(publicStart.indexOf("await import(\"../app.js?v=3.8-c\")") < publicStart.indexOf("void snapshotPromise.then"));
+  assert.ok(publicStart.indexOf("await import(\"../app.js?v=3.8-j\")") < publicStart.indexOf("void snapshotPromise.then"));
   assert.doesNotMatch(publicStart, /await\s+snapshotPromise/);
   assert.match(publicStart, /void snapshotPromise\.then/);
-  assert.match(app, /publicSnapshotMode \? \{\} : await import\("\.\/store\.js"\)/);
+  assert.match(app, /publicSnapshotMode \? \{\} : await import\("\.\/store\.js\?v=3\.8-j"\)/);
   assert.match(app, /publicSnapshotMode \? \{\} : await import\("\.\/ai\/service\.js/);
   assert.match(app, /publicSnapshotMode \? \{\} : await import\("\.\/cloud\/sync\.js"\)/);
   assert.match(app, /function enforcePublicReadOnlyDom\(\)/);

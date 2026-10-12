@@ -56,3 +56,17 @@ test("GitHub activity retry refreshes only rate-limited repositories and preserv
   assert.deepEqual(merged.repositories.map(({ fullName }) => fullName), ["acme/ok", "acme/limited"]);
   assert.deepEqual(merged.errors.map(({ fullName }) => fullName), ["acme/private"]);
 });
+
+test("an aborted activity stage reports every unprocessed repository as incomplete", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const names = Array.from({ length: 6 }, (_, index) => `acme/repo-${index + 1}`);
+  const result = await fetchGitHubActivity(names, {}, {
+    startDate: "2026-10-01",
+    endDate: "2026-10-30",
+    signal: controller.signal,
+  });
+  assert.deepEqual(result.repositories, []);
+  assert.deepEqual(result.errors.map(({ fullName }) => fullName), names);
+  assert.ok(result.errors.every(({ code }) => code === "github_request_aborted"));
+});

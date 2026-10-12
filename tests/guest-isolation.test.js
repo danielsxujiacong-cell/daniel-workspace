@@ -19,7 +19,7 @@ test("existing sessions never auto-open from the root; only the explicit private
   assert.equal(shouldRestoreExistingSession("login", true), true);
   assert.match(gate, /if \(entryMode === "demo"\)[\s\S]*?void startGuestDemo\(\);[\s\S]*?else if \(entryMode === "login"\)[\s\S]*?startPrivateEntry\(\);[\s\S]*?else \{\s*void startPublicDashboard\(\);/);
   assert.match(gate, /function startPrivateEntry\(\)[\s\S]*?showLogin\(\)[\s\S]*?shouldRestoreExistingSession\(entryMode, hasStoredAuthSession\(\)\)[\s\S]*?restoreExistingSession\(\)/);
-  assert.match(gate, /async function startPublicDashboard\(\)[\s\S]*?await import\("\.\.\/app\.js\?v=3\.8-c"\)[\s\S]*?catch[\s\S]*?startup-failure/);
+  assert.match(gate, /async function startPublicDashboard\(\)[\s\S]*?await import\("\.\.\/app\.js\?v=3\.8-j"\)[\s\S]*?catch[\s\S]*?startup-failure/);
   const publicStartup = gate.slice(gate.indexOf("async function startPublicDashboard"), gate.indexOf("function startPrivateEntry"));
   assert.ok(publicStartup.indexOf('await import("../app.js?v=3.8-j")') < publicStartup.indexOf("void snapshotPromise.then"));
   assert.doesNotMatch(publicStartup, /await\s+snapshotPromise/);
@@ -80,7 +80,7 @@ test("private login still signs in, verifies the user, and checks the allowlist 
   const allowlistAt = loginFlow.indexOf("isAllowedUser(user)");
   const workspaceAt = loginFlow.indexOf("enterWorkspace(user)");
   assert.ok(signInAt >= 0 && signInAt < getUserAt && getUserAt < allowlistAt && allowlistAt < workspaceAt);
-  assert.match(gate, /async function enterWorkspace\(user\)\s*\{\s*if \(workspaceVisible\) return;\s*if \(!isAllowedUser\(user\)\) throw new Error\("Unauthorized user"\);[\s\S]*?import\("\.\.\/app\.js\?v=3\.8-c"\)/);
+  assert.match(gate, /async function enterWorkspace\(user\)\s*\{\s*if \(workspaceVisible\) return;\s*if \(!isAllowedUser\(user\)\) throw new Error\("Unauthorized user"\);[\s\S]*?import\("\.\.\/app\.js\?v=3\.8-j"\)/);
 
   const sessionRestore = gate.slice(gate.indexOf("async function restoreExistingSession"), gate.indexOf("async function startGuestDemo"));
   const getSessionAt = sessionRestore.indexOf("client.auth.getSession()");
