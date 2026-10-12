@@ -2,11 +2,8 @@ const rateBuckets = new Map();
 const MAX_BODY_CHARS = 32_000;
 const MAX_CONTEXT_CHARS = 12_000;
 const MAX_HISTORY_CHARS = 8_000;
-const PUBLIC_DASHBOARD_REPOSITORIES = Object.freeze([
-  { projectId: "workspace", fullName: "danielsxujiacong-cell/daniel-workspace" },
-  { projectId: "portfolio", fullName: "danielsxujiacong-cell/personal-portfolio" },
-  { projectId: "investment-dashboard", fullName: "danielsxujiacong-cell/AI-investment-dashboard" },
-]);
+const PUBLIC_SNAPSHOT_KEY = "latest";
+const MAX_PUBLIC_SNAPSHOT_CHARS = 1_500_000;
 
 function allowedOrigins(env) {
   return new Set((env.ALLOWED_ORIGINS || "").split(",").map((item) => item.trim()).filter(Boolean));
@@ -368,20 +365,6 @@ function activityDateKey(value) {
     : "";
 }
 
-function shiftActivityDate(dateKey, offset) {
-  const date = new Date(`${dateKey}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() + offset);
-  return date.toISOString().slice(0, 10);
-}
-
-function publicDashboardDate(value = Date.now()) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
-  }).formatToParts(value instanceof Date ? value : new Date(value));
-  const part = (name) => parts.find((item) => item.type === name)?.value || "";
-  return `${part("year")}-${part("month")}-${part("day")}`;
-}
-
 function validActivityDate(value) {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const parsed = new Date(`${value}T00:00:00.000Z`);
@@ -511,38 +494,162 @@ async function githubActivityRoute(request, env) {
   return jsonResponse(request, env, { repositories, errors });
 }
 
-async function publicDashboardRoute(request, env) {
-  if (request.method !== "GET") return githubError(request, env, 405, "public_dashboard_method_not_allowed", "公开 Dashboard 仅支持只读 GET 请求。");
-  if (isRateLimited(request, 12)) return githubError(request, env, 429, "public_dashboard_rate_limited", "公开活动请求过多，请稍后重试。");
+function hasExactKeys(value, keys) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value)
+    && Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key)));
+}
 
-  const endDate = publicDashboardDate();
-  const startDate = shiftActivityDate(endDate, -29);
-  let publicReadToken = null;
-  try { publicReadToken = await createPublicReadToken(env); } catch { publicReadToken = null; }
-  const repositories = await Promise.all(PUBLIC_DASHBOARD_REPOSITORIES.map(async ({ projectId, fullName }) => {
-    try {
-      const key = fullName.toLowerCase();
-      const authorized = publicReadToken ? new Map([[key, { token: publicReadToken }]]) : new Map();
-      const result = await readRepositoryActivity(fullName, authorized, startDate, endDate, true);
-      return { projectId, complete: result.complete, truncated: result.truncated, dailyCounts: result.dailyCounts };
-    } catch (error) {
-      return {
-        projectId,
-        complete: false,
-        truncated: true,
-        dailyCounts: [],
-        errorCode: typeof error?.code === "string" ? error.code : "github_unavailable",
-        ...(Number.isInteger(error?.upstreamStatus) ? { upstreamStatus: error.upstreamStatus } : {}),
-      };
-    }
-  }));
-  const cors = corsHeaders(request, env);
-  return new Response(JSON.stringify({ period: { startDate, endDate }, repositories }), {
-    status: 200,
-    headers: {
-      ...cors,
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "public, max-age=300, s-maxage=300",
+function validSnapshotDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function unsafePublicText(value) {
+  return typeof value !== "string"
+    || value.length > 20_000
+    || /\b(?:Bearer\s+[A-Za-z0-9._~-]{12,}|(?:gh[pousr]_[A-Za-z0-9_]{16,}|github_pat_[A-Za-z0-9_]{16,}|sk-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}))\b/i.test(value)
+    || /-----BEGIN [A-Z ]*PRIVATE KEY-----/i.test(value)
+    || /(?:\b[A-Z]:\\|\\\\[^\s\\]+\\|\/(?:Users|home|private|Volumes|mnt)\/)/i.test(value)
+    || /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(value)
+    || /(?<!\d)(?:\+?86[-\s]?)?1[3-9]\d{9}(?!\d)/.test(value)
+    || /https?:\/\//i.test(value);
+}
+
+function validSnapshotText(value, maximum = 8_000, allowEmpty = true) {
+  return typeof value === "string" && value.length <= maximum && (allowEmpty || Boolean(value.trim())) && !unsafePublicText(value);
+}
+
+function validSnapshotUrl(value, kind) {
+  if (value === "") return true;
+  if (typeof value !== "string" || value.length > 500) return false;
+  let url;
+  try { url = new URL(value); } catch { return false; }
+  if (url.protocol !== "https:" || url.username || url.password || url.port || url.search || url.hash) return false;
+  const host = url.hostname.toLowerCase();
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal") || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host) || host.includes(":")) return false;
+  if (kind === "github") return ["github.com", "www.github.com"].includes(host) && /^\/[A-Za-z0-9-]{1,39}\/[A-Za-z0-9_.-]{1,100}\/?$/.test(url.pathname);
+  return !["github.com", "www.github.com"].includes(host);
+}
+
+function validTextList(value, maximumItems = 100, maximumLength = 2_000) {
+  return Array.isArray(value) && value.length <= maximumItems && value.every((item) => validSnapshotText(item, maximumLength));
+}
+
+function validPublicSnapshot(snapshot) {
+  const rootKeys = ["schemaVersion", "generatedAt", "activity", "projects", "tasks", "workLogs", "knowledge", "decisions", "summaries", "publishedAt"];
+  if (!hasExactKeys(snapshot, rootKeys) || snapshot.schemaVersion !== 1 || !validSnapshotDate(String(snapshot.generatedAt || "").slice(0, 10))) return false;
+  if (!hasExactKeys(snapshot.activity, ["startDate", "endDate", "githubDailyCounts", "githubRepositoryCount", "githubComplete", "workLogsComplete"])) return false;
+  if (!validSnapshotDate(snapshot.activity.startDate) || !validSnapshotDate(snapshot.activity.endDate) || snapshot.activity.startDate > snapshot.activity.endDate) return false;
+  const activityDays = (Date.parse(`${snapshot.activity.endDate}T00:00:00.000Z`) - Date.parse(`${snapshot.activity.startDate}T00:00:00.000Z`)) / 86_400_000 + 1;
+  if (activityDays > 366 || !Array.isArray(snapshot.activity.githubDailyCounts) || snapshot.activity.githubDailyCounts.length > 366
+    || !Number.isSafeInteger(snapshot.activity.githubRepositoryCount) || snapshot.activity.githubRepositoryCount < 0 || snapshot.activity.githubRepositoryCount > 200
+    || typeof snapshot.activity.githubComplete !== "boolean" || typeof snapshot.activity.workLogsComplete !== "boolean") return false;
+  const activityDates = new Set();
+  for (const item of snapshot.activity.githubDailyCounts) {
+    if (!hasExactKeys(item, ["date", "count"]) || !validSnapshotDate(item.date) || item.date < snapshot.activity.startDate || item.date > snapshot.activity.endDate
+      || activityDates.has(item.date) || !Number.isSafeInteger(item.count) || item.count < 0 || item.count > 1_000_000) return false;
+    activityDates.add(item.date);
+  }
+  if (!Array.isArray(snapshot.projects) || snapshot.projects.length > 200 || !Array.isArray(snapshot.tasks) || snapshot.tasks.length > 2_000
+    || !Array.isArray(snapshot.workLogs) || snapshot.workLogs.length > 5_000 || !Array.isArray(snapshot.knowledge) || snapshot.knowledge.length > 2_000
+    || !Array.isArray(snapshot.decisions) || snapshot.decisions.length > 2_000) return false;
+  const projectIds = new Set();
+  for (const item of snapshot.projects) {
+    if (!hasExactKeys(item, ["id", "name", "description", "status", "stage", "next", "url", "github", "notes", "isPinned"])
+      || !/^project-\d{3}$/.test(item.id) || projectIds.has(item.id) || !validSnapshotText(item.name, 200, false)
+      || !validSnapshotText(item.description) || !validSnapshotText(item.status, 100) || !validSnapshotText(item.stage, 200)
+      || !validSnapshotText(item.next, 2_000) || !validSnapshotText(item.notes)
+      || !validSnapshotUrl(item.url, "website") || !validSnapshotUrl(item.github, "github") || typeof item.isPinned !== "boolean") return false;
+    projectIds.add(item.id);
+  }
+  const seen = { task: new Set(), workLog: new Set(), knowledge: new Set(), decision: new Set() };
+  for (const item of snapshot.tasks) {
+    if (!hasExactKeys(item, ["id", "title", "description", "projectId", "status", "priority", "due"])
+      || !/^task-\d{4}$/.test(item.id) || seen.task.has(item.id) || !validSnapshotText(item.title, 1_000, false)
+      || !validSnapshotText(item.description) || !validSnapshotText(item.projectId, 100) || (item.projectId && !projectIds.has(item.projectId))
+      || !validSnapshotText(item.status, 80) || !validSnapshotText(item.priority, 80) || !validSnapshotText(item.due, 40)) return false;
+    seen.task.add(item.id);
+  }
+  for (const item of snapshot.workLogs) {
+    if (!hasExactKeys(item, ["id", "projectId", "workDate", "completedItems", "outcomes", "nextStep"])
+      || !/^work-log-\d{4}$/.test(item.id) || seen.workLog.has(item.id) || !projectIds.has(item.projectId) || !validSnapshotDate(item.workDate)
+      || !validSnapshotText(item.completedItems, 8_000, false)
+      || !validSnapshotText(item.outcomes) || !validSnapshotText(item.nextStep, 4_000)) return false;
+    seen.workLog.add(item.id);
+  }
+  for (const item of snapshot.knowledge) {
+    if (!hasExactKeys(item, ["id", "type", "title", "content", "summary", "tags", "projectId"])
+      || !/^knowledge-\d{4}$/.test(item.id) || seen.knowledge.has(item.id) || !validSnapshotText(item.type, 100)
+      || !validSnapshotText(item.title, 1_000, false) || !validSnapshotText(item.content, 20_000) || !validSnapshotText(item.summary)
+      || !validTextList(item.tags, 100, 200) || !validSnapshotText(item.projectId, 100) || (item.projectId && !projectIds.has(item.projectId))) return false;
+    seen.knowledge.add(item.id);
+  }
+  for (const item of snapshot.decisions) {
+    if (!hasExactKeys(item, ["id", "question", "options", "goal", "time", "cost", "risk", "recommendation", "final", "reason", "projectId"])
+      || !/^decision-\d{4}$/.test(item.id) || seen.decision.has(item.id) || !validSnapshotText(item.question, 2_000, false)
+      || !validTextList(item.options, 100, 2_000) || !validSnapshotText(item.goal) || !validSnapshotText(item.time, 1_000)
+      || !validSnapshotText(item.cost, 1_000) || !validSnapshotText(item.risk, 2_000) || !validSnapshotText(item.recommendation, 4_000)
+      || !validSnapshotText(item.final, 2_000) || !validSnapshotText(item.reason, 4_000) || !validSnapshotText(item.projectId, 100)
+      || (item.projectId && !projectIds.has(item.projectId))) return false;
+    seen.decision.add(item.id);
+  }
+  if (!hasExactKeys(snapshot.summaries, ["dailyBrief", "weeklySummary"]) || !validSnapshotText(snapshot.summaries.dailyBrief, 20_000) || !validSnapshotText(snapshot.summaries.weeklySummary, 20_000)) return false;
+  return typeof snapshot.publishedAt === "string" && snapshot.publishedAt.length <= 40;
+}
+
+async function verifySnapshotGithubLinks(snapshot, env) {
+  const projects = snapshot.projects.filter((item) => item.github);
+  if (!projects.length) return true;
+  let token = null;
+  try { token = await createPublicReadToken(env); } catch { token = null; }
+  for (const project of projects) {
+    const match = project.github.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/?$/i);
+    if (!match) return false;
+    const fullName = `${match[1]}/${match[2]}`;
+    const encoded = fullName.split("/").map(encodeURIComponent).join("/");
+    let response = await githubApi(`/repos/${encoded}`, token);
+    if (!response.ok && token) response = await githubApi(`/repos/${encoded}`);
+    if (!response.ok) return false;
+    const repo = await response.json();
+    if (repo?.private !== false || repo?.full_name?.toLowerCase() !== fullName.toLowerCase()) return false;
+  }
+  return true;
+}
+
+async function publicSnapshotRoute(request, env) {
+  if (!env.PUBLIC_WORKSPACE_SNAPSHOTS) return githubError(request, env, 503, "public_snapshot_unavailable", "公开快照存储尚未配置。");
+  if (request.method === "GET") {
+    if (isRateLimited(request, 60)) return githubError(request, env, 429, "public_snapshot_rate_limited", "快照读取过于频繁，请稍后重试。");
+    const snapshot = await env.PUBLIC_WORKSPACE_SNAPSHOTS.get(PUBLIC_SNAPSHOT_KEY, "json");
+    if (!snapshot) return githubError(request, env, 404, "public_snapshot_not_published", "尚未发布经过审核的访客快照。");
+    if (!validPublicSnapshot(snapshot)) return githubError(request, env, 503, "public_snapshot_invalid", "公开快照暂不可用，请由所有者重新发布。");
+    const cors = corsHeaders(request, env);
+    return new Response(JSON.stringify(snapshot), {
+      status: 200,
+      headers: { ...cors, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "public, max-age=60, s-maxage=300" },
+    });
+  }
+  if (request.method !== "POST") return githubError(request, env, 405, "public_snapshot_method_not_allowed", "快照仅支持公开只读 GET 和所有者发布 POST。");
+  const user = await authenticateWorkspace(request, env);
+  if (!user) return githubError(request, env, 401, "public_snapshot_owner_required", "只有已验证的 Workspace 所有者可以发布访客快照。");
+  const bodyText = await request.text();
+  if (bodyText.length > MAX_PUBLIC_SNAPSHOT_CHARS) return githubError(request, env, 413, "public_snapshot_too_large", "访客快照超过安全大小限制。");
+  let snapshot;
+  try { snapshot = JSON.parse(bodyText); } catch { return githubError(request, env, 400, "public_snapshot_invalid_json", "快照内容不是有效 JSON。"); }
+  if (!validPublicSnapshot(snapshot)) return githubError(request, env, 400, "public_snapshot_rejected", "快照字段、记录或安全筛选未通过校验；原快照保持不变。");
+  if (!await verifySnapshotGithubLinks(snapshot, env)) return githubError(request, env, 400, "public_snapshot_private_repository", "快照包含无法确认公开的 GitHub 仓库；原快照保持不变。");
+  const published = { ...snapshot, publishedAt: new Date().toISOString() };
+  await env.PUBLIC_WORKSPACE_SNAPSHOTS.put(PUBLIC_SNAPSHOT_KEY, JSON.stringify(published), { metadata: { schemaVersion: 1 } });
+  return jsonResponse(request, env, {
+    published: true,
+    publishedAt: published.publishedAt,
+    counts: {
+      projects: published.projects.length,
+      tasks: published.tasks.length,
+      workLogs: published.workLogs.length,
+      knowledge: published.knowledge.length,
+      decisions: published.decisions.length,
     },
   });
 }
@@ -809,7 +916,7 @@ export default {
     const url = new URL(request.url);
     if (!corsHeaders(request, env)) return new Response(null, { status: 403, headers: { "Cache-Control": "no-store" } });
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(request, env) });
-    if (url.pathname === "/api/public/dashboard") return publicDashboardRoute(request, env);
+    if (url.pathname === "/api/public/snapshot") return publicSnapshotRoute(request, env);
     if (url.pathname === "/api/github/public-snapshots") return publicGitHubRoute(request, env);
     if (url.pathname === "/api/github/activity") return githubActivityRoute(request, env);
     if (url.pathname.startsWith("/api/github/")) return githubRoute(request, env, url);

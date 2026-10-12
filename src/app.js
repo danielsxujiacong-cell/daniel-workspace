@@ -1,9 +1,22 @@
-if (globalThis.DANIEL_WORKSPACE_AUTHENTICATED !== true) {
+const publicSnapshotMode = globalThis.DANIEL_WORKSPACE_MODE === "public";
+let publishedSnapshot = publicSnapshotMode ? globalThis.DANIEL_WORKSPACE_PUBLIC_SNAPSHOT || null : null;
+if (!publicSnapshotMode && globalThis.DANIEL_WORKSPACE_AUTHENTICATED !== true) {
   throw new Error("Workspace requires a validated Supabase session.");
 }
 
 let workspaceAuth = globalThis.DANIEL_WORKSPACE_AUTH;
-if (!workspaceAuth?.client || !workspaceAuth.userId) throw new Error("Workspace cloud sync requires a validated user session.");
+if (!publicSnapshotMode && (!workspaceAuth?.client || !workspaceAuth.userId)) throw new Error("Workspace cloud sync requires a validated user session.");
+
+const {
+  buildPublishableSnapshot,
+  buildSnapshotActivity,
+  createSnapshotReviewDraft,
+  hydratePublicSnapshot,
+  publishPublicSnapshot,
+  PUBLIC_SNAPSHOT_COLLECTION_LABELS,
+  selectedSnapshotCounts,
+} = await import("./public-snapshot.js?v=3.8-c");
+let hydratedPublicData = publicSnapshotMode ? hydratePublicSnapshot(publishedSnapshot) : null;
 
 const {
   loadCloudCache,
@@ -18,17 +31,19 @@ const {
   saveData,
   saveLocalScanBaseline,
   saveLocalScanCache,
-} = await import("./store.js");
-const { buildAssistantContext } = await import("./ai/context.js");
-const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = await import("./ai/service.js?v=3.4.2");
-const { buildProjectNextStepContext, buildProjectNextStepPrompt, parseProjectNextStepResponse, verifiedProjectGitHubCommit } = await import("./ai/project-next-step.js?v=3.3.2");
-const { buildDailyBriefContext, buildDailyBriefPrompt, getRecentWorkLogRange, parseDailyBriefResponse } = await import("./ai/daily-brief.js?v=3.6");
-const { buildWeeklySummaryContext, buildWeeklySummaryPrompt, getWeeklySummaryRange, parseWeeklySummaryResponse, shanghaiDateKey, weeklySummaryMarkdown } = await import("./ai/weekly-summary.js?v=3.6");
-const { fetchPrivateGitHubSnapshots, listPrivateGitHubRepositories } = await import("./github/private-api.js?v=3.5-b.4");
-const { localScanEndpointFor, shouldRenderDashboardGitHubActivity } = await import("./local-companion.js?v=3.5-a.2");
+} = publicSnapshotMode ? {} : await import("./store.js");
+const { buildAssistantContext } = publicSnapshotMode ? {} : await import("./ai/context.js");
+const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = publicSnapshotMode ? {} : await import("./ai/service.js?v=3.4.2");
+const { buildProjectNextStepContext, buildProjectNextStepPrompt, parseProjectNextStepResponse, verifiedProjectGitHubCommit } = publicSnapshotMode ? {} : await import("./ai/project-next-step.js?v=3.3.2");
+const { buildDailyBriefContext, buildDailyBriefPrompt, getRecentWorkLogRange, parseDailyBriefResponse } = publicSnapshotMode ? {} : await import("./ai/daily-brief.js?v=3.6");
+const { buildWeeklySummaryContext, buildWeeklySummaryPrompt, getWeeklySummaryRange, parseWeeklySummaryResponse, shanghaiDateKey, weeklySummaryMarkdown } = publicSnapshotMode ? {} : await import("./ai/weekly-summary.js?v=3.6");
+const { fetchPrivateGitHubSnapshots, listPrivateGitHubRepositories } = publicSnapshotMode ? {} : await import("./github/private-api.js?v=3.5-b.4");
+const { localScanEndpointFor, shouldRenderDashboardGitHubActivity } = publicSnapshotMode ? { localScanEndpointFor: () => null, shouldRenderDashboardGitHubActivity: () => false } : await import("./local-companion.js?v=3.5-a.2");
 const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = await import("./suggestions.js");
-const { fetchPublicGitHubRepositories, fetchPublicGitHubRepository, GITHUB_CACHE_TTL_MS, isGitHubSnapshotFresh, parsePublicGitHubRepository } = await import("./github/public-api.js?v=3.5-b.4");
-const { fetchGitHubActivity } = await import("./github/activity.js?v=3.8");
+const { fetchPublicGitHubRepositories, fetchPublicGitHubRepository, GITHUB_CACHE_TTL_MS, isGitHubSnapshotFresh, parsePublicGitHubRepository } = publicSnapshotMode
+  ? await import("./github/public-api.js?v=3.5-b.4")
+  : await import("./github/public-api.js?v=3.5-b.4");
+const { fetchGitHubActivity } = publicSnapshotMode ? {} : await import("./github/activity.js?v=3.8");
 const { deployedWebsiteUrl, humanizeProjectCommit, projectDescriptionAfterEdit, projectDescriptionForEdit, projectIntroduction, projectShowcase } = await import("./project-story.js?v=3.7-d");
 const { buildCloudDashboardModel, buildLocalDashboardModel, buildRecentProjectUpdates, chooseRecentCommit, compareLocalProjects, homeProjectField, projectTaskProgress, taskPriorityLabel } = await import("./dashboard.js?v=3.8");
 const { buildHomeActivity, projectStageBreakdown, projectStatusBreakdown, resolveActivityRange, shiftDateKey } = await import("./home-activity.js?v=3.8");
@@ -50,14 +65,15 @@ const {
   preserveDeviceOnlyData,
   saveCloudChanges,
   setCloudProjectPinned,
-} = await import("./cloud/sync.js");
-const { loadProjectWorkLogs, loadWorkLogsForRange, loadWorkLogActivityForRange, saveWorkLogRecord, workLogCloudError } = await import("./cloud/work-logs.js?v=3.8");
+} = publicSnapshotMode ? {} : await import("./cloud/sync.js");
+const { loadProjectWorkLogs, loadWorkLogsForRange, loadWorkLogActivityForRange, saveWorkLogRecord, workLogCloudError } = publicSnapshotMode ? {} : await import("./cloud/work-logs.js?v=3.8");
 
 const app = document.querySelector("#app");
-let legacyData = loadData();
-let cloudCache = loadCloudCache(workspaceAuth.userId);
-let db = cloudCache?.data || legacyData;
-const legacyCandidateCounts = countLocalMigrationCandidates(legacyData);
+const emptyPublicData = { projects: [], tasks: [], workLogs: [], knowledge: [], decisions: [], activities: [], settings: { theme: "system" } };
+let legacyData = publicSnapshotMode ? null : loadData();
+let cloudCache = publicSnapshotMode ? null : loadCloudCache(workspaceAuth.userId);
+let db = publicSnapshotMode ? hydratedPublicData || emptyPublicData : cloudCache?.data || legacyData;
+const legacyCandidateCounts = publicSnapshotMode ? {} : countLocalMigrationCandidates(legacyData);
 const legacyCandidateTotal = Object.values(legacyCandidateCounts).reduce((sum, count) => sum + count, 0);
 let cloudBaseline = cloudCache?.baseline || null;
 let cloudCacheActive = Boolean(cloudCache);
@@ -69,18 +85,19 @@ let cloudInitializationRunning = false;
 let workspaceDataRevision = 0;
 let dashboardWorkLogsRequestId = 0;
 let homeActivityRequestId = 0;
-let migrationState = loadCloudMigrationState(workspaceAuth.userId);
-let scanCache = loadLocalScanCache();
-const localScanEndpoint = localScanEndpointFor(window.location);
+let migrationState = publicSnapshotMode ? null : loadCloudMigrationState(workspaceAuth.userId);
+let scanCache = publicSnapshotMode ? { inventory: null, baseline: null } : loadLocalScanCache();
+const localScanEndpoint = publicSnapshotMode ? null : localScanEndpointFor(window.location);
 let workspaceActive = true;
 let activeLocalScanController = null;
 const ui = {
   page: "home",
   projectId: null,
   projectFilter: "all",
+  projectStatusFilter: "",
   projectsView: "cloud",
   moreMenuOpen: false,
-  projectPinningAvailable: typeof cloudCache?.projectPinningAvailable === "boolean" ? cloudCache.projectPinningAvailable : null,
+  projectPinningAvailable: publicSnapshotMode ? true : typeof cloudCache?.projectPinningAvailable === "boolean" ? cloudCache.projectPinningAvailable : null,
   projectPinUpdatingId: null,
   localProjectId: null,
   localProjects: scanCache.inventory,
@@ -121,8 +138,9 @@ const ui = {
   githubRefreshAttemptAt: {},
   githubAppStatus: "unknown",
   githubAppRepositoryCount: 0,
+  publicSnapshotPreview: { status: "idle", draft: null, error: "", confirmed: false, publishedAt: "" },
   cloud: {
-    status: navigator.onLine === false ? "offline" : "loading",
+    status: publicSnapshotMode ? "public" : navigator.onLine === false ? "offline" : "loading",
     lastSyncedAt: cloudCache?.lastSyncedAt || "",
     migrationAvailable: false,
     migrationDismissed: false,
@@ -360,10 +378,13 @@ async function loadDashboardWorkLogs({ force = false } = {}) {
 }
 
 function currentHomeActivityRange() {
-  const defaults = resolveActivityRange("30d");
+  const snapshotEndDate = publicSnapshotMode ? publishedSnapshot?.activity?.endDate : "";
+  const anchor = snapshotEndDate ? new Date(`${snapshotEndDate}T12:00:00+08:00`) : Date.now();
+  const defaults = resolveActivityRange("30d", { now: anchor });
   return resolveActivityRange(ui.activityRangePreset, {
     startDate: ui.activityCustomStartDate || defaults.startDate,
     endDate: ui.activityCustomEndDate || defaults.endDate,
+    now: anchor,
   });
 }
 
@@ -372,6 +393,35 @@ async function loadHomeActivity({ force = false } = {}) {
   const range = currentHomeActivityRange();
   if (!range.valid) {
     ui.homeActivity = { key: "", status: "invalid", model: null, range, githubStatus: "idle", workLogsStatus: "idle", error: range.error };
+    render();
+    return;
+  }
+
+  if (publicSnapshotMode) {
+    if (publishedSnapshot && (range.startDate < publishedSnapshot.activity.startDate || range.endDate > publishedSnapshot.activity.endDate)) {
+      ui.homeActivity = {
+        key: `${range.startDate}|${range.endDate}|published-snapshot-outside-range`,
+        status: "invalid",
+        model: null,
+        range,
+        githubStatus: "unavailable",
+        workLogsStatus: "unavailable",
+        error: `已发布快照的活动历史覆盖 ${publishedSnapshot.activity.startDate} 至 ${publishedSnapshot.activity.endDate}；请选择此范围内的日期。`,
+      };
+      render();
+      return;
+    }
+    const model = buildSnapshotActivity(publishedSnapshot, range);
+    ui.homeActivity = {
+      key: `${range.startDate}|${range.endDate}|published-snapshot`,
+      status: model ? "ready" : "unavailable",
+      model,
+      range,
+      githubStatus: model?.coverage.githubStatus || "unavailable",
+      workLogsStatus: model?.coverage.workLogsStatus || "unavailable",
+      error: model ? "" : publishedSnapshot ? `当前已发布快照覆盖 ${publishedSnapshot.activity.startDate} 至 ${publishedSnapshot.activity.endDate}。` : dashboardUnavailableMessage(),
+    };
+    if (ui.selectedActivityDate && (ui.selectedActivityDate < range.startDate || ui.selectedActivityDate > range.endDate)) ui.selectedActivityDate = "";
     render();
     return;
   }
@@ -602,11 +652,11 @@ function deferLegacyMigration() {
 }
 
 window.addEventListener("online", () => {
-  if (workspaceActive) void initializeCloudSync();
+  if (workspaceActive && !publicSnapshotMode) void initializeCloudSync();
 });
 
 window.addEventListener("offline", () => {
-  if (!workspaceActive) return;
+  if (!workspaceActive || publicSnapshotMode) return;
   ui.cloud.status = "offline";
   render();
 });
@@ -780,6 +830,7 @@ function localDashboardModel() {
 }
 
 function cloudDashboardModel() {
+  if (publicSnapshotMode) return buildCloudDashboardModel({ projects: db.projects, tasks: db.tasks });
   if (!cloudCacheActive && ui.cloud.status !== "synced") return buildCloudDashboardModel({});
   return buildCloudDashboardModel({ projects: db.projects, tasks: db.tasks });
 }
@@ -1217,10 +1268,11 @@ function renderDashboardRecent(model) {
 }
 
 function cloudWorkspaceAvailable() {
-  return cloudCacheActive || ["synced", "syncing"].includes(ui.cloud.status);
+  return publicSnapshotMode ? Boolean(hydratedPublicData) : cloudCacheActive || ["synced", "syncing"].includes(ui.cloud.status);
 }
 
 function dashboardUnavailableMessage() {
+  if (publicSnapshotMode && !hydratedPublicData) return globalThis.DANIEL_WORKSPACE_PUBLIC_SNAPSHOT_ERROR || "所有者尚未发布经过审核的访客快照。";
   if (ui.cloud.status === "loading") return "Supabase 正在读取当前账号资料。";
   if (ui.cloud.status === "migration") return "Supabase 中暂时没有项目和任务；本机旧资料尚未迁移。";
   if (ui.cloud.status === "error" || ui.cloud.status === "offline") return "当前没有可用的云端缓存；本机草稿不会计入首页。";
@@ -1264,14 +1316,17 @@ function renderDashboardGitHubActivity(project, hasLocalProgress = false) {
 }
 
 function renderDashboardFocusProjects(projects, dataAvailable) {
-  const pinnedProjects = dataAvailable && ui.projectPinningAvailable === true ? getHomePinnedProjects(projects) : [];
+  const pinnedProjects = dataAvailable && ui.projectPinningAvailable === true
+    ? publicSnapshotMode ? projects.filter((project) => project.isPinned === true).sort((left, right) => String(left.name || "").localeCompare(String(right.name || ""), "zh-CN")).slice(0, MAX_HOME_PROJECT_PINS) : getHomePinnedProjects(projects)
+    : [];
   const projectCard = (project) => {
     const status = homeProjectField(project.status);
     const stage = homeProjectField(project.stage);
     const next = homeProjectField(project.next);
     const progress = projectTaskProgress(project.id, db.tasks);
     const progressLabel = progress ? `已完成 ${progress.completed} / ${progress.total} 项任务` : "";
-    return `<article class="dashboard-focus-card"><header class="dashboard-focus-card-header"><button class="dashboard-focus-name" data-action="view-project" data-id="${esc(project.id)}">${esc(project.name)}</button>${status ? statusPill(status) : ""}</header><div class="dashboard-focus-card-details">${stage ? `<div class="dashboard-project-field"><span>当前阶段</span><strong>${esc(stage)}</strong></div>` : ""}${next ? `<div class="dashboard-project-field"><span>下一步</span><strong>${esc(next)}</strong></div>` : ""}${progress ? `<div class="dashboard-project-field"><span>任务完成</span><strong>${esc(progressLabel)}</strong></div>` : ""}</div><footer class="dashboard-focus-card-footer"><button class="button quiet small" data-action="view-project" data-id="${esc(project.id)}">查看详情 ${icon("arrow")}</button></footer></article>`;
+    const website = deployedWebsiteUrl(project);
+    return `<article class="dashboard-focus-card"><header class="dashboard-focus-card-header"><button class="dashboard-focus-name" data-action="view-project" data-id="${esc(project.id)}">${esc(project.name)}</button>${status ? statusPill(status) : ""}</header><div class="dashboard-focus-card-details">${stage ? `<div class="dashboard-project-field"><span>当前阶段</span><strong>${esc(stage)}</strong></div>` : ""}${next ? `<div class="dashboard-project-field"><span>下一步</span><strong>${esc(next)}</strong></div>` : ""}${progress ? `<div class="dashboard-project-field"><span>任务完成</span><strong>${esc(progressLabel)}</strong></div>` : ""}</div><footer class="dashboard-focus-card-footer"><button class="button quiet small" data-action="view-project" data-id="${esc(project.id)}">查看详情 ${icon("arrow")}</button>${website ? `<a class="button quiet small" href="${esc(website)}" target="_blank" rel="noopener noreferrer">体验网站 ${icon("external")}</a>` : ""}</footer></article>`;
   };
   const empty = !dataAvailable
     ? "项目暂不可用。"
@@ -1329,11 +1384,15 @@ function activityWeeks(days) {
 }
 
 function renderActivityRangeControl(activity, dataAvailable) {
-  const defaults = resolveActivityRange("30d");
+  const snapshotEndDate = publicSnapshotMode ? publishedSnapshot?.activity?.endDate : "";
+  const anchor = snapshotEndDate ? new Date(`${snapshotEndDate}T12:00:00+08:00`) : Date.now();
+  const defaults = resolveActivityRange("30d", { now: anchor });
   const startDate = ui.activityCustomStartDate || defaults.startDate;
   const endDate = ui.activityCustomEndDate || defaults.endDate;
   const busy = ui.homeActivity.status === "loading";
-  return `<div class="dashboard-activity-controls"><label class="sr-only" for="dashboard-activity-range">活动统计时间范围</label><select id="dashboard-activity-range" aria-label="活动统计时间范围" ${dataAvailable ? "" : "disabled"}><option value="7d" ${ui.activityRangePreset === "7d" ? "selected" : ""}>近 7 天</option><option value="30d" ${ui.activityRangePreset === "30d" ? "selected" : ""}>近 30 天</option><option value="90d" ${ui.activityRangePreset === "90d" ? "selected" : ""}>近 90 天</option><option value="custom" ${ui.activityRangePreset === "custom" ? "selected" : ""}>自定义日期</option></select>${ui.activityRangePreset === "custom" ? `<label class="sr-only" for="dashboard-activity-start">开始日期</label><input id="dashboard-activity-start" type="date" value="${esc(startDate)}" max="${esc(defaults.endDate)}" aria-label="开始日期"/><span class="activity-date-separator">至</span><label class="sr-only" for="dashboard-activity-end">结束日期</label><input id="dashboard-activity-end" type="date" value="${esc(endDate)}" max="${esc(defaults.endDate)}" aria-label="结束日期"/>` : ""}<button class="button quiet small" data-action="refresh-home-activity" ${!dataAvailable || busy ? "disabled" : ""} aria-label="刷新活动统计">${busy ? "读取中…" : "刷新"}</button></div>`;
+  const publicReady = !publicSnapshotMode || Boolean(hydratedPublicData);
+  const maximumDate = publicSnapshotMode && snapshotEndDate ? snapshotEndDate : defaults.endDate;
+  return `<div class="dashboard-activity-controls"><label class="sr-only" for="dashboard-activity-range">活动统计时间范围</label><select id="dashboard-activity-range" aria-label="活动统计时间范围" ${dataAvailable && publicReady ? "" : "disabled"}><option value="7d" ${ui.activityRangePreset === "7d" ? "selected" : ""}>近 7 天</option><option value="30d" ${ui.activityRangePreset === "30d" ? "selected" : ""}>近 30 天</option><option value="90d" ${ui.activityRangePreset === "90d" ? "selected" : ""}>近 90 天</option><option value="custom" ${ui.activityRangePreset === "custom" ? "selected" : ""}>自定义日期</option></select>${ui.activityRangePreset === "custom" ? `<label class="sr-only" for="dashboard-activity-start">开始日期</label><input id="dashboard-activity-start" type="date" value="${esc(startDate)}" max="${esc(maximumDate)}" aria-label="开始日期"/><span class="activity-date-separator">至</span><label class="sr-only" for="dashboard-activity-end">结束日期</label><input id="dashboard-activity-end" type="date" value="${esc(endDate)}" max="${esc(maximumDate)}" aria-label="结束日期"/>` : ""}${publicSnapshotMode ? "" : `<button class="button quiet small" data-action="refresh-home-activity" ${!dataAvailable || busy ? "disabled" : ""} aria-label="刷新活动统计">${busy ? "读取中…" : "刷新"}</button>`}</div>`;
 }
 
 function renderActivityStatus(activity, dataAvailable) {
@@ -1383,7 +1442,7 @@ function renderActivityMetrics(activity) {
 
 function renderActivityHeatmap(activity, dataAvailable) {
   const model = activity.model;
-  if (!dataAvailable || !model) return `<section class="card dashboard-chart-card dashboard-heatmap-card grid-span-12"><header class="dashboard-chart-heading"><div><h2>开发活动</h2><p>GitHub 提交与 Workspace 工作记录</p></div>${renderActivityRangeControl(activity, dataAvailable)}</header>${renderActivityStatus(activity, dataAvailable)}<div class="dashboard-chart-empty">${activity.status === "loading" ? "活动数据读取中…" : "等待云端数据"}</div></section>`;
+  if (!dataAvailable || !model) return `<section class="card dashboard-chart-card dashboard-heatmap-card grid-span-12"><header class="dashboard-chart-heading"><div><h2>开发活动</h2><p>GitHub 提交与 Workspace 工作记录</p></div>${renderActivityRangeControl(activity, dataAvailable)}</header>${renderActivityStatus(activity, dataAvailable)}<div class="dashboard-chart-empty">${activity.status === "loading" ? "活动数据读取中…" : publicSnapshotMode ? "等待已审核快照" : "等待云端数据"}</div></section>`;
   const maximum = Math.max(1, ...model.days.map((day) => day.githubCommits + day.workLogs));
   const weeks = activityWeeks(model.days);
   const cells = weeks.flatMap((week, weekIndex) => week.map((day, weekday) => {
@@ -1446,7 +1505,7 @@ function renderActivityTrend(activity, dataAvailable) {
 }
 
 function renderProjectStatusChart(projects, dataAvailable) {
-  if (!dataAvailable) return `<section class="card dashboard-chart-card dashboard-status-card grid-span-5"><header class="dashboard-chart-heading"><div><h2>项目状态</h2><p>当前 Supabase 快照</p></div></header><div class="dashboard-chart-empty">${esc(dashboardUnavailableMessage())}</div></section>`;
+  if (!dataAvailable) return `<section class="card dashboard-chart-card dashboard-status-card grid-span-5"><header class="dashboard-chart-heading"><div><h2>项目状态</h2><p>${publicSnapshotMode ? "公开快照" : "当前 Supabase 快照"}</p></div></header><div class="dashboard-chart-empty">${esc(dashboardUnavailableMessage())}</div></section>`;
   const breakdown = projectStatusBreakdown(projects);
   const total = breakdown.reduce((sum, item) => sum + item.count, 0);
   const radius = 54;
@@ -1455,16 +1514,16 @@ function renderProjectStatusChart(projects, dataAvailable) {
   const slices = breakdown.map((item, index) => {
     const length = total ? circumference * item.count / total : 0;
     const color = PROJECT_STATUS_COLORS[item.label] || DASHBOARD_CHART_COLORS[index % DASHBOARD_CHART_COLORS.length];
-    const ring = `<circle cx="76" cy="76" r="${radius}" fill="none" stroke="${color}" stroke-width="18" stroke-dasharray="${length.toFixed(2)} ${(circumference - length).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}"><title>${esc(`${item.label} ${item.count} 个项目`)}</title></circle>`;
+    const ring = `<circle cx="76" cy="76" r="${radius}" fill="none" stroke="${color}" stroke-width="18" stroke-dasharray="${length.toFixed(2)} ${(circumference - length).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" ${publicSnapshotMode ? `tabindex="0" role="button" data-action="filter-project-status" data-status="${esc(item.label)}" aria-label="筛选${esc(item.label)}项目"` : ""}><title>${esc(`${item.label} ${item.count} 个项目 · 点击筛选`)}</title></circle>`;
     offset += length;
     return ring;
   }).join("");
   const legend = breakdown.map((item, index) => {
     const color = PROJECT_STATUS_COLORS[item.label] || DASHBOARD_CHART_COLORS[index % DASHBOARD_CHART_COLORS.length];
     const ratio = total ? Math.round(item.count / total * 100) : 0;
-    return `<li><i style="--status-color:${color}"></i><span>${esc(item.label)}</span><strong>${item.count}</strong><small>${ratio}%</small></li>`;
+    return `<li ${publicSnapshotMode ? `data-action="filter-project-status" data-status="${esc(item.label)}" tabindex="0" role="button" aria-label="筛选${esc(item.label)}项目"` : ""}><i style="--status-color:${color}"></i><span>${esc(item.label)}</span><strong>${item.count}</strong><small>${ratio}%</small></li>`;
   }).join("");
-  return `<section class="card dashboard-chart-card dashboard-status-card grid-span-5"><header class="dashboard-chart-heading"><div><h2>项目状态</h2><p>当前 Supabase 快照 · 不受日期筛选</p></div></header>${total ? `<div class="dashboard-status-body"><svg class="dashboard-status-donut" viewBox="0 0 152 152" role="img" aria-label="${esc(`当前 ${total} 个项目的状态分布`)}"><circle cx="76" cy="76" r="${radius}" fill="none" stroke="var(--line)" stroke-width="18"/>${slices}<text x="76" y="73" class="dashboard-donut-total">${total}</text><text x="76" y="91" class="dashboard-donut-label">项目</text></svg><ul class="dashboard-status-legend">${legend}</ul></div>` : `<div class="dashboard-chart-empty">当前没有项目记录。</div>`}</section>`;
+  return `<section class="card dashboard-chart-card dashboard-status-card grid-span-5"><header class="dashboard-chart-heading"><div><h2>项目状态</h2><p>${publicSnapshotMode ? "公开快照" : "当前 Supabase 快照"} · 不受日期筛选</p></div></header>${total ? `<div class="dashboard-status-body"><svg class="dashboard-status-donut" viewBox="0 0 152 152" role="img" aria-label="${esc(`当前 ${total} 个项目的状态分布`)}"><circle cx="76" cy="76" r="${radius}" fill="none" stroke="var(--line)" stroke-width="18"/>${slices}<text x="76" y="73" class="dashboard-donut-total">${total}</text><text x="76" y="91" class="dashboard-donut-label">项目</text></svg><ul class="dashboard-status-legend">${legend}</ul></div>` : `<div class="dashboard-chart-empty">当前没有项目记录。</div>`}</section>`;
 }
 
 function renderProjectStageChart(projects, dataAvailable) {
@@ -1475,7 +1534,7 @@ function renderProjectStageChart(projects, dataAvailable) {
     const color = item.label === "未分类" ? "#c6cbd4" : DASHBOARD_CHART_COLORS[index % DASHBOARD_CHART_COLORS.length];
     return `<div class="dashboard-stage-row"><span class="dashboard-stage-label" title="${esc(item.label)}">${esc(item.label)}</span><div class="dashboard-stage-track"><span style="width:${(item.count / maximum * 100).toFixed(1)}%;--stage-color:${color}"></span></div><strong>${item.count}</strong></div>`;
   }).join("");
-  return `<section class="card dashboard-chart-card dashboard-stage-card grid-span-12"><header class="dashboard-chart-heading"><div><h2>项目阶段</h2><p>按 Supabase 已保存字段统计；空值显示为未分类，不从 Commit 推断阶段</p></div></header>${breakdown.length ? `<div class="dashboard-stage-list">${bars}</div>` : `<div class="dashboard-chart-empty">当前没有项目记录。</div>`}</section>`;
+  return `<section class="card dashboard-chart-card dashboard-stage-card grid-span-12"><header class="dashboard-chart-heading"><div><h2>项目阶段</h2><p>${publicSnapshotMode ? "按已发布快照字段统计；空值显示为未分类，不从 Commit 推断阶段" : "按 Supabase 已保存字段统计；空值显示为未分类，不从 Commit 推断阶段"}</p></div></header>${breakdown.length ? `<div class="dashboard-stage-list">${bars}</div>` : `<div class="dashboard-chart-empty">当前没有项目记录。</div>`}</section>`;
 }
 
 function latestProjectCommit(project, localProject = null) {
@@ -1678,7 +1737,28 @@ function renderDashboardSuggestion(today, suggestion) {
 }
 
 function renderDashboardAISummary(today, suggestion) {
+  if (publicSnapshotMode) return renderPublishedAISummaries();
   return `<details id="dashboard-ai-summary" class="dashboard-ai-summary grid-span-12" ${ui.aiSummaryExpanded ? "open" : ""}><summary><span>${icon("sparkle")} AI 总结</span><small>今日简报 · 每周总结 · 下一步建议</small></summary><div class="dashboard-ai-summary-content">${renderDashboardSuggestion(today, suggestion)}${renderDailyBrief()}${renderWeeklySummary()}</div></details>`;
+}
+
+function renderPublishedAISummaries() {
+  const summaries = publishedSnapshot?.summaries || {};
+  const daily = summaries.dailyBrief ? parseSnapshotSummary(summaries.dailyBrief) : null;
+  const weekly = summaries.weeklySummary ? parseSnapshotSummary(summaries.weeklySummary) : null;
+  const section = (title, value) => value ? `<section class="card card-pad public-snapshot-summary"><h3>${esc(title)}</h3>${renderSummaryValue(value)}</section>` : "";
+  if (!daily && !weekly) return `<section class="card card-pad public-ai-snapshot grid-span-12"><h2>AI 简报与周报</h2><p class="muted">访客不会触发实时 AI 请求；所有者可在发布预览中选择已生成且审核过的内容。</p></section>`;
+  return `<section class="public-ai-snapshot grid-span-12"><div class="section-title"><h2>已发布的 AI 总结</h2><span class="muted">快照内容 · 不会实时请求 AI</span></div><div class="public-ai-snapshot-grid">${section("AI 今日简报", daily)}${section("AI 每周总结", weekly)}</div></section>`;
+}
+
+function parseSnapshotSummary(value) {
+  try { return JSON.parse(value); } catch { return { text: value }; }
+}
+
+function renderSummaryValue(value) {
+  if (typeof value === "string") return `<p>${esc(value)}</p>`;
+  if (Array.isArray(value)) return `<ul>${value.map((item) => `<li>${renderSummaryValue(item)}</li>`).join("")}</ul>`;
+  if (value && typeof value === "object") return `<div class="public-summary-fields">${Object.entries(value).map(([key, item]) => `<div><strong>${esc(key)}</strong>${renderSummaryValue(item)}</div>`).join("")}</div>`;
+  return `<span>${esc(value ?? "")}</span>`;
 }
 
 function renderDashboard() {
@@ -1686,10 +1766,11 @@ function renderDashboard() {
   const dataAvailable = cloudWorkspaceAvailable();
   const projects = dataAvailable ? db.projects : [];
   const today = cloudModel.todayContinue;
-  const suggestion = suggestionForDashboard(today);
+  const suggestion = publicSnapshotMode ? null : suggestionForDashboard(today);
   const counts = cloudModel.counts;
   const completedProjects = projects.filter((project) => project.status === "已完成").length;
-  const stats = `<section class="dashboard-overview grid-span-12" aria-label="项目指挥中心"><div class="dashboard-home-title"><div class="eyebrow">DANIEL WORKSPACE · PROJECT CONTROL CENTER</div><h1>项目指挥中心</h1></div><div class="dashboard-stat-row">${dashboardStatCard("项目总数", dataAvailable ? counts.projects : "—", "projects", "all", dataAvailable ? "查看全部项目" : "云端读取中", !dataAvailable)}${dashboardStatCard("进行中", dataAvailable ? counts.activeProjects : "—", "projects", "active", dataAvailable ? "查看进行中" : "云端读取中", !dataAvailable)}${dashboardStatCard("已完成", dataAvailable ? completedProjects : "—", "projects", "completed", dataAvailable ? "查看已完成" : "云端读取中", !dataAvailable)}${dashboardStatCard("待办任务", dataAvailable ? counts.openTasks : "—", "tasks", "todo", dataAvailable ? "查看待办任务" : "云端读取中", !dataAvailable)}</div></section>`;
+  const unavailableLabel = publicSnapshotMode ? "快照未发布" : "云端读取中";
+  const stats = `<section class="dashboard-overview grid-span-12" aria-label="项目指挥中心"><div class="dashboard-home-title"><div class="eyebrow">DANIEL WORKSPACE · PROJECT CONTROL CENTER</div><h1>项目指挥中心</h1></div><div class="dashboard-stat-row">${dashboardStatCard("项目总数", dataAvailable ? counts.projects : "—", "projects", "all", dataAvailable ? "查看全部项目" : unavailableLabel, !dataAvailable)}${dashboardStatCard("进行中", dataAvailable ? counts.activeProjects : "—", "projects", "active", dataAvailable ? "查看进行中" : unavailableLabel, !dataAvailable)}${dashboardStatCard("已完成", dataAvailable ? completedProjects : "—", "projects", "completed", dataAvailable ? "查看已完成" : unavailableLabel, !dataAvailable)}${dashboardStatCard("待办任务", dataAvailable ? counts.openTasks : "—", "tasks", "todo", dataAvailable ? "查看待办任务" : unavailableLabel, !dataAvailable)}</div></section>`;
   const activity = ui.homeActivity;
   return renderDashboardLayout([stats, renderActivityHeatmap(activity, dataAvailable), renderActivityTrend(activity, dataAvailable), renderProjectStatusChart(projects, dataAvailable), renderProjectStageChart(projects, dataAvailable), renderDashboardFocusProjects(projects, dataAvailable), renderDashboardAISummary(today, suggestion)]);
 }
@@ -1699,6 +1780,7 @@ function renderProjects() {
   const projects = cloudProjects.filter((project) => ui.projectFilter === "active"
     ? project.status === "进行中"
     : ui.projectFilter === "completed" ? project.status === "已完成" : true)
+    .filter((project) => !ui.projectStatusFilter || project.status === ui.projectStatusFilter)
     .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
   const pinnedProjectCount = countPinnedProjects(cloudProjects);
   const configured = cloudProjects.filter((project) => parsePublicGitHubRepository(project.github));
@@ -1730,7 +1812,8 @@ function renderProjects() {
   const refreshError = hasRequestFailure || hasUnavailableRepository || githubAppError
     ? `<p class="github-refresh-feedback" role="status">${esc(ui.githubAppMessage || (hasRequestFailure ? "部分仓库刷新失败，可重试。" : "部分仓库暂不可读取，仍显示可用数据。"))}</p>` : "";
   const cloudView = `<div class="heading-actions project-actions"><button class="button" data-action="refresh-all-github" ${ui.githubRefreshing || ui.githubAppStatus === "connecting" ? "disabled aria-busy=\"true\"" : ""}>${icon("reset")} ${ui.githubAppStatus === "connecting" || ui.githubRefreshing ? "刷新中…" : "刷新 GitHub"}</button><button class="button primary" data-action="open-create-project">${icon("plus")} 新建项目</button></div>${refreshError}${pinNotice}<div class="toolbar"><div class="filter-list">${[["all", "全部"], ["active", "进行中"], ["completed", "已完成"]].map(([filter, label]) => `<button class="filter-button ${ui.projectFilter === filter ? "active" : ""}" data-action="filter-projects" data-filter="${filter}">${label}${filter === "active" && cloudWorkspaceAvailable() ? ` · ${cloudProjects.filter((project) => project.status === "进行中").length}` : filter === "completed" && cloudWorkspaceAvailable() ? ` · ${cloudProjects.filter((project) => project.status === "已完成").length}` : ""}</button>`).join("")}</div><span class="muted">${cloudWorkspaceAvailable() ? `${projects.length} 个项目` : esc(dashboardUnavailableMessage())}</span></div>${projectList}`;
-  return `<div class="page-heading projects-heading"><div><h1>Projects</h1></div></div><div class="project-view-switch" role="group" aria-label="项目来源"><button class="filter-button ${ui.projectsView === "cloud" ? "active" : ""}" data-action="set-projects-view" data-view="cloud" aria-pressed="${ui.projectsView === "cloud"}">云端项目</button><button class="filter-button ${ui.projectsView === "local" ? "active" : ""}" data-action="set-projects-view" data-view="local" aria-pressed="${ui.projectsView === "local"}">本机扫描</button></div>${ui.projectsView === "local" ? localView : cloudView}`;
+  const statusFilterChip = publicSnapshotMode && ui.projectStatusFilter ? `<div class="public-filter-notice">状态筛选：${esc(ui.projectStatusFilter)} <button type="button" class="text-button" data-action="clear-project-status">清除筛选</button></div>` : "";
+  return `<div class="page-heading projects-heading"><div><h1>Projects</h1></div></div>${publicSnapshotMode ? "" : `<div class="project-view-switch" role="group" aria-label="项目来源"><button class="filter-button ${ui.projectsView === "cloud" ? "active" : ""}" data-action="set-projects-view" data-view="cloud" aria-pressed="${ui.projectsView === "cloud"}">云端项目</button><button class="filter-button ${ui.projectsView === "local" ? "active" : ""}" data-action="set-projects-view" data-view="local" aria-pressed="${ui.projectsView === "local"}">本机扫描</button></div>`}${statusFilterChip}${publicSnapshotMode ? cloudView : ui.projectsView === "local" ? localView : cloudView}`;
 }
 
 function safeExternal(url) {
@@ -1803,6 +1886,7 @@ function projectNextStepContext(project, tasks) {
 }
 
 function renderProjectNextStep(project, tasks) {
+  if (publicSnapshotMode) return "";
   const current = projectNextStepContext(project, tasks);
   const state = ui.projectNextStep?.projectId === project.id ? ui.projectNextStep : null;
   const aiReady = getAIStatus().mode === "real";
@@ -1978,21 +2062,28 @@ function adoptProjectNextStep(projectId) {
 
 function renderProjectWorkLogs(project) {
   const state = ui.projectWorkLogs.projectId === project.id ? ui.projectWorkLogs : null;
-  const status = state?.status || "loading";
+  const status = publicSnapshotMode ? "ready" : state?.status || "loading";
   const items = state?.items || [];
   const editing = state?.editingId ? items.find((item) => item.id === state.editingId) : null;
   const canSave = cloudSyncEnabled && ui.cloud.status === "synced" && !state?.saving && navigator.onLine !== false;
-  const form = `<form id="project-work-log-form" class="work-log-form" data-project-id="${esc(project.id)}"><div class="work-log-form-grid"><label>日期<input type="date" name="workDate" value="${esc(editing?.workDate || shanghaiDateKey())}" ${state?.saving ? "disabled" : ""}></label><label class="work-log-wide">完成事项<textarea name="completedItems" rows="3" maxlength="8000" required placeholder="记录具体完成的工作" ${state?.saving ? "disabled" : ""}>${esc(editing?.completedItems || "")}</textarea></label><label class="work-log-wide">成果<textarea name="outcomes" rows="2" maxlength="8000" placeholder="可选" ${state?.saving ? "disabled" : ""}>${esc(editing?.outcomes || "")}</textarea></label><label class="work-log-wide">下一步<textarea name="nextStep" rows="2" maxlength="4000" placeholder="可选" ${state?.saving ? "disabled" : ""}>${esc(editing?.nextStep || "")}</textarea></label><label class="work-log-wide">证据链接<textarea name="evidenceLinks" rows="2" maxlength="20480" placeholder="可选：HTTP/HTTPS 链接，每行一个" ${state?.saving ? "disabled" : ""}>${esc((editing?.evidenceLinks || []).join("\n"))}</textarea></label></div><div class="work-log-form-actions">${editing ? `<button type="button" class="button quiet small" data-action="cancel-work-log-edit" ${state?.saving ? "disabled" : ""}>取消编辑</button>` : ""}<button type="submit" class="button primary small" ${canSave ? "" : "disabled"}>${state?.saving ? "保存中…" : editing ? "保存修改" : "保存工作记录"}</button></div></form>`;
-  const records = items.length ? `<div class="work-log-list">${items.map((item) => `<article class="work-log-entry"><header><time>${esc(item.workDate)}</time><button type="button" class="button quiet small" data-action="edit-work-log" data-id="${esc(item.id)}" ${state?.saving ? "disabled" : ""}>编辑</button></header><div><strong>完成事项</strong><p class="work-log-text">${esc(item.completedItems)}</p></div>${item.outcomes ? `<div><strong>成果</strong><p class="work-log-text">${esc(item.outcomes)}</p></div>` : ""}${item.nextStep ? `<div><strong>下一步</strong><p class="work-log-text">${esc(item.nextStep)}</p></div>` : ""}${item.evidenceLinks.length ? `<div><strong>证据</strong><ul class="work-log-links">${item.evidenceLinks.map((link) => `<li><a href="${esc(link)}" target="_blank" rel="noopener noreferrer">${esc(link)}</a></li>`).join("")}</ul></div>` : ""}</article>`).join("")}</div>` : `<div class="empty-state">这个项目还没有工作记录。</div>`;
-  const statusMessage = status === "loading" ? `<p class="work-log-message" role="status">正在读取 Supabase 工作记录…</p>`
+  const form = publicSnapshotMode ? "" : `<form id="project-work-log-form" class="work-log-form" data-project-id="${esc(project.id)}"><div class="work-log-form-grid"><label>日期<input type="date" name="workDate" value="${esc(editing?.workDate || shanghaiDateKey())}" ${state?.saving ? "disabled" : ""}></label><label class="work-log-wide">完成事项<textarea name="completedItems" rows="3" maxlength="8000" required placeholder="记录具体完成的工作" ${state?.saving ? "disabled" : ""}>${esc(editing?.completedItems || "")}</textarea></label><label class="work-log-wide">成果<textarea name="outcomes" rows="2" maxlength="8000" placeholder="可选" ${state?.saving ? "disabled" : ""}>${esc(editing?.outcomes || "")}</textarea></label><label class="work-log-wide">下一步<textarea name="nextStep" rows="2" maxlength="4000" placeholder="可选" ${state?.saving ? "disabled" : ""}>${esc(editing?.nextStep || "")}</textarea></label><label class="work-log-wide">证据链接<textarea name="evidenceLinks" rows="2" maxlength="20480" placeholder="可选：HTTP/HTTPS 链接，每行一个" ${state?.saving ? "disabled" : ""}>${esc((editing?.evidenceLinks || []).join("\n"))}</textarea></label></div><div class="work-log-form-actions">${editing ? `<button type="button" class="button quiet small" data-action="cancel-work-log-edit" ${state?.saving ? "disabled" : ""}>取消编辑</button>` : ""}<button type="submit" class="button primary small" ${canSave ? "" : "disabled"}>${state?.saving ? "保存中…" : editing ? "保存修改" : "保存工作记录"}</button></div></form>`;
+  const records = items.length ? `<div class="work-log-list">${items.map((item) => `<article class="work-log-entry"><header><time>${esc(item.workDate)}</time>${publicSnapshotMode ? "" : `<button type="button" class="button quiet small" data-action="edit-work-log" data-id="${esc(item.id)}" ${state?.saving ? "disabled" : ""}>编辑</button>`}</header><div><strong>完成事项</strong><p class="work-log-text">${esc(item.completedItems)}</p></div>${item.outcomes ? `<div><strong>成果</strong><p class="work-log-text">${esc(item.outcomes)}</p></div>` : ""}${item.nextStep ? `<div><strong>下一步</strong><p class="work-log-text">${esc(item.nextStep)}</p></div>` : ""}${(item.evidenceLinks || []).length ? `<div><strong>证据</strong><ul class="work-log-links">${item.evidenceLinks.map((link) => `<li><a href="${esc(link)}" target="_blank" rel="noopener noreferrer">${esc(link)}</a></li>`).join("")}</ul></div>` : ""}</article>`).join("")}</div>` : `<div class="empty-state">这个项目还没有工作记录。</div>`;
+  const statusMessage = publicSnapshotMode ? "" : status === "loading" ? `<p class="work-log-message" role="status">正在读取 Supabase 工作记录…</p>`
     : status === "error" ? `<p class="work-log-message error" role="alert">${esc(state?.error || "读取工作记录失败。")}</p>`
       : !cloudWorkspaceAvailable() ? `<p class="work-log-message" role="status">当前没有可用的云端工作区资料。</p>`
         : !canSave && !state?.saving ? `<p class="work-log-message" role="status">云端暂不可用，稍后可重试。</p>` : "";
-  return `<section class="card card-pad project-work-logs"><div class="card-header"><div><h3>工作记录</h3></div><div class="heading-actions"><button type="button" class="button quiet small" data-action="reload-project-work-logs" data-id="${esc(project.id)}" ${status === "loading" || state?.saving ? "disabled" : ""}>刷新</button><button type="button" class="button primary small" data-action="toggle-work-log-form" data-id="${esc(project.id)}" aria-expanded="${Boolean(state?.formOpen || editing)}" ${editing || state?.saving ? "disabled" : ""}>${state?.formOpen || editing ? "收起" : "记录进展"}</button></div></div>${statusMessage}${state?.error && status !== "error" ? `<p class="work-log-message error" role="alert">${esc(state.error)}</p>` : ""}${status !== "loading" && (state?.formOpen || editing) ? form : ""}${records}</section>`;
+  return `<section class="card card-pad project-work-logs"><div class="card-header"><div><h3>工作记录</h3></div>${publicSnapshotMode ? `<span class="muted">快照只读</span>` : `<div class="heading-actions"><button type="button" class="button quiet small" data-action="reload-project-work-logs" data-id="${esc(project.id)}" ${status === "loading" || state?.saving ? "disabled" : ""}>刷新</button><button type="button" class="button primary small" data-action="toggle-work-log-form" data-id="${esc(project.id)}" aria-expanded="${Boolean(state?.formOpen || editing)}" ${editing || state?.saving ? "disabled" : ""}>${state?.formOpen || editing ? "收起" : "记录进展"}</button></div>`}</div>${statusMessage}${state?.error && status !== "error" ? `<p class="work-log-message error" role="alert">${esc(state.error)}</p>` : ""}${!publicSnapshotMode && status !== "loading" && (state?.formOpen || editing) ? form : ""}${records}</section>`;
 }
 
 async function loadProjectWorkLogEntries(projectId, { force = false } = {}) {
   const current = ui.projectWorkLogs;
+  if (publicSnapshotMode) {
+    const items = [...(db.workLogs || [])].filter((item) => item.projectId === projectId)
+      .sort((left, right) => right.workDate.localeCompare(left.workDate));
+    ui.projectWorkLogs = { projectId, status: "ready", items, error: "", editingId: "", saving: false, formOpen: false };
+    if (workspaceActive && ui.projectId === projectId) render();
+    return;
+  }
   if (!force && current.projectId === projectId && ["loading", "ready"].includes(current.status)) return;
   ui.projectWorkLogs = { projectId, status: "loading", items: current.projectId === projectId ? current.items : [], error: "", editingId: "", saving: false, formOpen: current.projectId === projectId && current.formOpen };
   render();
@@ -2096,7 +2187,7 @@ function renderTasks() {
     return `<section class="empty-page"><p>还没有任务。</p><button class="button primary" data-action="open-create-task">${icon("plus")} 新建任务</button></section>`;
   }
   const tasks = [...cloudTasks].filter((task) => taskMatchesFilter(task, ui.taskFilter)).sort((a, b) => Number(a.status === "done") - Number(b.status === "done") || ["高", "中", "低"].indexOf(a.priority) - ["高", "中", "低"].indexOf(b.priority));
-  return `<div class="page-heading"><div><div class="eyebrow">行动清单 · 云端同步</div><h1>Tasks</h1><p>把下一步写清楚，一件一件完成。</p></div><div class="heading-actions"><button class="button primary" data-action="open-create-task">${icon("plus")} 新建任务</button></div></div>
+  return `<div class="page-heading"><div><div class="eyebrow">${publicSnapshotMode ? "公开快照 · 只读" : "行动清单 · 云端同步"}</div><h1>Tasks</h1><p>把下一步写清楚，一件一件完成。</p></div><div class="heading-actions"><button class="button primary" data-action="open-create-task">${icon("plus")} 新建任务</button></div></div>
     <div class="toolbar"><div class="filter-list">${filters.map(([value, label]) => `<button class="filter-button ${ui.taskFilter === value ? "active" : ""}" data-action="filter-tasks" data-filter="${value}">${label}${value === "todo" && cloudWorkspaceAvailable() ? ` · ${cloudTasks.filter((task) => task.status !== "done").length}` : ""}</button>`).join("")}</div><span class="muted">${cloudWorkspaceAvailable() ? `${tasks.length} 项任务` : esc(dashboardUnavailableMessage())}</span></div>
     <section class="card card-pad"><div class="task-list">${tasks.map((task) => taskRow(task)).join("") || `<div class="empty-state"><strong>${cloudWorkspaceAvailable() ? "没有符合条件的任务" : "Supabase 资料不可用"}</strong>${cloudWorkspaceAvailable() ? "创建一条任务，让下一步更清晰。" : esc(dashboardUnavailableMessage())}</div>`}</div></section>`;
 }
@@ -2106,13 +2197,13 @@ function renderKnowledge() {
   if (cloudWorkspaceAvailable() && records.length === 0) {
     return `<section class="empty-page"><p>还没有资料。</p><button class="button primary" data-action="open-create-knowledge">${icon("plus")} 添加资料</button></section>`;
   }
-  return `<div class="page-heading"><div><div class="eyebrow">收件箱 · 云端同步</div><h1>Knowledge</h1><p>先收集，再整理。文本、笔记和链接随账号保存。</p></div><div class="heading-actions"><button class="button primary" data-action="open-create-knowledge">${icon("plus")} 添加资料</button></div></div>
+  return `<div class="page-heading"><div><div class="eyebrow">${publicSnapshotMode ? "公开快照 · 只读" : "收件箱 · 云端同步"}</div><h1>Knowledge</h1><p>${publicSnapshotMode ? "查看经审核并发布的知识资料。" : "先收集，再整理。文本、笔记和链接随账号保存。"}</p></div><div class="heading-actions"><button class="button primary" data-action="open-create-knowledge">${icon("plus")} 添加资料</button></div></div>
     <section class="card card-pad"><div class="card-header"><h3>所有资料</h3><span class="minor">${records.length} 条</span></div>${records.map((item) => `<article class="knowledge-row"><div class="record-icon">${recordIcon(item.type)}</div><div class="record-copy"><div class="record-title">${esc(item.title)}</div><div class="record-meta">${esc(item.summary || "暂无摘要")} · ${esc(projectTitle(item.projectId))} · ${timeAgo(item.createdAt)}</div><details class="knowledge-details"><summary>查看内容</summary><div class="record-meta content-text">${knowledgeContent(item)}</div></details><div class="tag-row">${item.tags.map((tag) => `<span class="tag">#${esc(tag)}</span>`).join("")}</div></div><div class="record-actions" style="opacity:1"><button class="icon-button" data-action="edit-knowledge" data-id="${esc(item.id)}" aria-label="编辑资料">${icon("edit")}</button><button class="icon-button" data-action="delete-knowledge" data-id="${esc(item.id)}" aria-label="删除资料">${icon("trash")}</button></div></article>`).join("") || `<div class="empty-state"><strong>收件箱还空着</strong>添加一段文字、一则笔记或一个网页链接。</div>`}</section>`;
 }
 
 function decisionCard(decision) {
   const expanded = ui.expandedDecisionId === decision.id;
-  return `<article class="card decision-card" data-action="toggle-decision" data-id="${esc(decision.id)}" tabindex="0" role="button" aria-expanded="${expanded}"><div class="decision-card-top"><div><h3>${esc(decision.question)}</h3><p>${esc(decision.goal || "尚未描述目标")}</p></div><div class="record-actions" style="opacity:1"><button class="icon-button" data-action="edit-decision" data-id="${esc(decision.id)}" aria-label="编辑决策">${icon("edit")}</button><button class="icon-button" data-action="delete-decision" data-id="${esc(decision.id)}" aria-label="删除决策">${icon("trash")}</button></div></div><div class="decision-result">${icon("target")} ${esc(decision.final || "尚未填写最终决定")}</div><div class="record-meta">${esc(projectTitle(decision.projectId))} · ${timeAgo(decision.createdAt)}</div>${expanded ? `<div class="decision-detail-grid"><div class="decision-detail-cell"><div class="meta-label">可选方案</div><div class="meta-value">${esc(decision.options.join("；") || "未记录")}</div></div><div class="decision-detail-cell"><div class="meta-label">Mock AI 建议</div><div class="meta-value">${esc(decision.recommendation || "未生成")}</div></div><div class="decision-detail-cell"><div class="meta-label">时间 · 成本</div><div class="meta-value">${esc(decision.time || "未记录")} · ${esc(decision.cost || "未记录")}</div></div><div class="decision-detail-cell"><div class="meta-label">风险</div><div class="meta-value">${esc(decision.risk || "未记录")}</div></div><div class="decision-detail-cell" style="grid-column:1/-1"><div class="meta-label">决定原因</div><div class="meta-value">${esc(decision.reason || "未记录")}</div></div></div>` : ""}</article>`;
+  return `<article class="card decision-card" data-action="toggle-decision" data-id="${esc(decision.id)}" tabindex="0" role="button" aria-expanded="${expanded}"><div class="decision-card-top"><div><h3>${esc(decision.question)}</h3><p>${esc(decision.goal || "尚未描述目标")}</p></div><div class="record-actions" style="opacity:1"><button class="icon-button" data-action="edit-decision" data-id="${esc(decision.id)}" aria-label="编辑决策">${icon("edit")}</button><button class="icon-button" data-action="delete-decision" data-id="${esc(decision.id)}" aria-label="删除决策">${icon("trash")}</button></div></div><div class="decision-result">${icon("target")} ${esc(decision.final || "尚未填写最终决定")}</div><div class="record-meta">${esc(projectTitle(decision.projectId))} · ${timeAgo(decision.createdAt)}</div>${expanded ? `<div class="decision-detail-grid"><div class="decision-detail-cell"><div class="meta-label">可选方案</div><div class="meta-value">${esc(decision.options.join("；") || "未记录")}</div></div><div class="decision-detail-cell"><div class="meta-label">${publicSnapshotMode ? "已记录建议" : "Mock AI 建议"}</div><div class="meta-value">${esc(decision.recommendation || "未生成")}</div></div><div class="decision-detail-cell"><div class="meta-label">时间 · 成本</div><div class="meta-value">${esc(decision.time || "未记录")} · ${esc(decision.cost || "未记录")}</div></div><div class="decision-detail-cell"><div class="meta-label">风险</div><div class="meta-value">${esc(decision.risk || "未记录")}</div></div><div class="decision-detail-cell" style="grid-column:1/-1"><div class="meta-label">决定原因</div><div class="meta-value">${esc(decision.reason || "未记录")}</div></div></div>` : ""}</article>`;
 }
 
 function renderDecisions() {
@@ -2120,12 +2211,13 @@ function renderDecisions() {
   if (cloudWorkspaceAvailable() && decisions.length === 0) {
     return `<section class="empty-page"><p>还没有决策。</p><button class="button primary" data-action="open-create-decision">${icon("plus")} 新建决策</button></section>`;
   }
-  return `<div class="page-heading"><div><div class="eyebrow">决策记录 · 云端同步</div><h1>Decisions</h1><p>把问题、选项和最终原因放在一起，方便以后回看。</p></div><div class="heading-actions"><button class="button primary" data-action="open-create-decision">${icon("plus")} 新建决策</button></div></div>
+  return `<div class="page-heading"><div><div class="eyebrow">${publicSnapshotMode ? "公开快照 · 只读" : "决策记录 · 云端同步"}</div><h1>Decisions</h1><p>把问题、选项和最终原因放在一起，方便以后回看。</p></div><div class="heading-actions"><button class="button primary" data-action="open-create-decision">${icon("plus")} 新建决策</button></div></div>
     <div class="section-title"><h2>历史决策</h2><span class="muted">${decisions.length} 条记录</span></div>${decisions.map(decisionCard).join("") || `<div class="card empty-state"><strong>还没有决策记录</strong>记录一次选择，之后就能回看当时的考虑。<br><br><button class="button primary" data-action="open-create-decision">${icon("plus")} 新建决策</button></div>`}`;
 }
 
 function pageTitle() {
   if (ui.page === "project") return projectTitle(ui.projectId);
+  if (ui.page === "snapshot-preview") return "访客快照预览";
   if (ui.page === "local-project") return localProjectById(ui.localProjectId)?.name || "本地项目";
   return ({ home: "Home", projects: "Projects", knowledge: "Knowledge", decisions: "Decisions", tasks: "Tasks" })[ui.page] || "Home";
 }
@@ -2134,7 +2226,7 @@ function renderNav() {
   const items = [["home", "grid", "Home"], ["projects", "folder", "Projects"], ["tasks", "checkSquare", "Tasks"]];
   const moreItems = [["knowledge", "inbox", "Knowledge"], ["decisions", "bulb", "Decisions"]];
   const moreActive = moreItems.some(([page]) => ui.page === page);
-  return `<aside class="sidebar"><div class="brand"><div class="brand-mark">D</div><div><div class="brand-name">Daniel Workspace</div><div class="brand-caption">个人 AI 工作台</div></div></div><nav class="nav-list" aria-label="主导航">${items.map(([page, iconName, label]) => `<button class="nav-item ${(ui.page === page || (ui.page === "project" && page === "projects")) ? "active" : ""}" data-page="${page}">${icon(iconName)}<span>${label}</span>${page === "tasks" ? `<span class="nav-count">${cloudWorkspaceAvailable() ? openTasks().length : "—"}</span>` : ""}</button>`).join("")}<div class="nav-more-wrap"><button class="nav-item ${moreActive ? "active" : ""}" data-action="toggle-more-menu" aria-expanded="${ui.moreMenuOpen}" aria-haspopup="true"><span class="nav-more-glyph" aria-hidden="true">···</span><span>更多</span></button><div class="nav-more-menu" ${ui.moreMenuOpen ? "" : "hidden"}>${moreItems.map(([page, iconName, label]) => `<button class="nav-item ${ui.page === page ? "active" : ""}" data-page="${page}">${icon(iconName)}<span>${label}</span></button>`).join("")}</div></div></nav></aside>`;
+  return `<aside class="sidebar"><div class="brand"><div class="brand-mark">D</div><div><div class="brand-name">Daniel Workspace</div><div class="brand-caption">${publicSnapshotMode ? "公开只读项目指挥中心" : "个人 AI 工作台"}</div></div></div><nav class="nav-list" aria-label="主导航">${items.map(([page, iconName, label]) => `<button class="nav-item ${(ui.page === page || (ui.page === "project" && page === "projects")) ? "active" : ""}" data-page="${page}">${icon(iconName)}<span>${label}</span>${page === "tasks" ? `<span class="nav-count">${cloudWorkspaceAvailable() ? openTasks().length : "—"}</span>` : ""}</button>`).join("")}<div class="nav-more-wrap"><button class="nav-item ${moreActive ? "active" : ""}" data-action="toggle-more-menu" aria-expanded="${ui.moreMenuOpen}" aria-haspopup="true"><span class="nav-more-glyph" aria-hidden="true">···</span><span>更多</span></button><div class="nav-more-menu" ${ui.moreMenuOpen ? "" : "hidden"}>${moreItems.map(([page, iconName, label]) => `<button class="nav-item ${ui.page === page ? "active" : ""}" data-page="${page}">${icon(iconName)}<span>${label}</span></button>`).join("")}</div></div></nav></aside>`;
 }
 
 function searchItems(query) {
@@ -2165,6 +2257,7 @@ function contextLabel() {
 }
 
 function renderAssistant() {
+  if (publicSnapshotMode) return "";
   if (!ui.assistantOpen) return `<button class="assistant-launcher" data-action="open-assistant" aria-label="打开 AI 助手"><span class="assistant-orb">${icon("sparkle")}</span><span>问问 AI</span></button>`;
   const prompts = ["project", "local-project"].includes(ui.page) ? ["这个项目现在有什么问题？", "这个项目最近有什么变化？", "帮我总结下一步"] : ui.page === "decisions" ? ["帮我整理这个决定", "我最近做了什么决定？"] : ui.page === "tasks" ? ["我下一步应该做什么？", "哪个任务优先？"] : ui.page === "knowledge" ? ["最近收集了哪些资料？", "总结一下当前收件箱"] : ["我下一步应该做什么？", "最近有哪些进展？"];
   const status = getAIStatus();
@@ -2356,6 +2449,7 @@ function cloudStatusLabel() {
 }
 
 function renderCloudNotice() {
+  if (publicSnapshotMode) return "";
   if (ui.cloud.status === "error" || ui.cloud.status === "offline") {
     const cacheMessage = cloudCacheActive
       ? `当前显示上次成功同步的云端缓存${ui.cloud.lastSyncedAt ? `（${formattedTimestamp(ui.cloud.lastSyncedAt)}）` : ""}。`
@@ -2377,13 +2471,202 @@ function renderCloudNotice() {
   return "";
 }
 
+function renderPublicSnapshotNotice() {
+  if (publishedSnapshot) return `<section class="public-snapshot-banner" role="status"><strong>公开只读快照</strong><span>展示所有者审核后发布的数据 · ${publishedSnapshot.publishedAt ? `更新于 ${esc(formattedTimestamp(publishedSnapshot.publishedAt))}` : "发布日期未提供"}</span></section>`;
+  const message = globalThis.DANIEL_WORKSPACE_PUBLIC_SNAPSHOT_ERROR || "尚未发布经过审核的访客快照。私人工作台数据不会自动公开。";
+  return `<section class="public-snapshot-banner pending" role="status"><strong>访客快照尚未发布</strong><span>${esc(message)} 项目、任务、工作记录、资料和决策在所有者审核并发布前不会显示。</span></section>`;
+}
+
+function reviewItemTitle(item) {
+  const fields = item.fields || {};
+  return fields.name || fields.title || fields.question || fields.repository || fields.type || item.reviewId;
+}
+
+function reviewItemPreview(item) {
+  return JSON.stringify(item.fields || {}, null, 2);
+}
+
+function renderSnapshotReviewItems(collection) {
+  const items = ui.publicSnapshotPreview.draft?.collections?.[collection] || [];
+  if (!items.length) return `<p class="empty-state">没有可供审核的${esc(PUBLIC_SNAPSHOT_COLLECTION_LABELS[collection] || collection)}记录。</p>`;
+  return `<div class="snapshot-review-list">${items.map((item) => `<article class="snapshot-review-item"><div class="snapshot-review-item-head"><label class="snapshot-review-toggle"><input type="checkbox" data-snapshot-review="include" data-collection="${esc(collection)}" data-review-id="${esc(item.reviewId)}" ${item.include ? "checked" : ""}/><strong>${esc(reviewItemTitle(item))}</strong></label><span class="muted">${item.include ? "已选择发布" : "默认隐藏"}</span></div>${item.findings?.length ? `<div class="snapshot-sensitive-notice"><strong>需要检查的字段</strong><ul>${item.findings.map((finding) => `<li>${esc(finding.field)}：${esc(finding.reason)}</li>`).join("")}</ul><label><input type="checkbox" data-snapshot-review="acknowledge" data-collection="${esc(collection)}" data-review-id="${esc(item.reviewId)}" ${item.sensitiveAcknowledged ? "checked" : ""}/> 我已检查这条记录中的提示字段</label></div>` : ""}<details class="snapshot-review-detail"><summary>查看将发布的脱敏内容</summary><pre>${esc(reviewItemPreview(item))}</pre></details></article>`).join("")}</div>`;
+}
+
+function renderSnapshotCollectionSection(collection, title) {
+  const items = ui.publicSnapshotPreview.draft?.collections?.[collection] || [];
+  const counts = selectedSnapshotCounts(ui.publicSnapshotPreview.draft);
+  return `<section class="card card-pad snapshot-review-section"><header class="card-header"><div><h2>${esc(title)}</h2><p class="minor">候选 ${items.length} 条 · 已选择 ${counts[collection] || 0} 条</p></div></header>${renderSnapshotReviewItems(collection)}</section>`;
+}
+
+function snapshotSelectionTotal(counts) {
+  return Object.entries(counts || {}).reduce((sum, [key, value]) => sum + (key === "summaries" ? value : value), 0);
+}
+
+function renderSnapshotPreview() {
+  const state = ui.publicSnapshotPreview;
+  if (!state.draft && state.status === "loading") return `<section class="page-heading"><div><div class="eyebrow">访客快照</div><h1>正在生成预览</h1><p>读取已同步的真实项目资料、工作记录和公开仓库汇总；这些数据仍只留在私人浏览器中。</p></div></section><section class="card card-pad snapshot-loading" role="status"><span class="startup-spinner"></span>正在筛选并核对数据来源…</section>`;
+  if (!state.draft && state.status === "error") return `<section class="page-heading"><div><div class="eyebrow">访客快照</div><h1>预览未完成</h1><p>${esc(state.error)}</p></div><button class="button primary" data-action="generate-snapshot-preview">重试生成预览</button></section>`;
+  if (!state.draft) return `<section class="page-heading"><div><div class="eyebrow">只读发布流程</div><h1>预览访客快照</h1><p>读取当前登录账号中已同步的真实数据，逐条查看公开字段并手动选择要发布的记录。生成预览不会上传数据或更新访客页面。</p></div></section><section class="card card-pad snapshot-intro"><h2>预览范围</h2><ul><li>项目、任务、工作记录、知识资料和决策来自当前 Supabase 登录工作区。</li><li>开发活动只统计经 Worker 核验为公开的 GitHub 仓库；只保存每日汇总，不保存 Commit 原文或 SHA。</li><li>本机路径、账号 ID、证据链接、未核验仓库地址、令牌和密钥不会进入发布快照。</li><li>全部候选默认不公开；必须逐条选择，并再次确认记录数量和内容后才会发送给 Worker。</li></ul><button class="button primary" data-action="generate-snapshot-preview">读取真实资料并生成预览</button></section>`;
+
+  const draft = state.draft;
+  const counts = selectedSnapshotCounts(draft);
+  const totalSelected = snapshotSelectionTotal(counts);
+  const candidates = draft.collections;
+  const totalCandidates = Object.values(candidates).reduce((sum, items) => sum + items.length, 0);
+  const workLogStatus = draft.completeness.workLogs && !draft.completeness.workLogsTruncated ? "工作记录已完整读取" : "工作记录历史可能不完整";
+  const githubStatus = draft.completeness.github ? "公开仓库活动读取完整" : `${draft.completeness.githubErrors} 项公开仓库活动未完整读取`;
+  return `<section class="page-heading snapshot-page-heading"><div><div class="eyebrow">所有者专用 · 预览后发布</div><h1>访客快照预览</h1><p>候选 ${totalCandidates} 条 · 当前选择 ${totalSelected} 条。预览为本机内存草稿，未写入 KV，也未发送给访客。</p></div><button class="button quiet" data-action="regenerate-snapshot-preview">重新读取私人资料</button></section>
+    <section class="snapshot-scope-grid"><article class="card snapshot-scope-card"><span>数据源</span><strong>${esc(ui.cloud.lastSyncedAt ? `Supabase · ${formattedTimestamp(ui.cloud.lastSyncedAt)}` : "Supabase 当前会话")}</strong></article><article class="card snapshot-scope-card"><span>活动时间范围</span><strong>${esc(draft.activityRange.startDate)} 至 ${esc(draft.activityRange.endDate)}</strong></article><article class="card snapshot-scope-card"><span>工作记录</span><strong>${esc(workLogStatus)}</strong></article><article class="card snapshot-scope-card"><span>GitHub 活动</span><strong>${esc(githubStatus)}</strong></article></section>
+    <section class="card card-pad snapshot-review-warning"><strong>公开字段检查</strong><p>下面展示的是将要发布的脱敏内容。带提示的字段必须先勾选“已检查”；没有提示的记录也必须逐条勾选。证据链接、认证信息、本机目录、Companion 扫描和私人 Commit 原文不进入快照。</p>${draft.completeness.workLogsTruncated ? `<p class="snapshot-warning">至少一个项目超过单次工作记录读取上限；本次预览会标记活动统计不完整。</p>` : ""}</section>
+    ${renderSnapshotCollectionSection("projects", "Projects · 全部项目候选")}
+    ${renderSnapshotCollectionSection("tasks", "Tasks · 任务候选")}
+    ${renderSnapshotCollectionSection("workLogs", "Work Logs · 工作记录候选")}
+    ${renderSnapshotCollectionSection("knowledge", "Knowledge · 知识资料候选")}
+    ${renderSnapshotCollectionSection("decisions", "Decisions · 决策候选")}
+    ${renderSnapshotCollectionSection("githubActivity", "GitHub · 已核验公开仓库每日汇总")}
+    ${renderSnapshotCollectionSection("summaries", "AI 简报/周报 · 仅包含已生成内容")}
+    <section class="card card-pad snapshot-publish-panel"><h2>发布前确认</h2><p>选中记录：项目 ${counts.projects || 0}、任务 ${counts.tasks || 0}、工作记录 ${counts.workLogs || 0}、资料 ${counts.knowledge || 0}、决策 ${counts.decisions || 0}、公开仓库活动 ${counts.githubActivity || 0}、AI 总结 ${counts.summaries || 0}。</p><label class="snapshot-final-review"><input id="snapshot-final-review" type="checkbox" ${state.confirmed ? "checked" : ""}/> 我已检查选中记录和脱敏字段，并确认这些内容适合公开展示。</label><button class="button primary" data-action="open-snapshot-publish-confirm" ${!state.confirmed || !totalSelected ? "disabled" : ""}>确认公开并发布 ${totalSelected} 条记录</button>${state.publishedAt ? `<p class="snapshot-published-status" role="status">最近一次发布成功：${esc(formattedTimestamp(state.publishedAt))}。线上访客快照已更新。</p>` : ""}</section>`;
+}
+
+async function mapWithConcurrency(items, concurrency, callback) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      try { results[index] = await callback(items[index], index); }
+      catch (error) { results[index] = { error }; }
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+async function generateSnapshotPreview() {
+  if (publicSnapshotMode || !workspaceActive) return;
+  if (!workspaceAuth?.client || !workspaceAuth.userId || ui.cloud.status !== "synced" || cloudSyncRunning || cloudSyncTimer) {
+    ui.publicSnapshotPreview = { status: "error", draft: null, error: "请先等待私人工作台完成 Supabase 同步，再生成快照。" };
+    render();
+    return;
+  }
+  ui.publicSnapshotPreview = { status: "loading", draft: null, error: "", confirmed: false, publishedAt: ui.publicSnapshotPreview.publishedAt || "" };
+  render();
+  const today = shanghaiDateKey();
+  const range = resolveActivityRange("custom", { startDate: shiftDateKey(today, 1 - PUBLIC_SNAPSHOT_ACTIVITY_DAYS), endDate: today });
+  try {
+    const projectLogs = await mapWithConcurrency(db.projects, 4, async (project) => ({
+      projectId: project.id,
+      items: await loadProjectWorkLogs(workspaceAuth.client, workspaceAuth.userId, project.id),
+    }));
+    const failedWorkLogs = projectLogs.some((result) => result?.error);
+    const workLogs = projectLogs.flatMap((result) => Array.isArray(result?.items) ? result.items : []);
+    const workLogsTruncated = projectLogs.some((result) => result?.items?.length >= 200);
+    const repositoryProjects = db.projects.flatMap((project) => {
+      const repository = parsePublicGitHubRepository(project.github);
+      return repository ? [{ project, repository }] : [];
+    });
+    const publicCheck = repositoryProjects.length
+      ? await fetchPublicGitHubRepositories(repositoryProjects.map(({ repository }) => repository.url), workspaceAuth)
+      : { snapshots: [], errors: [] };
+    const verifiedRepos = (publicCheck.snapshots || []).filter((repo) => repo.isPublic === true);
+    const activityResult = verifiedRepos.length
+      ? await fetchGitHubActivity(verifiedRepos.map((repo) => repo.repositoryName).filter(Boolean), workspaceAuth, range)
+      : { repositories: [], errors: [] };
+    const activityComplete = verifiedRepos.length === 0 || (activityResult.errors.length === 0
+      && activityResult.repositories.length === verifiedRepos.length
+      && activityResult.repositories.every((item) => item.complete === true && item.truncated !== true));
+    const summaries = {
+      dailyBrief: { status: ui.dailyBriefStatus, value: ui.dailyBrief },
+      weeklySummary: { status: ui.weeklySummaryStatus, value: ui.weeklySummary },
+    };
+    const draft = createSnapshotReviewDraft({
+      data: db,
+      workLogs,
+      publicRepositories: verifiedRepos,
+      githubActivity: { ...activityResult, complete: activityComplete, errors: activityResult.errors, workLogsComplete: !failedWorkLogs, workLogsTruncated },
+      summaries,
+      activityRange: { startDate: range.startDate, endDate: range.endDate },
+    });
+    if (!range.valid) throw new Error(range.error || "快照日期范围无效。");
+    ui.publicSnapshotPreview = { status: "ready", draft, error: "", confirmed: false, publishedAt: ui.publicSnapshotPreview.publishedAt || "" };
+  } catch (error) {
+    ui.publicSnapshotPreview = { status: "error", draft: null, error: typeof error?.message === "string" ? error.message : "读取真实工作区资料失败。", confirmed: false, publishedAt: ui.publicSnapshotPreview.publishedAt || "" };
+  }
+  if (workspaceActive) render();
+}
+
+function toggleSnapshotReview(collection, reviewId, field, value) {
+  const items = ui.publicSnapshotPreview.draft?.collections?.[collection];
+  const item = items?.find((entry) => entry.reviewId === reviewId);
+  if (!item) return;
+  const draft = ui.publicSnapshotPreview.draft;
+  if (field === "include" && value && collection !== "projects" && collection !== "summaries") {
+    const selectedParents = (draft.collections.projects || []).filter((project) => project.include);
+    const hasSelectedParent = collection === "githubActivity"
+      ? (item.sourceProjectIds || []).some((sourceId) => selectedParents.some((project) => project.sourceId === sourceId))
+      : !item.fields.projectId || selectedParents.some((project) => project.reviewId === item.fields.projectId);
+    if ((collection === "workLogs" || item.fields.projectId || item.sourceProjectIds?.length) && !hasSelectedParent) {
+      toast("请先选择这条记录关联的项目，再选择发布记录");
+      return;
+    }
+  }
+  if (field === "include" && value && item.findings?.length && !item.sensitiveAcknowledged) {
+    toast("请先检查并确认这条记录中的敏感字段提示");
+    return;
+  }
+  item[field] = Boolean(value);
+  if (field === "include" && collection === "projects" && !value) {
+    for (const [childCollection, children] of Object.entries(draft.collections)) {
+      for (const child of children) {
+        if (childCollection === "githubActivity" ? child.sourceProjectIds?.includes(item.sourceId) : child.fields?.projectId === item.reviewId) child.include = false;
+      }
+    }
+  }
+  ui.publicSnapshotPreview.confirmed = false;
+  render();
+}
+
+async function publishReviewedSnapshot() {
+  if (publicSnapshotMode || !ui.publicSnapshotPreview.confirmed) return;
+  const snapshot = buildPublishableSnapshot(ui.publicSnapshotPreview.draft);
+  try {
+    const result = await publishPublicSnapshot(snapshot, workspaceAuth);
+    ui.publicSnapshotPreview = { ...ui.publicSnapshotPreview, status: "ready", publishedAt: result.publishedAt || new Date().toISOString(), confirmed: false };
+    toast("访客快照已发布");
+  } catch (error) {
+    ui.publicSnapshotPreview.error = typeof error?.message === "string" ? error.message : "发布失败；原有访客快照保持不变。";
+    toast(ui.publicSnapshotPreview.error);
+  }
+  if (workspaceActive) render();
+}
+
+function openSnapshotPublishConfirmation() {
+  if (publicSnapshotMode || !ui.publicSnapshotPreview.confirmed) return;
+  const snapshot = buildPublishableSnapshot(ui.publicSnapshotPreview.draft);
+  const counts = selectedSnapshotCounts(ui.publicSnapshotPreview.draft);
+  const total = snapshotSelectionTotal(counts);
+  const ranges = `${snapshot.activity.startDate} 至 ${snapshot.activity.endDate}`;
+  openConfirmation({
+    title: "确认发布访客快照",
+    message: `即将公开 ${total} 条经你逐条选择的记录：项目 ${counts.projects || 0}、任务 ${counts.tasks || 0}、工作记录 ${counts.workLogs || 0}、资料 ${counts.knowledge || 0}、决策 ${counts.decisions || 0}、公开仓库活动 ${counts.githubActivity || 0}、AI 总结 ${counts.summaries || 0}。开发活动范围为 ${ranges}。快照只包含页面中展示的白名单字段，不含本机路径、用户 ID、证据链接、私钥、Token 或私人仓库内容。确认后这些内容会写入公开只读 KV，访客无需登录即可读取。`,
+    confirmLabel: `公开并发布 ${total} 条记录`,
+    onConfirm: () => { void publishReviewedSnapshot(); },
+  });
+}
+
 function render() {
   if (!workspaceActive) return;
-  const page = ui.page === "home" ? renderDashboard() : ui.page === "projects" ? renderProjects() : ui.page === "project" ? renderProjectDetail() : ui.page === "local-project" ? renderLocalProjectDetail() : ui.page === "tasks" ? renderTasks() : ui.page === "knowledge" ? renderKnowledge() : renderDecisions();
-  app.innerHTML = `${renderNav()}<main class="main-shell"><header class="topbar"><div class="breadcrumbs"><span>Daniel Workspace</span><span class="crumb-sep">/</span><strong>${esc(pageTitle())}</strong></div><div class="search-wrap"><div class="search-box">${icon("search")}<input id="global-search" type="search" value="${esc(ui.query)}" placeholder="搜索项目、资料、决策或任务…" autocomplete="off" aria-label="全局搜索"/><kbd class="search-hint">Ctrl K</kbd></div><div id="search-results"></div></div><div class="topbar-actions"><span class="today-label">${formattedDate()}</span><button class="cloud-sync-indicator ${esc(ui.cloud.status)}" data-action="retry-cloud-sync" title="点击重新检查 Supabase 同步状态" aria-live="polite" ${["loading", "syncing", "migrating"].includes(ui.cloud.status) ? "disabled" : ""}>${esc(cloudStatusLabel())}</button><button class="icon-button theme-toggle" data-action="toggle-theme" title="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式" aria-label="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式">${icon(document.documentElement.dataset.theme === "light" ? "moon" : "sun")}</button><button class="icon-button" data-action="open-assistant" title="打开 AI Assistant" aria-label="打开 AI Assistant">${icon("sparkle")}</button><button class="button quiet small logout-button" data-action="logout">退出登录</button></div></header><div class="content">${renderCloudNotice()}${page}</div></main>${renderAssistant()}${renderModal()}<div class="toast-region" id="toast-region" aria-live="polite"></div>`;
+  if (publicSnapshotMode && ui.page === "local-project") ui.page = "home";
+  const page = ui.page === "home" ? renderDashboard() : ui.page === "projects" ? renderProjects() : ui.page === "project" ? renderProjectDetail() : ui.page === "snapshot-preview" && !publicSnapshotMode ? renderSnapshotPreview() : ui.page === "local-project" ? renderLocalProjectDetail() : ui.page === "tasks" ? renderTasks() : ui.page === "knowledge" ? renderKnowledge() : renderDecisions();
+  app.dataset.mode = publicSnapshotMode ? "public" : "private";
+  const headerActions = publicSnapshotMode
+    ? `<span class="today-label">公开只读快照</span><a class="button quiet small public-login-link" href="?mode=login">登录</a>`
+    : `<button class="button quiet small" data-action="open-snapshot-preview">预览访客快照</button><span class="today-label">${formattedDate()}</span><button class="cloud-sync-indicator ${esc(ui.cloud.status)}" data-action="retry-cloud-sync" title="点击重新检查 Supabase 同步状态" aria-live="polite" ${["loading", "syncing", "migrating"].includes(ui.cloud.status) ? "disabled" : ""}>${esc(cloudStatusLabel())}</button><button class="icon-button theme-toggle" data-action="toggle-theme" title="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式" aria-label="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式">${icon(document.documentElement.dataset.theme === "light" ? "moon" : "sun")}</button><button class="icon-button" data-action="open-assistant" title="打开 AI Assistant" aria-label="打开 AI Assistant">${icon("sparkle")}</button><button class="button quiet small logout-button" data-action="logout">退出登录</button>`;
+  app.innerHTML = `${renderNav()}<main class="main-shell"><header class="topbar"><div class="breadcrumbs"><span>Daniel Workspace</span><span class="crumb-sep">/</span><strong>${esc(pageTitle())}</strong></div><div class="search-wrap"><div class="search-box">${icon("search")}<input id="global-search" type="search" value="${esc(ui.query)}" placeholder="搜索项目、资料、决策或任务…" autocomplete="off" aria-label="全局搜索"/><kbd class="search-hint">Ctrl K</kbd></div><div id="search-results"></div></div><div class="topbar-actions">${headerActions}</div></header><div class="content">${publicSnapshotMode ? renderPublicSnapshotNotice() : renderCloudNotice()}${page}</div></main>${renderAssistant()}${renderModal()}<div class="toast-region" id="toast-region" aria-live="polite"></div>`;
   renderSearchResults();
+  enforcePublicReadOnlyDom();
   if (ui.assistantOpen) document.querySelector("#assistant-messages")?.scrollTo({ top: 999999, behavior: "smooth" });
-  if (ui.page === "home" && cloudWorkspaceAvailable() && ui.projectPinningAvailable === true && !ui.githubRefreshing) {
+  if (!publicSnapshotMode && ui.page === "home" && cloudWorkspaceAvailable() && ui.projectPinningAvailable === true && !ui.githubRefreshing) {
     const stalePinnedIds = getHomePinnedProjects(db.projects)
       .filter((project) => parsePublicGitHubRepository(project.github) && !isGitHubSnapshotFresh(project.githubData)
         && ui.githubRefreshStatus[project.id] !== "loading"
@@ -2680,6 +2963,7 @@ function handleSearchResult(kind, id) {
 }
 
 async function toggleProjectPinInCloud(projectId) {
+  if (publicSnapshotMode) return;
   const project = projectById(projectId);
   if (!project || !workspaceActive) return;
   if (ui.projectPinningAvailable !== true) {
@@ -2726,8 +3010,32 @@ async function toggleProjectPinInCloud(projectId) {
   }
 }
 
+const PUBLIC_READ_ONLY_ACTIONS = new Set([
+  "dashboard-stat", "filter-projects", "filter-project-status", "clear-project-status", "filter-tasks",
+  "select-home-activity-date", "toggle-decision", "toggle-more-menu", "view-project", "view-decision", "open-search-result",
+]);
+
+function enforcePublicReadOnlyDom() {
+  if (!publicSnapshotMode) return;
+  for (const element of app.querySelectorAll("[data-action]")) {
+    if (!PUBLIC_READ_ONLY_ACTIONS.has(element.dataset.action)) element.remove();
+  }
+  for (const element of app.querySelectorAll("[data-page]")) {
+    if (!["home", "projects", "tasks", "knowledge", "decisions"].includes(element.dataset.page)) element.remove();
+  }
+  app.querySelectorAll("form, [contenteditable='true'], [data-private-only]").forEach((element) => element.remove());
+  for (const element of app.querySelectorAll("input, textarea, select")) {
+    if (["global-search", "dashboard-activity-range", "dashboard-activity-start", "dashboard-activity-end"].includes(element.id)) continue;
+    element.remove();
+  }
+}
+
 function handleAction(action, element, sourceEvent) {
+  if (publicSnapshotMode && !PUBLIC_READ_ONLY_ACTIONS.has(action)) return;
   const id = element.dataset.id;
+  if (action === "open-snapshot-preview") { ui.page = "snapshot-preview"; render(); return; }
+  if (action === "generate-snapshot-preview" || action === "regenerate-snapshot-preview") { void generateSnapshotPreview(); return; }
+  if (action === "open-snapshot-publish-confirm") { openSnapshotPublishConfirmation(); return; }
   if (action === "close-confirm-backdrop" && element !== sourceEvent?.target) return;
   if (action === "refresh-home-activity") { void loadHomeActivity({ force: true }); return; }
   if (action === "select-home-activity-date") {
@@ -2885,10 +3193,13 @@ function handleAction(action, element, sourceEvent) {
   if (action === "dashboard-stat") {
     const page = element.dataset.targetPage;
     if (page === "projects") ui.projectFilter = element.dataset.filter || "all";
+    if (page === "projects") ui.projectStatusFilter = "";
     if (page === "tasks") ui.taskFilter = element.dataset.filter || "all";
     if (page) go(page);
   }
-  if (action === "filter-projects") { ui.projectFilter = element.dataset.filter || "all"; render(); }
+  if (action === "filter-projects") { ui.projectFilter = element.dataset.filter || "all"; ui.projectStatusFilter = ""; render(); }
+  if (action === "filter-project-status") { ui.projectFilter = "all"; ui.projectStatusFilter = element.dataset.status || ""; go("projects"); }
+  if (action === "clear-project-status") { ui.projectStatusFilter = ""; render(); }
   if (action === "filter-tasks") { ui.taskFilter = element.dataset.filter; render(); }
   if (action === "toggle-task") {
     const task = db.tasks.find((item) => item.id === id);
@@ -2940,8 +3251,9 @@ app.addEventListener("click", (event) => {
   const element = event.target.closest("[data-action], [data-page]");
   if (!element) return;
   if (element.dataset.page) {
+    if (publicSnapshotMode && !["home", "projects", "tasks", "knowledge", "decisions"].includes(element.dataset.page)) return;
     ui.moreMenuOpen = false;
-    if (element.dataset.page === "projects") ui.projectFilter = "all";
+    if (element.dataset.page === "projects") { ui.projectFilter = "all"; ui.projectStatusFilter = ""; }
     if (element.dataset.page === "tasks") ui.taskFilter = "all";
     go(element.dataset.page);
     return;
@@ -2955,11 +3267,22 @@ app.addEventListener("toggle", (event) => {
 
 app.addEventListener("change", (event) => {
   const target = event.target;
+  if (target.dataset.snapshotReview) {
+    toggleSnapshotReview(target.dataset.collection, target.dataset.reviewId, target.dataset.snapshotReview, target.checked);
+    return;
+  }
+  if (target.id === "snapshot-final-review") {
+    ui.publicSnapshotPreview.confirmed = target.checked;
+    render();
+    return;
+  }
+  if (publicSnapshotMode && !["dashboard-activity-range", "dashboard-activity-start", "dashboard-activity-end"].includes(target.id)) return;
   if (target.id === "dashboard-activity-range") {
     ui.activityRangePreset = ["7d", "30d", "90d", "custom"].includes(target.value) ? target.value : "30d";
     ui.selectedActivityDate = "";
     if (ui.activityRangePreset === "custom") {
-      const defaults = resolveActivityRange("30d");
+      const snapshotEndDate = publicSnapshotMode ? publishedSnapshot?.activity?.endDate : "";
+      const defaults = resolveActivityRange("30d", { now: snapshotEndDate ? new Date(`${snapshotEndDate}T12:00:00+08:00`) : Date.now() });
       ui.activityCustomStartDate ||= defaults.startDate;
       ui.activityCustomEndDate ||= defaults.endDate;
     }
@@ -2975,7 +3298,7 @@ app.addEventListener("change", (event) => {
 });
 
 app.addEventListener("keydown", (event) => {
-  const target = event.target.closest('[data-action="view-project"], [data-action="view-decision"], [data-action="toggle-decision"], [data-action="select-home-activity-date"]');
+  const target = event.target.closest('[data-action="view-project"], [data-action="view-decision"], [data-action="toggle-decision"], [data-action="select-home-activity-date"], [data-action="filter-project-status"]');
   if (target && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); handleAction(target.dataset.action, target); }
   if (event.target.id === "assistant-input" && event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
@@ -2997,6 +3320,7 @@ app.addEventListener("keydown", (event) => {
 });
 
 app.addEventListener("input", (event) => {
+  if (publicSnapshotMode && event.target.id !== "global-search") return;
   if (event.target.id === "project-next-step-draft" && ui.projectNextStep?.projectId === ui.projectId) {
     const state = ui.projectNextStep;
     state.suggestion = event.target.value.slice(0, 500);
@@ -3034,6 +3358,7 @@ app.addEventListener("focusout", (event) => {
 
 app.addEventListener("submit", (event) => {
   event.preventDefault();
+  if (publicSnapshotMode) return;
   if (event.target.id === "project-work-log-form") {
     void submitProjectWorkLog(event.target);
   } else if (event.target.id === "record-form") {
@@ -3052,12 +3377,12 @@ document.addEventListener("keydown", (event) => {
 
 const initialLocalProjectRoute = location.hash.match(/^#local-project\/(.+)$/);
 const initialProjectRoute = location.hash.match(/^#project\/(.+)$/);
-if (initialLocalProjectRoute) {
+if (!publicSnapshotMode && initialLocalProjectRoute) {
   try {
     ui.page = "local-project";
     ui.localProjectId = decodeURIComponent(initialLocalProjectRoute[1]);
   } catch { /* Ignore malformed local routes. */ }
-} else if (initialProjectRoute) {
+} else if (!publicSnapshotMode && initialProjectRoute) {
   try {
     const id = decodeURIComponent(initialProjectRoute[1]);
     if (projectById(id)) { ui.page = "project"; ui.projectId = id; }
@@ -3073,7 +3398,29 @@ if (new URLSearchParams(location.search).has("github_app")) {
   history.replaceState(null, "", cleanUrl);
 }
 render();
-if (ui.page === "project" && ui.projectId) void loadProjectWorkLogEntries(ui.projectId);
-void initializeCloudSync();
-if (localScanEndpoint) refreshLocalProjects();
-void refreshPrivateGitHubData(db.projects, { silent: true });
+if (publicSnapshotMode) {
+  globalThis.DANIEL_WORKSPACE_SET_PUBLIC_SNAPSHOT = (snapshot, error = "") => {
+    if (!publicSnapshotMode || !workspaceActive) return;
+    publishedSnapshot = snapshot || null;
+    hydratedPublicData = hydratePublicSnapshot(publishedSnapshot);
+    globalThis.DANIEL_WORKSPACE_PUBLIC_SNAPSHOT_ERROR = hydratedPublicData ? "" : error || "尚未发布经过审核的访客快照。";
+    db = hydratedPublicData || emptyPublicData;
+    ui.projectPinningAvailable = true;
+    const route = location.hash.match(/^#project\/(.+)$/);
+    if (route) {
+      try {
+        const id = decodeURIComponent(route[1]);
+        if (projectById(id)) { ui.page = "project"; ui.projectId = id; }
+      } catch { /* Ignore malformed public project routes. */ }
+    }
+    render();
+    if (ui.page === "project" && ui.projectId) void loadProjectWorkLogEntries(ui.projectId);
+    else if (hydratedPublicData && ui.page === "home") void loadHomeActivity();
+  };
+  if (hydratedPublicData) void loadHomeActivity();
+} else {
+  if (ui.page === "project" && ui.projectId) void loadProjectWorkLogEntries(ui.projectId);
+  void initializeCloudSync();
+  if (localScanEndpoint) refreshLocalProjects();
+  void refreshPrivateGitHubData(db.projects, { silent: true });
+}

@@ -106,10 +106,11 @@ async function enterWorkspace(user) {
   workspaceEntryPromise = (async () => {
     publicDashboard?.destroy();
     publicDashboard = null;
+    globalThis.DANIEL_WORKSPACE_MODE = "private";
     globalThis.DANIEL_WORKSPACE_AUTHENTICATED = true;
     globalThis.DANIEL_WORKSPACE_AUTH = { client: authClient, userId: user.id };
     try {
-      workspaceModule = await import("../app.js?v=3.8-a");
+      workspaceModule = await import("../app.js?v=3.8-c");
       workspaceVisible = true;
     } catch (error) {
       workspaceVisible = false;
@@ -299,8 +300,22 @@ async function startGuestDemo() {
 
 async function startPublicDashboard() {
   try {
-    const { mountPublicDashboard } = await import("../public-dashboard.js?v=3.8-a");
-    publicDashboard = mountPublicDashboard({ root: app });
+    publicDashboard?.destroy();
+    publicDashboard = null;
+    globalThis.DANIEL_WORKSPACE_MODE = "public";
+    globalThis.DANIEL_WORKSPACE_AUTHENTICATED = false;
+    globalThis.DANIEL_WORKSPACE_AUTH = null;
+    globalThis.DANIEL_WORKSPACE_PUBLIC_SNAPSHOT = null;
+    globalThis.DANIEL_WORKSPACE_PUBLIC_SNAPSHOT_ERROR = "正在读取已审核的公开快照…";
+    const snapshotPromise = import("../public-snapshot.js?v=3.8-c").then(({ fetchPublishedSnapshot }) => fetchPublishedSnapshot())
+      .then((snapshot) => ({ snapshot, error: "" }))
+      .catch((error) => ({ snapshot: null, error: typeof error?.message === "string" ? error.message : "公开快照暂不可用。" }));
+    await import("../app.js?v=3.8-c");
+    void snapshotPromise.then(({ snapshot, error }) => {
+      globalThis.DANIEL_WORKSPACE_PUBLIC_SNAPSHOT = snapshot;
+      globalThis.DANIEL_WORKSPACE_PUBLIC_SNAPSHOT_ERROR = error;
+      globalThis.DANIEL_WORKSPACE_SET_PUBLIC_SNAPSHOT?.(snapshot, error);
+    });
   } catch {
     app.innerHTML = `<main class="startup-screen startup-failure" role="alert"><section><div class="startup-skeleton-mark" aria-hidden="true">D</div><h1>项目指挥中心暂时无法加载</h1><p>请检查网络后重新打开页面。</p><a class="button small" href="./">重新加载</a> <a class="public-return-link" href="?mode=login">登录</a></section></main>`;
   }

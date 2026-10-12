@@ -1,10 +1,10 @@
 # Daniel Workspace
 
-Daniel Workspace V3.8-A 是公开只读项目指挥中心。无需登录即可浏览白名单项目、公开网站和公开 GitHub 活动；登录后仍进入现有私人工作台，继续使用 Supabase 云同步、本机 Companion 和私人 AI。公开 Dashboard 与登录后的 V3.8 Dashboard 使用同一页面布局；公开页不读取私人项目表、任务、工作记录、私有仓库或本机缓存。
+Daniel Workspace V3.8-C 使用统一的完整工作台界面和两种数据模式。访客无需登录即可查看所有者逐条审核后发布的真实只读快照；登录后继续使用实时 Supabase、GitHub 和本机 Companion 私人工作台。访客模式只读取独立 Cloudflare KV 快照，不读取私人表、浏览器工作区缓存、本机文件或私有仓库。
 
 ## Status
 
-- **Stage:** V3.8-A makes the default route a public read-only Dashboard while preserving the authenticated workspace, Supabase rows, sync, and AI behavior. Verification and acceptance status are recorded in [HANDOFF](docs/HANDOFF.md).
+- **Stage:** V3.8-C unifies the shared Dashboard and detail pages across public snapshot and authenticated live modes. The public snapshot remains unpublished until the owner reviews and explicitly publishes it. Verification and handoff are recorded in [HANDOFF](docs/HANDOFF.md).
 - **Last updated:** 2026-10-12
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -16,7 +16,7 @@ Daniel Workspace V3.8-A 是公开只读项目指挥中心。无需登录即可�
 python local_companion.py
 ```
 
-在浏览器打开 [http://127.0.0.1:4174](http://127.0.0.1:4174) 即可浏览公开项目指挥中心；根网址始终先显示公开页，不因浏览器保存的登录会话自动进入私人工作台。用户点击右上角「登录」后，系统会核验本机已保存会话；有效会话直接进入，无会话时显示登录表单。`?mode=login` 是该私人入口的明确路由，刷新时会再次核验现有会话；退出后回到公开根网址。`?mode=guest` 是公开页的兼容别名。FlowOps 网站明确标为模拟演示，使用虚构业务数据；旧 TK-1001 运营模拟仅通过显式 `?mode=demo` 打开，不再作为默认首页。公开页只访问固定的公开 GitHub 仓库白名单并显示每日 Commit 汇总，不请求 Supabase 业务表、工作记录、私有仓库原文或 Local Companion。登录后按 `Ctrl+K` 或 `⌘K` 聚焦全局搜索；部署站点会在登录后尝试从本机 `127.0.0.1:4174` 读取扫描，浏览器可能要求允许页面访问本地网络。
+在浏览器打开 [http://127.0.0.1:4174](http://127.0.0.1:4174) 即可浏览公开只读工作台；根网址先显示完整界面，不因已保存的 Supabase 会话自动进入私人模式。快照未发布时页面会明确说明尚无公开项目数据，不显示 Mock 统计。登录后在私人工作台点击「预览访客快照」，逐条审核脱敏候选，再勾选最终确认并二次确认发布；预览不会上传数据。已发布快照通过 Worker 的公开 GET 从独立 KV 读取，访客搜索、导航、项目详情和图表筛选均为只读。`?mode=guest` 是公开模式别名，`?mode=login` 是唯一私人入口；退出后回到公开根网址。FlowOps 网站明确标为虚构业务的模拟演示；TK-1001 流程模拟仅通过显式 `?mode=demo` 打开。登录后按 `Ctrl+K` 或 `⌘K` 聚焦全局搜索；Companion 仅在私人登录模式尝试从本机 `127.0.0.1:4174` 读取扫描。
 
 手动控制 Companion：前台运行 `python local_companion.py` 时按 `Ctrl+C` 停止；开机任务启动的后台实例可在 PowerShell 执行 `Stop-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion"` 停止。取消后续登录自动启动，执行 `Unregister-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion" -Confirm:$false`。重新登录 Windows 会再次启动仍注册的任务。
 
@@ -64,10 +64,19 @@ python local_companion.py
 
 ## V3.8-A 公开只读 Dashboard
 
+> 历史版本说明。完整访客体验、数据来源与发布方式以 [V3.8-C](#v38-c-完整工作台公开快照) 为准。
+
 - 默认首页和 `?mode=guest` 直接展示只读项目指挥中心；登录入口位于右上角。根路由不读取已保存会话、不初始化 Auth，也不会自动进入私人工作台。仅从右上角进入 `?mode=login` 后才验证已保存会话；有效会话经 `getUser()` 验证后直接进入，未登录时显示密码表单。
 - 公开页与登录 Home 共用 `dashboard-layout.js`、Dashboard 样式和卡片结构。公开白名单当前列出 5 个项目，其中 3 个已发布网站、1 个明确标注为模拟的 FlowOps 演示和 1 个只链接公开源码的项目。
 - `/api/public/dashboard` 不访问 Supabase。Worker 只请求固定的 3 个已确认公开 GitHub 仓库，先验证仓库为公开，再返回近 30 个上海日期的每日 Commit 数；不返回 Commit 原文、SHA、私人表行、工作记录、安装仓库清单或令牌。接口响应公开缓存 5 分钟并受精确来源 CORS 与请求限流保护。
 - 公开状态图只按静态白名单分类为「线上作品」「模拟演示」「公开源码」，不会复制私人 Workspace 保存的项目状态或阶段。没有安全公开依据的项目、任务、阶段和工作记录不展示。
+
+## V3.8-C 完整工作台公开快照
+
+- 访客与私人模式复用同一 `src/app.js`、Dashboard、项目、任务、知识资料、决策与工作记录只读视图。访客数据来自 `PUBLIC_WORKSPACE_SNAPSHOTS` KV 的固定 `latest` JSON；没有已审核快照时只显示空状态，不回退到 Mock/随机数据。
+- 只有私人账号所有者可以打开「预览访客快照」。预览读取 Supabase 已同步记录和只核验为公开的 GitHub 每日聚合，默认不选任何记录；敏感提示需逐项确认，最终发布另有数量范围确认。普通文本中的外链、邮箱、电话、路径、Token 和私钥会清理；证据链接、仓库提交原文/SHA、Companion 与私人仓库内容不进入快照。
+- Worker 只为经 `getUser()` 校验且 UUID 与 `WORKSPACE_USER_ID` 完全匹配的所有者接受发布 POST；拒绝额外字段、未通过清洗的内容和私有 GitHub 仓库。访客只能匿名 GET 快照；公开 Worker 路由不查询 Supabase 表，不提供私人记录 API。未修改数据库、RLS 或同步序列化。
+- 本地目标验收为桌面与 390px 手机视口可浏览，以及已有会话根网址、无痕未登录、退出回根页和刷新不循环；访客不触发 AI、Auth、Workspace localStorage、Companion 或写操作。用户须在预览页确认数据后主动发布；不得由部署流程自动发布快照。
 
 ## V2.5 登录配置
 
@@ -75,7 +84,7 @@ python local_companion.py
 
 `src/auth/config.js` 的 `SUPABASE_ALLOWED_USER` 设为唯一允许账号的 User UUID；留空时默认拒绝所有账号。只允许已存在的 Email + Password 账号登录，不能从应用注册。项目 URL 和 publishable key 属于公开前端配置；绝不填 `service_role` key、数据库密码、用户密码或私密 Token。
 
-公开根路由只加载 `src/auth/gate.js` 和公开 Dashboard，不读取 Auth localStorage、不导入 Supabase SDK、不读取 Workspace/扫描缓存，也不请求 Local Companion。只有用户主动打开 `?mode=login` 时，入口才检查是否有本机已保存会话；若有，会先调用 `getUser()` 验证唯一允许账号，再导入 `src/app.js`；网络失败时保留登录界面并提示重试。退出会立即清空私人页面和应用内存、停止扫描并清理 Supabase 会话，然后导航到公开根网址。入口静态骨架屏在模块加载前显示，公开模块加载失败时提供重新加载入口。
+公开根路由只检查 URL 模式，不读取 Auth localStorage、不初始化 Supabase SDK、不读取 Workspace/扫描缓存，也不请求 Local Companion；随后在公开模式加载共享 `src/app.js`，其中 `store.js`、云同步、Auth、AI、Companion 和私人 GitHub 模块均被跳过。访客只从 Worker 的匿名 GET 读取独立 KV 快照。只有用户主动打开 `?mode=login` 时，入口才检查本机已保存会话；若有，会先调用 `getUser()` 验证唯一允许账号，再进入完整私人工作台；网络失败时保留登录界面并提示重试。退出会立即清空私人页面和应用内存、停止扫描并清理 Supabase 会话，然后导航到公开根网址。入口静态骨架屏在模块加载前显示，公开模块加载失败时提供重新加载入口。
 
 访客隔离和登录门禁回归测试使用 Node 内置测试运行：
 
