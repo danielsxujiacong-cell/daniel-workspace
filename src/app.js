@@ -27,11 +27,10 @@ const { localScanEndpointFor, shouldRenderDashboardGitHubActivity } = await impo
 const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = await import("./suggestions.js");
 const { fetchPublicGitHubRepositories, fetchPublicGitHubRepository, GITHUB_CACHE_TTL_MS, isGitHubSnapshotFresh, parsePublicGitHubRepository } = await import("./github/public-api.js?v=3.5-b.4");
 const { deployedWebsiteUrl, humanizeProjectCommit, projectDescriptionAfterEdit, projectDescriptionForEdit, projectIntroduction, projectShowcase } = await import("./project-story.js?v=3.7-d");
-const { buildCloudDashboardModel, buildLocalDashboardModel, buildRecentProjectUpdates, chooseRecentCommit, compareLocalProjects, taskPriorityLabel } = await import("./dashboard.js?v=3.7-d");
+const { buildCloudDashboardModel, buildLocalDashboardModel, buildRecentProjectUpdates, chooseRecentCommit, compareLocalProjects, homeProjectField, projectTaskProgress, taskPriorityLabel } = await import("./dashboard.js?v=3.7-f");
 const {
   countPinnedProjects,
   getHomePinnedProjects,
-  getHomeShowcaseProjects,
   MAX_HOME_PROJECT_PINS,
   MIN_HOME_PROJECT_PINS,
   toggleProjectPin: nextProjectPinState,
@@ -1131,8 +1130,8 @@ function dashboardUnavailableMessage() {
   return "Supabase 资料尚未载入。";
 }
 
-function dashboardStatCard(label, value, page, filter, description) {
-  return `<button class="dashboard-stat-card" data-action="dashboard-stat" data-target-page="${page}" data-filter="${filter}" aria-label="${esc(`${label}：${value}，${description}`)}"><span class="dashboard-stat-label">${esc(label)}</span><strong>${value}</strong><span class="dashboard-stat-link">${esc(description)} ${icon("chevron")}</span></button>`;
+function dashboardStatCard(label, value, page, filter, description, disabled = false) {
+  return `<button class="dashboard-stat-card" data-action="dashboard-stat" data-target-page="${page}" data-filter="${filter}" aria-label="${esc(`${label}：${value}，${description}`)}" ${disabled ? "disabled" : ""}><span class="dashboard-stat-label">${esc(label)}</span><strong>${esc(value)}</strong><span class="dashboard-stat-link">${esc(description)} ${icon("chevron")}</span></button>`;
 }
 
 function renderDashboardGitHubActivity(project, hasLocalProgress = false) {
@@ -1168,23 +1167,24 @@ function renderDashboardGitHubActivity(project, hasLocalProgress = false) {
 }
 
 function renderDashboardFocusProjects(projects, dataAvailable) {
-  const showcase = dataAvailable && ui.projectPinningAvailable === true
-    ? getHomeShowcaseProjects(projects)
-    : { featured: null, secondary: [] };
-  const projectCard = (project, featured = false) => {
-    const description = projectIntroduction(project);
-    const website = deployedWebsiteUrl(project);
-    return `<article class="dashboard-project-card ${featured ? "dashboard-project-card-featured" : ""}"><div class="dashboard-project-card-copy"><div class="dashboard-project-card-heading"><h3>${esc(project.name)}</h3>${statusPill(project.status)}</div>${description ? `<p>${esc(description)}</p>` : ""}</div><div class="dashboard-project-actions"><button class="button quiet small" data-action="view-project" data-id="${esc(project.id)}">查看详情</button>${website ? `<a class="button quiet small" href="${esc(website)}" target="_blank" rel="noopener noreferrer">体验网站</a>` : ""}</div></article>`;
+  const pinnedProjects = dataAvailable && ui.projectPinningAvailable === true ? getHomePinnedProjects(projects) : [];
+  const projectCard = (project) => {
+    const status = homeProjectField(project.status);
+    const stage = homeProjectField(project.stage);
+    const next = homeProjectField(project.next);
+    const progress = projectTaskProgress(project.id, db.tasks);
+    const progressLabel = progress ? `已完成 ${progress.completed} / ${progress.total} 项任务` : "";
+    return `<article class="dashboard-focus-card"><header class="dashboard-focus-card-header"><button class="dashboard-focus-name" data-action="view-project" data-id="${esc(project.id)}">${esc(project.name)}</button>${status ? statusPill(status) : ""}</header><div class="dashboard-focus-card-details">${stage ? `<div class="dashboard-project-field"><span>当前阶段</span><strong>${esc(stage)}</strong></div>` : ""}${next ? `<div class="dashboard-project-field"><span>下一步</span><strong>${esc(next)}</strong></div>` : ""}${progress ? `<div class="dashboard-project-progress"><div class="dashboard-project-field"><span>完成情况</span><strong>${esc(progressLabel)}</strong></div><div class="dashboard-project-progress-track" role="progressbar" aria-label="${esc(`${project.name}任务完成情况`)}" aria-valuemin="0" aria-valuemax="${progress.total}" aria-valuenow="${progress.completed}" aria-valuetext="${esc(progressLabel)}"><span style="width:${Math.round(progress.ratio * 100)}%"></span></div></div>` : ""}</div><footer class="dashboard-focus-card-footer"><button class="button quiet small" data-action="view-project" data-id="${esc(project.id)}">查看详情 ${icon("arrow")}</button></footer></article>`;
   };
   const empty = !dataAvailable
     ? "项目暂不可用。"
     : ui.projectPinningAvailable === false
       ? "重点项目暂不可用。"
       : "还没有重点项目。";
-  const cards = showcase.featured
-    ? `${projectCard(showcase.featured, true)}${showcase.secondary.length ? `<div class="dashboard-secondary-projects">${showcase.secondary.map((project) => projectCard(project)).join("")}</div>` : ""}`
+  const cards = pinnedProjects.length
+    ? `<div class="dashboard-focus-grid">${pinnedProjects.map(projectCard).join("")}</div>`
     : `<div class="empty-state">${esc(empty)}${dataAvailable ? ` <button class="button quiet small" data-page="projects">选择项目 ${icon("arrow")}</button>` : ""}</div>`;
-  return `<section class="dashboard-focus-section grid-span-12" aria-labelledby="dashboard-focus-title"><div class="dashboard-focus-heading"><h2 id="dashboard-focus-title">精选项目</h2><button class="button quiet small" data-page="projects">管理项目</button></div>${cards}</section>`;
+  return `<section class="dashboard-focus-section grid-span-12" aria-labelledby="dashboard-focus-title"><div class="dashboard-focus-heading"><h2 id="dashboard-focus-title">置顶项目</h2><button class="button quiet small" data-page="projects">查看全部 ${icon("arrow")}</button></div>${cards}</section>`;
 }
 
 function latestProjectCommit(project, localProject = null) {
@@ -1219,12 +1219,6 @@ function renderProjectShowcase(project) {
   if (!story.features.length && !story.outcomes.length) return "";
   const list = (items) => `<ul class="project-story-list">${items.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>`;
   return `<section class="card card-pad project-showcase"><div class="project-showcase-column"><h3>核心功能</h3>${list(story.features)}</div><div class="project-showcase-column"><h3>已验证成果</h3>${list(story.outcomes)}</div></section>`;
-}
-
-function renderDashboardSections(model, dataAvailable) {
-  if (!dataAvailable || !model.priorityTasks.length) return "";
-  const taskRows = model.priorityTasks.map((task) => `<button class="dashboard-alert cloud-task-row" data-action="dashboard-stat" data-target-page="tasks" data-filter="todo"><span class="alert-mark"></span><span class="dashboard-alert-copy"><strong>${esc(task.title)}</strong><span>${esc(projectTitle(task.projectId))} · ${esc(taskPriorityLabel(task))}${task.due ? ` · ${esc(task.due)}` : ""}</span></span>${icon("chevron")}</button>`).join("");
-  return `<section class="card card-pad grid-span-12"><div class="card-header"><h2>待办</h2><button class="button quiet small" data-action="dashboard-stat" data-target-page="tasks" data-filter="todo">查看全部 ${icon("arrow")}</button></div><div class="dashboard-alert-list">${taskRows}</div></section>`;
 }
 
 async function generateDailyBrief() {
@@ -1402,7 +1396,9 @@ function renderDashboard() {
   const projects = dataAvailable ? db.projects : [];
   const today = cloudModel.todayContinue;
   const suggestion = suggestionForDashboard(today);
-  return `<div class="dashboard-home"><header class="dashboard-page-heading"><h1>我的工作台</h1><p>项目、AI 应用与自动化实践。</p></header><div class="dashboard-grid">${renderDashboardFocusProjects(projects, dataAvailable)}${renderDashboardSections(cloudModel, dataAvailable)}${renderDashboardAISummary(today, suggestion)}</div></div>`;
+  const counts = cloudModel.counts;
+  const stats = `<section class="dashboard-overview grid-span-12" aria-label="项目概况"><h1>项目工作台</h1><div class="dashboard-stat-row">${dashboardStatCard("全部项目", dataAvailable ? counts.projects : "—", "projects", "all", dataAvailable ? "查看项目" : "云端读取中", !dataAvailable)}${dashboardStatCard("进行中项目", dataAvailable ? counts.activeProjects : "—", "projects", "active", dataAvailable ? "查看进行中" : "云端读取中", !dataAvailable)}${dashboardStatCard("未完成任务", dataAvailable ? counts.openTasks : "—", "tasks", "todo", dataAvailable ? "查看任务" : "云端读取中", !dataAvailable)}</div></section>`;
+  return `<div class="dashboard-home"><div class="dashboard-grid">${stats}${renderDashboardFocusProjects(projects, dataAvailable)}${renderDashboardAISummary(today, suggestion)}</div></div>`;
 }
 
 function renderProjects() {

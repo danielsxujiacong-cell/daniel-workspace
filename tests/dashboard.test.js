@@ -1,7 +1,43 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildRecentProjectUpdates, chooseRecentCommit } from "../src/dashboard.js";
+import { buildCloudDashboardModel, buildRecentProjectUpdates, chooseRecentCommit, homeProjectField, projectTaskProgress } from "../src/dashboard.js";
 import { projectDescriptionAfterEdit, projectDescriptionForEdit, projectIntroduction } from "../src/project-story.js";
+
+test("home overview counts only the supplied cloud project and task records", () => {
+  const model = buildCloudDashboardModel({
+    projects: [
+      { id: "p1", status: "进行中" },
+      { id: "p2", status: "计划中" },
+      { id: "p3", status: "进行中" },
+    ],
+    tasks: [
+      { id: "t1", status: "todo" },
+      { id: "t2", status: "done" },
+      { id: "t3", status: "todo" },
+    ],
+  });
+
+  assert.deepEqual(model.counts, { projects: 3, activeProjects: 2, openTasks: 2, doneTasks: 1 });
+});
+
+test("home project progress uses linked real tasks and hides empty or invalid task sets", () => {
+  const tasks = [
+    { id: "t1", projectId: "p1", status: "done" },
+    { id: "t2", projectId: "p1", status: "todo" },
+    { id: "t3", projectId: "p2", status: "todo" },
+    { id: "t4", projectId: "p1", status: "unknown" },
+  ];
+
+  assert.deepEqual(projectTaskProgress("p1", tasks), { completed: 1, total: 2, ratio: 0.5 });
+  assert.equal(projectTaskProgress("p3", tasks), null);
+  assert.equal(projectTaskProgress("p1", [{ projectId: "p1", status: "unknown" }]), null);
+});
+
+test("home hides blank placeholder fields while keeping entered project details", () => {
+  assert.equal(homeProjectField("  当前迭代  "), "当前迭代");
+  assert.equal(homeProjectField("尚未设置阶段"), "");
+  assert.equal(homeProjectField("   "), "");
+});
 
 test("deduplicates the same commit reported by GitHub and the local scan", () => {
   const selected = chooseRecentCommit(

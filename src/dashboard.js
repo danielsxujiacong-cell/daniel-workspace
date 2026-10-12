@@ -3,6 +3,20 @@ import { parsePublicGitHubRepository } from "./github/public-api.js";
 
 export const STALE_PROJECT_DAYS = 30;
 const dayMs = 24 * 60 * 60 * 1000;
+const emptyHomeProjectFields = new Set(["未填写", "未设置", "尚未设置", "尚未设置阶段", "尚未设置下一步", "暂无", "n/a", "-"]);
+
+export function homeProjectField(value) {
+  const field = typeof value === "string" ? value.trim() : "";
+  return emptyHomeProjectFields.has(field.toLowerCase()) ? "" : field;
+}
+
+export function projectTaskProgress(projectId, tasks = []) {
+  if (!projectId || !Array.isArray(tasks)) return null;
+  const linkedTasks = tasks.filter((task) => task?.projectId === projectId && ["todo", "done"].includes(task.status));
+  if (!linkedTasks.length) return null;
+  const completed = linkedTasks.filter((task) => task.status === "done").length;
+  return { completed, total: linkedTasks.length, ratio: completed / linkedTasks.length };
+}
 
 function identityHash(value) {
   let hash = 14695981039346656037n;

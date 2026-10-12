@@ -124,6 +124,14 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 .content:has(.dashboard-home) { width: min(1280px, 100%); }
 .dashboard-home { width: min(1080px, 100%); margin: 0 auto; padding-bottom: 72px; }
 .dashboard-home .dashboard-grid { gap: 22px; }
+.dashboard-overview { display: grid; gap: 16px; min-width: 0; }
+.dashboard-overview h1 { margin: 0; color: var(--text); font-size: 25px; font-weight: 650; letter-spacing: -.04em; }
+#app:has(.dashboard-home) .assistant-launcher { position: static; right: auto; bottom: auto; width: fit-content; min-height: 43px; margin: 10px 14px 22px auto; padding: 0 15px 0 10px; }
+.dashboard-home .dashboard-stat-row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.dashboard-home .dashboard-stat-card { min-height: 94px; padding: 13px 16px; border-radius: 10px; background: var(--panel); }
+.dashboard-home .dashboard-stat-card > strong { color: var(--text); }
+.dashboard-home .dashboard-stat-card:disabled { opacity: .72; cursor: wait; transform: none; }
+.dashboard-home .dashboard-stat-card:disabled:hover { border-color: var(--line); background: var(--panel); }
 .dashboard-page-heading { margin: 2px 0 0; }
 .dashboard-page-heading h1 { margin: 0; color: var(--text); font-size: 27px; font-weight: 650; letter-spacing: -.04em; }
 .dashboard-page-heading p { margin: 7px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
@@ -147,6 +155,22 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 .dashboard-secondary-projects { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 1fr; gap: 14px; min-width: 0; }
 .dashboard-secondary-projects .dashboard-project-card { min-height: 166px; }
 .dashboard-secondary-projects .dashboard-project-card-copy > p { max-width: 480px; }
+.dashboard-home .dashboard-focus-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 1fr; gap: 12px; }
+.dashboard-focus-grid .dashboard-focus-card { display: flex; min-height: 166px; flex-direction: column; gap: 10px; padding: 15px 16px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); transition: border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
+.dashboard-focus-grid .dashboard-focus-card:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--accent) 28%, var(--line)); box-shadow: 0 3px 12px rgb(25 32 44 / 5%); }
+.dashboard-focus-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; min-width: 0; }
+.dashboard-focus-card-header .dashboard-focus-name { flex: 1 1 auto; min-width: 0; font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
+.dashboard-focus-card-header .status-pill { flex: 0 0 auto; }
+.dashboard-focus-card-details { display: grid; align-content: start; gap: 7px; flex: 1; min-width: 0; }
+.dashboard-project-field { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: start; gap: 8px; min-width: 0; font-size: 11px; line-height: 1.5; }
+.dashboard-project-field > span { color: var(--muted); }
+.dashboard-project-field > strong { min-width: 0; color: var(--text); font-size: 11px; font-weight: 500; overflow-wrap: anywhere; }
+.dashboard-project-progress { display: grid; gap: 5px; min-width: 0; }
+.dashboard-project-progress-track { overflow: hidden; height: 5px; border-radius: 5px; background: color-mix(in srgb, var(--line) 70%, var(--panel)); }
+.dashboard-project-progress-track > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.dashboard-focus-card-footer { display: flex; justify-content: flex-end; padding-top: 6px; border-top: 1px solid var(--line-soft); }
+.dashboard-focus-card-footer .button { min-height: 28px; padding: 0 5px; border: 0; color: var(--accent-strong); background: transparent; }
+.dashboard-focus-card-footer .button:hover { background: var(--accent-wash); }
 .dashboard-home .dashboard-focus-section .empty-state { margin: 0; padding: 28px; border: 1px solid var(--line); border-radius: 17px; background: var(--panel); }
 .dashboard-stat-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
 .dashboard-stat-card { appearance: none; display: grid; gap: 8px; min-width: 0; min-height: 112px; padding: 15px 17px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: var(--panel); text-align: left; cursor: pointer; transition: transform .16s ease, border-color .16s ease, background .16s ease; }
@@ -535,7 +559,7 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
   .dashboard-project-card-featured .dashboard-project-card-heading h3 { font-size: 21px; }
   .dashboard-project-actions { gap: 8px; }
   .dashboard-project-actions .button { min-height: 42px; padding: 0 14px; }
-  #app:has(.dashboard-home) .assistant-launcher { position: static; right: auto; bottom: auto; width: fit-content; min-height: 43px; margin: 10px 14px calc(18px + env(safe-area-inset-bottom)) auto; padding: 0 15px 0 10px; }
+  #app:has(.dashboard-home) .assistant-launcher { margin-bottom: calc(18px + env(safe-area-inset-bottom)); }
   #app:has(.dashboard-home) .assistant-panel { right: 12px; bottom: calc(72px + env(safe-area-inset-bottom)); width: min(375px, calc(100vw - 24px)); }
   .project-next-step-head { align-items: flex-start; flex-direction: column; }
   .project-next-step-head > button { width: 100%; }
@@ -544,7 +568,14 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
   .dashboard-stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .dashboard-stat-card { min-height: 96px; padding: 12px; }
   .dashboard-stat-card > strong { font-size: 24px; }
-  .dashboard-focus-grid { grid-template-columns: minmax(0, 1fr); }
+  .dashboard-home .dashboard-focus-grid { grid-template-columns: minmax(0, 1fr); }
+  .dashboard-home .dashboard-stat-row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+  .dashboard-home .dashboard-stat-card { min-height: 86px; padding: 10px 9px; }
+  .dashboard-home .dashboard-stat-card > strong { font-size: 22px; }
+  .dashboard-home .dashboard-stat-label { font-size: 9px; line-height: 1.35; }
+  .dashboard-home .dashboard-stat-link { gap: 2px; font-size: 8px; }
+  .dashboard-focus-grid .dashboard-focus-card { min-height: 156px; padding: 14px; }
+  .dashboard-project-field { grid-template-columns: 58px minmax(0, 1fr); }
   .daily-brief-content { grid-template-columns: minmax(0, 1fr); }
   .weekly-summary-sections { grid-template-columns: minmax(0, 1fr); }
   .work-log-form-grid { grid-template-columns: minmax(0, 1fr); }
@@ -937,11 +968,10 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 [data-theme="light"] .dashboard-alert-copy strong, [data-theme="light"] .dashboard-recent-copy strong { color: #303540; }
 [data-theme="light"] .dashboard-recent-project:hover .dashboard-recent-copy strong { color: #5147a1; }
 [data-theme="light"] .dashboard-recent-time { color: #727a87; }
-[data-theme="light"] .content:has(.dashboard-home) { background: #f8f7f3; }
-[data-theme="light"] .dashboard-project-card { border-color: #e8e6e1; background: #fff; box-shadow: 0 2px 9px rgb(45 42 34 / 3%); }
-[data-theme="light"] .dashboard-project-card:hover { border-color: #d7d1e9; box-shadow: 0 5px 16px rgb(45 42 34 / 6%); }
-[data-theme="light"] .dashboard-project-card .status-pill { border-color: #e9e7e3; color: #74717a; background: #f5f4f1; }
-[data-theme="light"] .dashboard-ai-summary { border-color: #e8e6e1; border-radius: 17px; background: #fff; }
+[data-theme="light"] .dashboard-focus-grid .dashboard-focus-card { border-color: #dfe3e9; background: #fff; }
+[data-theme="light"] .dashboard-focus-card-header .dashboard-focus-name { color: #303540; }
+[data-theme="light"] .dashboard-project-progress-track { background: #e7e9ef; }
+[data-theme="light"] .dashboard-ai-summary { border-color: #dfe3e9; border-radius: 10px; background: #fff; }
 [data-theme="light"] .dashboard-ai-summary > summary { min-height: 60px; }
 
 @media (max-width: 1100px) {

@@ -1,10 +1,10 @@
 # Daniel Workspace
 
-私人 AI 工作台 V3.7-E。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI。Home 以精选置顶项目为主，项目详情优先呈现用途、核心功能、已核对成果和近期进展，路径及 GitHub 技术资料默认折叠。访客页展示精选公开作品和模拟流程演示，与私人工作台隔离。
+私人 AI 工作台 V3.7-F。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI。Home 以云端项目/任务统计和置顶项目实际进度为主，项目详情保留介绍、开发记录和 GitHub 技术资料。访客页展示精选公开作品和模拟流程演示，与私人工作台隔离。
 
 ## Status
 
-- **Stage:** V3.7-E finalizes the interview-friendly Home showcase while preserving project data, Supabase sync, auth, and AI service behavior. Verification and acceptance status are recorded in [HANDOFF](docs/HANDOFF.md).
+- **Stage:** V3.7-F turns Home into a cloud-backed project management overview while preserving project data, Supabase sync, auth, and AI service behavior. Verification and acceptance status are recorded in [HANDOFF](docs/HANDOFF.md).
 - **Last updated:** 2026-10-12
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -47,6 +47,13 @@ python local_companion.py
 - 卡片只展示项目名称、已核实的一句话用途、当前状态、「查看详情」和通过现有 URL 校验的「体验网站」入口；Home 不再展示最近进展，项目详情中的开发记录保留。
 - AI 下一步建议、今日简报和每周总结继续由「AI 总结」默认折叠区承载。浅色主题采用米白、浅灰与克制紫色；手机端卡片纵向排列，AI 快捷入口放在内容之后，避免遮挡项目卡。
 - 本次只改 Home 展示与资源缓存版本，不改 Supabase、GitHub、Worker、登录门或数据同步逻辑。
+
+## V3.7-F Home 项目管理化
+
+- Home 展示全部项目、进行中项目和未完成任务三个云端统计，并可分别进入对应项目/任务列表。
+- 置顶项目使用统一紧凑卡片，只展示已填写的状态、阶段和下一步；完成情况只按真实关联任务计算，没有任务时隐藏进度。
+- Home 恢复全站浅灰背景与白色卡片，项目介绍、GitHub 提交和开发记录留在详情页，AI 总结保持默认折叠。
+- 仅调整 Home 展示、首页样式和静态资源缓存版本；不改数据库、数据同步、其他页面、访客权限或 AI 服务。
 
 ## V2.5 登录配置
 
