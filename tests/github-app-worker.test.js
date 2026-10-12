@@ -334,7 +334,10 @@ test("GitHub activity marks inaccessible repositories outside the App installati
     if (url.pathname === "/app/installations") return Response.json([{ id: 987654, app_id: 12345 }]);
     if (url.pathname.endsWith("/access_tokens")) return Response.json({ token: installationToken });
     if (url.pathname === "/installation/repositories") return Response.json({ repositories: [] });
-    if (url.pathname === "/repos/acme/private-missing") return Response.json({ message: "Not Found" }, { status: 404 });
+    if (url.pathname === "/repos/acme/private-missing") return Response.json({ message: "Not Found" }, {
+      status: 404,
+      headers: { "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": String(Math.ceil(Date.now() / 1000) + 600) },
+    });
     return new Response(`unexpected ${url}`, { status: 500 });
   };
   try {
@@ -345,6 +348,8 @@ test("GitHub activity marks inaccessible repositories outside the App installati
     const payload = await response.json();
     assert.equal(payload.errors[0].reasonCategory, "private_or_missing_outside_app_scope");
     assert.match(payload.errors[0].message, /私有仓库、已删除仓库或仓库名不匹配/);
+    assert.doesNotMatch(payload.errors[0].message, /GitHub 限流/);
+    assert.equal(payload.errors[0].code, "github_repo_not_in_app_scope");
     assert.equal(payload.errors[0].httpStatus, 404);
   } finally { globalThis.fetch = originalFetch; }
 });

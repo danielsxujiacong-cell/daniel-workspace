@@ -129,8 +129,10 @@ async function githubUpstreamFailure(response, operation) {
   error.retryAfterSeconds = Number(response.headers.get("Retry-After")) || null;
   const resetSeconds = Number(response.headers.get("X-RateLimit-Reset"));
   error.rateLimitResetAt = Number.isFinite(resetSeconds) && resetSeconds > 0 ? new Date(resetSeconds * 1000).toISOString() : null;
-  error.rateLimited = response.status === 429 || response.headers.get("X-RateLimit-Remaining") === "0"
-    || /rate.?limit|secondary rate/i.test(error.upstreamMessage);
+  error.rateLimited = response.status === 429 || response.status === 403 && (
+    response.headers.get("X-RateLimit-Remaining") === "0"
+    || /rate.?limit|secondary rate/i.test(error.upstreamMessage)
+  );
   error.code = error.rateLimited ? "github_rate_limited" : "github_upstream_error";
   return error;
 }
