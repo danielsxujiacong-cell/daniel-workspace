@@ -10,13 +10,12 @@ if (!publicSnapshotMode && (!workspaceAuth?.client || !workspaceAuth.userId)) th
 const {
   buildPublishableSnapshot,
   buildSnapshotActivity,
-  createSnapshotReviewDraft,
+  createPublicSnapshotDraft,
   hydratePublicSnapshot,
   publishPublicSnapshot,
   PUBLIC_SNAPSHOT_ACTIVITY_DAYS,
-  PUBLIC_SNAPSHOT_COLLECTION_LABELS,
-  selectedSnapshotCounts,
-} = await import("./public-snapshot.js?v=3.8-l");
+  snapshotDraftCounts,
+} = await import("./public-snapshot.js?v=3.8-m");
 let hydratedPublicData = publicSnapshotMode ? hydratePublicSnapshot(publishedSnapshot) : null;
 
 const {
@@ -143,7 +142,7 @@ const ui = {
   githubRefreshAttemptAt: {},
   githubAppStatus: "unknown",
   githubAppRepositoryCount: 0,
-  publicSnapshotPreview: { status: "idle", draft: null, error: "", confirmed: false, publishedAt: "", progress: null },
+  publicSnapshotPreview: { status: "idle", draft: null, error: "", publishedAt: "", progress: null },
   cloud: {
     status: publicSnapshotMode ? "public" : navigator.onLine === false ? "offline" : "loading",
     lastSyncedAt: cloudCache?.lastSyncedAt || "",
@@ -2255,7 +2254,7 @@ function renderDecisions() {
 
 function pageTitle() {
   if (ui.page === "project") return projectTitle(ui.projectId);
-  if (ui.page === "snapshot-preview") return "访客快照预览";
+  if (ui.page === "snapshot-preview") return "访客快照发布";
   if (ui.page === "local-project") return localProjectById(ui.localProjectId)?.name || "本地项目";
   return ({ home: "Home", projects: "Projects", knowledge: "Knowledge", decisions: "Decisions", tasks: "Tasks" })[ui.page] || "Home";
 }
@@ -2510,66 +2509,28 @@ function renderCloudNotice() {
 }
 
 function renderPublicSnapshotNotice() {
-  if (publishedSnapshot) return `<section class="public-snapshot-banner" role="status"><strong>公开只读快照</strong><span>展示所有者审核后发布的数据 · ${publishedSnapshot.publishedAt ? `更新于 ${esc(formattedTimestamp(publishedSnapshot.publishedAt))}` : "发布日期未提供"}</span></section>`;
-  const message = globalThis.DANIEL_WORKSPACE_PUBLIC_SNAPSHOT_ERROR || "尚未发布经过审核的访客快照。私人工作台数据不会自动公开。";
-  return `<section class="public-snapshot-banner pending" role="status"><strong>访客快照尚未发布</strong><span>${esc(message)} 项目、任务、工作记录、资料和决策在所有者审核并发布前不会显示。</span></section>`;
-}
-
-function reviewItemTitle(item) {
-  const fields = item.fields || {};
-  return fields.name || fields.title || fields.question || fields.repository || fields.type || item.reviewId;
-}
-
-function reviewItemPreview(item) {
-  return JSON.stringify(item.fields || {}, null, 2);
-}
-
-function renderSnapshotReviewItems(collection) {
-  const items = ui.publicSnapshotPreview.draft?.collections?.[collection] || [];
-  if (!items.length) return `<p class="empty-state">没有可供审核的${esc(PUBLIC_SNAPSHOT_COLLECTION_LABELS[collection] || collection)}记录。</p>`;
-  return `<div class="snapshot-review-list">${items.map((item) => `<article class="snapshot-review-item"><div class="snapshot-review-item-head"><label class="snapshot-review-toggle"><input type="checkbox" data-snapshot-review="include" data-collection="${esc(collection)}" data-review-id="${esc(item.reviewId)}" ${item.include ? "checked" : ""}/><strong>${esc(reviewItemTitle(item))}</strong></label><span class="muted">${item.include ? "已选择发布" : "默认隐藏"}</span></div>${item.findings?.length ? `<div class="snapshot-sensitive-notice"><strong>需要检查的字段</strong><ul>${item.findings.map((finding) => `<li>${esc(finding.field)}：${esc(finding.reason)}</li>`).join("")}</ul><label><input type="checkbox" data-snapshot-review="acknowledge" data-collection="${esc(collection)}" data-review-id="${esc(item.reviewId)}" ${item.sensitiveAcknowledged ? "checked" : ""}/> 我已检查这条记录中的提示字段</label></div>` : ""}<details class="snapshot-review-detail"><summary>查看将发布的脱敏内容</summary><pre>${esc(reviewItemPreview(item))}</pre></details></article>`).join("")}</div>`;
-}
-
-function renderSnapshotCollectionSection(collection, title) {
-  const items = ui.publicSnapshotPreview.draft?.collections?.[collection] || [];
-  const counts = selectedSnapshotCounts(ui.publicSnapshotPreview.draft);
-  return `<section class="card card-pad snapshot-review-section"><header class="card-header"><div><h2>${esc(title)}</h2><p class="minor">候选 ${items.length} 条 · 已选择 ${counts[collection] || 0} 条</p></div></header>${renderSnapshotReviewItems(collection)}</section>`;
-}
-
-function snapshotSelectionTotal(counts) {
-  return Object.entries(counts || {}).reduce((sum, [key, value]) => sum + (key === "summaries" ? value : value), 0);
+  if (publishedSnapshot) return `<section class="public-snapshot-banner" role="status"><strong>公开只读快照</strong><span>展示所有者手动发布的脱敏数据 · ${publishedSnapshot.publishedAt ? `更新于 ${esc(formattedTimestamp(publishedSnapshot.publishedAt))}` : "发布日期未提供"}</span></section>`;
+  const message = globalThis.DANIEL_WORKSPACE_PUBLIC_SNAPSHOT_ERROR || "尚未发布访客快照。私人工作台数据不会自动公开。";
+  return `<section class="public-snapshot-banner pending" role="status"><strong>访客快照尚未发布</strong><span>${esc(message)} 所有者手动发布前不会显示私人工作台资料。</span></section>`;
 }
 
 function renderSnapshotPreview() {
   const state = ui.publicSnapshotPreview;
-  if (!state.draft && state.status === "loading") {
+  if (["loading", "publishing"].includes(state.status)) {
     const progress = state.progress || {};
-    return `<section class="page-heading"><div><div class="eyebrow">访客快照</div><h1>正在生成预览</h1><p>读取已同步的真实项目资料、工作记录和公开仓库汇总；这些数据仍只留在私人浏览器中。</p></div></section><section class="card card-pad snapshot-loading" role="status" aria-live="polite"><span class="startup-spinner"></span><div class="snapshot-progress-copy"><strong>${esc(progress.message || "正在准备预览…")}</strong>${progress.detail ? `<span>${esc(progress.detail)}</span>` : ""}</div></section>`;
+    return `<section class="page-heading"><div><div class="eyebrow">访客快照</div><h1>${state.status === "publishing" ? "正在发布访客快照" : "正在准备访客快照"}</h1><p>使用已同步的工作区数据；敏感内容自动隐藏，只有这次手动操作会更新访客快照。</p></div></section><section class="card card-pad snapshot-loading" role="status" aria-live="polite"><span class="startup-spinner"></span><div class="snapshot-progress-copy"><strong>${esc(progress.message || "正在准备发布…")}</strong>${progress.detail ? `<span>${esc(progress.detail)}</span>` : ""}</div></section>`;
   }
-  if (!state.draft && state.status === "error") return `<section class="page-heading"><div><div class="eyebrow">访客快照</div><h1>预览未完成</h1><p>${esc(state.error)}</p></div><button class="button primary" data-action="generate-snapshot-preview">重试生成预览</button></section>`;
-  if (!state.draft) return `<section class="page-heading"><div><div class="eyebrow">只读发布流程</div><h1>预览访客快照</h1><p>读取当前登录账号中已同步的真实数据，逐条查看公开字段并手动选择要发布的记录。生成预览不会上传数据或更新访客页面。</p></div></section><section class="card card-pad snapshot-intro"><h2>预览范围</h2><ul><li>项目、任务、工作记录、知识资料和决策来自当前 Supabase 登录工作区。</li><li>开发活动只统计经 Worker 核验为公开的 GitHub 仓库；只保存每日汇总，不保存 Commit 原文或 SHA。</li><li>本机路径、账号 ID、证据链接、未核验仓库地址、令牌和密钥不会进入发布快照。</li><li>全部候选默认不公开；必须逐条选择，并再次确认记录数量和内容后才会发送给 Worker。</li></ul><button class="button primary" data-action="generate-snapshot-preview">读取真实资料并生成预览</button></section>`;
+  if (!state.draft && state.status === "idle") return `<section class="page-heading"><div><div class="eyebrow">访客快照</div><h1>一键发布</h1><p>私人工作台保持实时更新；访客快照只在所有者手动点击发布后更新。</p></div></section>`;
 
   const draft = state.draft;
-  const incomplete = draft.completeness?.complete === false;
-  const completenessIssues = Array.isArray(draft.completeness?.issues) ? draft.completeness.issues : [];
-  const counts = selectedSnapshotCounts(draft);
-  const totalSelected = snapshotSelectionTotal(counts);
-  const candidates = draft.collections;
-  const totalCandidates = Object.values(candidates).reduce((sum, items) => sum + items.length, 0);
-  const workLogStatus = draft.completeness.workLogs && !draft.completeness.workLogsTruncated ? "工作记录已完整读取" : "工作记录历史可能不完整";
-  const githubStatus = draft.completeness.github ? "公开仓库活动读取完整" : `${draft.completeness.githubErrors} 项公开仓库活动未完整读取`;
-  return `<section class="page-heading snapshot-page-heading"><div><div class="eyebrow">所有者专用 · 预览后发布</div><h1>访客快照预览</h1><p>候选 ${totalCandidates} 条 · 当前选择 ${totalSelected} 条。预览为本机内存草稿，未写入 KV，也未发送给访客。</p></div><button class="button quiet" data-action="regenerate-snapshot-preview">重新读取私人资料</button></section>
-    ${incomplete ? `<section class="card card-pad snapshot-incomplete" role="alert"><strong>数据源读取不完整 · 发布已锁定</strong><p>下面只显示成功读取的部分，缺失数据没有按零处理。请检查原因后安全重试；完整读取前不能发布。</p>${completenessIssues.length ? `<ul>${completenessIssues.map((issue) => `<li>${esc(issue)}</li>`).join("")}</ul>` : "<p>至少一个数据源未通过完整性核对。</p>"}<button class="button quiet" data-action="regenerate-snapshot-preview">重试缺失数据读取</button></section>` : ""}
-    <section class="snapshot-scope-grid"><article class="card snapshot-scope-card"><span>数据源</span><strong>${esc(ui.cloud.lastSyncedAt ? `Supabase · ${formattedTimestamp(ui.cloud.lastSyncedAt)}` : "Supabase 当前会话")}</strong></article><article class="card snapshot-scope-card"><span>活动时间范围</span><strong>${esc(draft.activityRange.startDate)} 至 ${esc(draft.activityRange.endDate)}</strong></article><article class="card snapshot-scope-card"><span>工作记录</span><strong>${esc(workLogStatus)}</strong></article><article class="card snapshot-scope-card"><span>GitHub 活动</span><strong>${esc(githubStatus)}</strong></article></section>
-    <section class="card card-pad snapshot-review-warning"><strong>公开字段检查</strong><p>下面展示的是将要发布的脱敏内容。带提示的字段必须先勾选“已检查”；没有提示的记录也必须逐条勾选。证据链接、认证信息、本机目录、Companion 扫描和私人 Commit 原文不进入快照。</p>${draft.completeness.workLogsTruncated ? `<p class="snapshot-warning">至少一个项目超过单次工作记录读取上限；本次预览会标记活动统计不完整。</p>` : ""}</section>
-    ${renderSnapshotCollectionSection("projects", "Projects · 全部项目候选")}
-    ${renderSnapshotCollectionSection("tasks", "Tasks · 任务候选")}
-    ${renderSnapshotCollectionSection("workLogs", "Work Logs · 工作记录候选")}
-    ${renderSnapshotCollectionSection("knowledge", "Knowledge · 知识资料候选")}
-    ${renderSnapshotCollectionSection("decisions", "Decisions · 决策候选")}
-    ${renderSnapshotCollectionSection("githubActivity", "GitHub · 已核验公开仓库每日汇总")}
-    ${renderSnapshotCollectionSection("summaries", "AI 简报/周报 · 仅包含已生成内容")}
-    <section class="card card-pad snapshot-publish-panel"><h2>发布前确认</h2><p>选中记录：项目 ${counts.projects || 0}、任务 ${counts.tasks || 0}、工作记录 ${counts.workLogs || 0}、资料 ${counts.knowledge || 0}、决策 ${counts.decisions || 0}、公开仓库活动 ${counts.githubActivity || 0}、AI 总结 ${counts.summaries || 0}。</p>${incomplete ? "<p class=\"snapshot-publish-blocked\">完整性检查未通过，当前预览不可发布。</p>" : `<label class="snapshot-final-review"><input id="snapshot-final-review" type="checkbox" ${state.confirmed ? "checked" : ""}/> 我已检查选中记录和脱敏字段，并确认这些内容适合公开展示。</label>`}<button class="button primary" data-action="open-snapshot-publish-confirm" ${incomplete || !state.confirmed || !totalSelected ? "disabled" : ""}>确认公开并发布 ${totalSelected} 条记录</button>${state.publishedAt ? `<p class="snapshot-published-status" role="status">最近一次发布成功：${esc(formattedTimestamp(state.publishedAt))}。线上访客快照已更新。</p>` : ""}</section>`;
+  const incomplete = draft ? !snapshotDraftPublishable(draft) : false;
+  const counts = draft ? snapshotDraftCounts(draft) : null;
+  const issues = Array.isArray(draft?.completeness?.issues) ? draft.completeness.issues : [];
+  const countSummary = counts ? `项目 ${counts.projects || 0} · 任务 ${counts.tasks || 0} · 工作记录 ${counts.workLogs || 0} · 资料 ${counts.knowledge || 0} · 决策 ${counts.decisions || 0} · 公开仓库活动 ${counts.githubActivity || 0} · AI 简报 ${counts.summaries || 0}` : "";
+  return `<section class="page-heading"><div><div class="eyebrow">访客快照</div><h1>${state.status === "published" ? "快照已发布" : incomplete ? "数据未完整，快照未发布" : "发布未完成"}</h1><p>${esc(state.error || (state.status === "published" ? `访客现在可读取此快照 · ${formattedTimestamp(state.publishedAt)}` : "当前数据没有写入公开存储，可从顶部按钮安全重试。"))}</p></div></section>
+    ${incomplete ? `<section class="card card-pad snapshot-incomplete" role="alert"><strong>缺失数据仍保持缺失，没有按零发布。</strong><p>完成并核对所有必要读取之前不会更新访客快照。</p>${issues.length ? `<ul>${issues.map((issue) => `<li>${esc(issue)}</li>`).join("")}</ul>` : "<p>至少一个数据源未通过完整性核对。</p>"}</section>` : ""}
+    ${draft ? `<section class="card card-pad snapshot-publish-panel" role="status"><h2>${state.status === "published" ? "本次访客快照" : "已安全汇总的数据"}</h2><p>${esc(countSummary)}</p><p>活动范围：${esc(draft.activityRange.startDate)} 至 ${esc(draft.activityRange.endDate)}</p><p>敏感信息、认证值、邮箱、联系方式、本机路径、证据链接和未核验仓库地址由白名单过滤器自动隐藏。访客页保持只读。</p>${state.status === "published" ? `<p class="snapshot-published-status">发布成功：${esc(formattedTimestamp(state.publishedAt))}。访客请求会直接读取最新快照。</p>` : ""}</section>` : ""}
+    ${state.status === "error" && !draft ? `<section class="card card-pad snapshot-incomplete" role="alert"><strong>发布失败</strong><p>${esc(state.error)}</p><p>原有访客快照未被修改。修复数据源或网络后，点击顶部「一键发布访客快照」重试。</p></section>` : ""}`;
 }
 
 async function mapWithConcurrency(items, concurrency, callback) {
@@ -2587,8 +2548,8 @@ async function mapWithConcurrency(items, concurrency, callback) {
 }
 
 function snapshotDraftPublishable(draft) {
-  return draft?.completeness?.complete !== false && draft?.completeness?.workLogs !== false
-    && draft?.completeness?.github !== false && draft?.completeness?.workLogsTruncated !== true;
+  return draft?.completeness?.complete === true && draft?.completeness?.workLogs === true
+    && draft?.completeness?.github === true && draft?.completeness?.workLogsTruncated !== true;
 }
 
 function snapshotReadError(error) {
@@ -2614,10 +2575,12 @@ function snapshotActivityForNames(result, names) {
   };
 }
 
-async function generateSnapshotPreview() {
+async function generateAndPublishVisitorSnapshot() {
   if (publicSnapshotMode || !workspaceActive) return;
+  if (["loading", "publishing"].includes(ui.publicSnapshotPreview.status)) return;
+  ui.page = "snapshot-preview";
   if (!workspaceAuth?.client || !workspaceAuth.userId || ui.cloud.status !== "synced" || cloudSyncRunning || cloudSyncTimer) {
-    ui.publicSnapshotPreview = { status: "error", draft: null, error: "请先等待私人工作台完成 Supabase 同步，再生成快照。", progress: null };
+    ui.publicSnapshotPreview = { status: "error", draft: null, error: "请先等待私人工作台完成 Supabase 同步，再发布快照。", progress: null };
     render();
     return;
   }
@@ -2628,7 +2591,7 @@ async function generateSnapshotPreview() {
     ui.publicSnapshotPreview = { ...ui.publicSnapshotPreview, status: "loading", progress: { message, detail } };
     render();
   };
-  ui.publicSnapshotPreview = { status: "loading", draft: null, error: "", confirmed: false, publishedAt: previousPublishedAt, progress: { message: "准备读取已同步的 Workspace 数据", detail: "预览只在当前登录浏览器生成，不会发布。" } };
+  ui.publicSnapshotPreview = { status: "loading", draft: null, error: "", publishedAt: previousPublishedAt, progress: { message: "准备读取已同步的 Workspace 数据", detail: "仅这次手动操作会更新公开快照。" } };
   render();
   const today = shanghaiDateKey();
   const range = resolveActivityRange("custom", { startDate: shiftDateKey(today, 1 - PUBLIC_SNAPSHOT_ACTIVITY_DAYS), endDate: today });
@@ -2804,7 +2767,7 @@ async function generateSnapshotPreview() {
       ...verificationErrors.map((error) => `仓库公开状态：${error.fullName || "未知仓库"} 未核验（${snapshotReadError(error)}）`),
       ...activityResult.errors.map((error) => `GitHub 活动：${error.fullName || "未知仓库"} 未完整读取（${snapshotReadError(error)}）`),
     ];
-    const draft = createSnapshotReviewDraft({
+    const draft = createPublicSnapshotDraft({
       data: db,
       workLogs,
       publicRepositories: verifiedRepos,
@@ -2822,79 +2785,29 @@ async function generateSnapshotPreview() {
     });
     if (!range.valid) throw new Error(range.error || "快照日期范围无效。");
     if (requestId !== snapshotPreviewRequestId) return;
-    ui.publicSnapshotPreview = { status: "ready", draft, error: "", confirmed: false, publishedAt: previousPublishedAt, progress: null };
-  } catch (error) {
-    if (requestId !== snapshotPreviewRequestId) return;
-    ui.publicSnapshotPreview = { status: "error", draft: null, error: snapshotReadError(error), confirmed: false, publishedAt: previousPublishedAt, progress: null };
-  }
-  if (workspaceActive && requestId === snapshotPreviewRequestId) render();
-}
-
-function toggleSnapshotReview(collection, reviewId, field, value) {
-  const items = ui.publicSnapshotPreview.draft?.collections?.[collection];
-  const item = items?.find((entry) => entry.reviewId === reviewId);
-  if (!item) return;
-  const draft = ui.publicSnapshotPreview.draft;
-  if (field === "include" && value && collection !== "projects" && collection !== "summaries") {
-    const selectedParents = (draft.collections.projects || []).filter((project) => project.include);
-    const hasSelectedParent = collection === "githubActivity"
-      ? (item.sourceProjectIds || []).some((sourceId) => selectedParents.some((project) => project.sourceId === sourceId))
-      : !item.fields.projectId || selectedParents.some((project) => project.reviewId === item.fields.projectId);
-    if ((collection === "workLogs" || item.fields.projectId || item.sourceProjectIds?.length) && !hasSelectedParent) {
-      toast("请先选择这条记录关联的项目，再选择发布记录");
+    if (!snapshotDraftPublishable(draft)) {
+      ui.publicSnapshotPreview = { status: "error", draft, error: "数据读取不完整，本次未发布。请修复下列数据源后，从顶部按钮安全重试。", publishedAt: previousPublishedAt, progress: null };
+      render();
       return;
     }
-  }
-  if (field === "include" && value && item.findings?.length && !item.sensitiveAcknowledged) {
-    toast("请先检查并确认这条记录中的敏感字段提示");
-    return;
-  }
-  item[field] = Boolean(value);
-  if (field === "include" && collection === "projects" && !value) {
-    for (const [childCollection, children] of Object.entries(draft.collections)) {
-      for (const child of children) {
-        if (childCollection === "githubActivity" ? child.sourceProjectIds?.includes(item.sourceId) : child.fields?.projectId === item.reviewId) child.include = false;
-      }
+    const counts = snapshotDraftCounts(draft);
+    const snapshot = buildPublishableSnapshot(draft);
+    ui.publicSnapshotPreview = { status: "publishing", draft, error: "", publishedAt: previousPublishedAt, progress: { message: "正在写入最新访客快照", detail: `项目 ${counts.projects || 0}、任务 ${counts.tasks || 0}、工作记录 ${counts.workLogs || 0}、公开仓库活动 ${counts.githubActivity || 0}。` } };
+    render();
+    try {
+      const result = await publishPublicSnapshot(snapshot, workspaceAuth);
+      if (requestId !== snapshotPreviewRequestId) return;
+      ui.publicSnapshotPreview = { status: "published", draft, error: "", publishedAt: result.publishedAt || new Date().toISOString(), publishedCounts: result.counts || counts, progress: null };
+      toast("访客快照已发布，访客现在可以读取最新内容");
+    } catch (error) {
+      if (requestId !== snapshotPreviewRequestId) return;
+      ui.publicSnapshotPreview = { status: "error", draft, error: typeof error?.message === "string" ? error.message : "发布失败；原有访客快照保持不变。", publishedAt: previousPublishedAt, progress: null };
     }
-  }
-  ui.publicSnapshotPreview.confirmed = false;
-  render();
-}
-
-async function publishReviewedSnapshot() {
-  if (publicSnapshotMode || !ui.publicSnapshotPreview.confirmed) return;
-  if (!snapshotDraftPublishable(ui.publicSnapshotPreview.draft)) {
-    toast("快照数据源读取不完整，必须完成安全重试后才能发布。");
-    return;
-  }
-  const snapshot = buildPublishableSnapshot(ui.publicSnapshotPreview.draft);
-  try {
-    const result = await publishPublicSnapshot(snapshot, workspaceAuth);
-    ui.publicSnapshotPreview = { ...ui.publicSnapshotPreview, status: "ready", publishedAt: result.publishedAt || new Date().toISOString(), confirmed: false };
-    toast("访客快照已发布");
   } catch (error) {
-    ui.publicSnapshotPreview.error = typeof error?.message === "string" ? error.message : "发布失败；原有访客快照保持不变。";
-    toast(ui.publicSnapshotPreview.error);
+    if (requestId !== snapshotPreviewRequestId) return;
+    ui.publicSnapshotPreview = { status: "error", draft: null, error: snapshotReadError(error), publishedAt: previousPublishedAt, progress: null };
   }
-  if (workspaceActive) render();
-}
-
-function openSnapshotPublishConfirmation() {
-  if (publicSnapshotMode || !ui.publicSnapshotPreview.confirmed) return;
-  if (!snapshotDraftPublishable(ui.publicSnapshotPreview.draft)) {
-    toast("快照数据源读取不完整，必须完成安全重试后才能发布。");
-    return;
-  }
-  const snapshot = buildPublishableSnapshot(ui.publicSnapshotPreview.draft);
-  const counts = selectedSnapshotCounts(ui.publicSnapshotPreview.draft);
-  const total = snapshotSelectionTotal(counts);
-  const ranges = `${snapshot.activity.startDate} 至 ${snapshot.activity.endDate}`;
-  openConfirmation({
-    title: "确认发布访客快照",
-    message: `即将公开 ${total} 条经你逐条选择的记录：项目 ${counts.projects || 0}、任务 ${counts.tasks || 0}、工作记录 ${counts.workLogs || 0}、资料 ${counts.knowledge || 0}、决策 ${counts.decisions || 0}、公开仓库活动 ${counts.githubActivity || 0}、AI 总结 ${counts.summaries || 0}。开发活动范围为 ${ranges}。快照只包含页面中展示的白名单字段，不含本机路径、用户 ID、证据链接、私钥、Token 或私人仓库内容。确认后这些内容会写入公开只读 KV，访客无需登录即可读取。`,
-    confirmLabel: `公开并发布 ${total} 条记录`,
-    onConfirm: () => { void publishReviewedSnapshot(); },
-  });
+  if (workspaceActive && requestId === snapshotPreviewRequestId) render();
 }
 
 function render() {
@@ -2904,7 +2817,7 @@ function render() {
   app.dataset.mode = publicSnapshotMode ? "public" : "private";
   const headerActions = publicSnapshotMode
     ? `<span class="today-label">公开只读快照</span><a class="button quiet small public-login-link" href="?mode=login">登录</a>`
-    : `<button class="button quiet small" data-action="open-snapshot-preview">预览访客快照</button><span class="today-label">${formattedDate()}</span><button class="cloud-sync-indicator ${esc(ui.cloud.status)}" data-action="retry-cloud-sync" title="点击重新检查 Supabase 同步状态" aria-live="polite" ${["loading", "syncing", "migrating"].includes(ui.cloud.status) ? "disabled" : ""}>${esc(cloudStatusLabel())}</button><button class="icon-button theme-toggle" data-action="toggle-theme" title="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式" aria-label="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式">${icon(document.documentElement.dataset.theme === "light" ? "moon" : "sun")}</button><button class="icon-button" data-action="open-assistant" title="打开 AI Assistant" aria-label="打开 AI Assistant">${icon("sparkle")}</button><button class="button quiet small logout-button" data-action="logout">退出登录</button>`;
+    : `<button class="button primary small snapshot-publish-action" data-action="publish-visitor-snapshot" aria-label="一键发布访客快照" ${["loading", "publishing"].includes(ui.publicSnapshotPreview.status) ? "disabled" : ""}>${["loading", "publishing"].includes(ui.publicSnapshotPreview.status) ? "正在发布…" : `<span class="snapshot-publish-label-desktop">一键发布访客快照</span><span class="snapshot-publish-label-mobile">发布快照</span>`}</button><span class="today-label">${formattedDate()}</span><button class="cloud-sync-indicator ${esc(ui.cloud.status)}" data-action="retry-cloud-sync" title="点击重新检查 Supabase 同步状态" aria-live="polite" ${["loading", "syncing", "migrating"].includes(ui.cloud.status) ? "disabled" : ""}>${esc(cloudStatusLabel())}</button><button class="icon-button theme-toggle" data-action="toggle-theme" title="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式" aria-label="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式">${icon(document.documentElement.dataset.theme === "light" ? "moon" : "sun")}</button><button class="icon-button" data-action="open-assistant" title="打开 AI Assistant" aria-label="打开 AI Assistant">${icon("sparkle")}</button><button class="button quiet small logout-button" data-action="logout">退出登录</button>`;
   app.innerHTML = `${renderNav()}<main class="main-shell"><header class="topbar"><div class="breadcrumbs"><span>Daniel Workspace</span><span class="crumb-sep">/</span><strong>${esc(pageTitle())}</strong></div><div class="search-wrap"><div class="search-box">${icon("search")}<input id="global-search" type="search" value="${esc(ui.query)}" placeholder="搜索项目、资料、决策或任务…" autocomplete="off" aria-label="全局搜索"/><kbd class="search-hint">Ctrl K</kbd></div><div id="search-results"></div></div><div class="topbar-actions">${headerActions}</div></header><div class="content">${publicSnapshotMode ? renderPublicSnapshotNotice() : renderCloudNotice()}${page}</div></main>${renderAssistant()}${renderModal()}<div class="toast-region" id="toast-region" aria-live="polite"></div>`;
   renderSearchResults();
   enforcePublicReadOnlyDom();
@@ -3276,9 +3189,7 @@ function enforcePublicReadOnlyDom() {
 function handleAction(action, element, sourceEvent) {
   if (publicSnapshotMode && !PUBLIC_READ_ONLY_ACTIONS.has(action)) return;
   const id = element.dataset.id;
-  if (action === "open-snapshot-preview") { ui.page = "snapshot-preview"; render(); return; }
-  if (action === "generate-snapshot-preview" || action === "regenerate-snapshot-preview") { void generateSnapshotPreview(); return; }
-  if (action === "open-snapshot-publish-confirm") { openSnapshotPublishConfirmation(); return; }
+  if (action === "publish-visitor-snapshot") { void generateAndPublishVisitorSnapshot(); return; }
   if (action === "close-confirm-backdrop" && element !== sourceEvent?.target) return;
   if (action === "refresh-home-activity") { void loadHomeActivity({ force: true }); return; }
   if (action === "select-home-activity-date") {
@@ -3510,15 +3421,6 @@ app.addEventListener("toggle", (event) => {
 
 app.addEventListener("change", (event) => {
   const target = event.target;
-  if (target.dataset.snapshotReview) {
-    toggleSnapshotReview(target.dataset.collection, target.dataset.reviewId, target.dataset.snapshotReview, target.checked);
-    return;
-  }
-  if (target.id === "snapshot-final-review") {
-    ui.publicSnapshotPreview.confirmed = target.checked;
-    render();
-    return;
-  }
   if (publicSnapshotMode && !["dashboard-activity-range", "dashboard-activity-start", "dashboard-activity-end"].includes(target.id)) return;
   if (target.id === "dashboard-activity-range") {
     ui.activityRangePreset = ["7d", "30d", "90d", "custom"].includes(target.value) ? target.value : "30d";

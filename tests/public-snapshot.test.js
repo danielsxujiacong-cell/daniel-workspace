@@ -3,7 +3,8 @@ import test from "node:test";
 import worker from "../cloudflare/worker.js";
 import {
   buildPublishableSnapshot,
-  createSnapshotReviewDraft,
+  createPublicSnapshotDraft,
+  snapshotDraftCounts,
   validatePublicSnapshot,
 } from "../src/public-snapshot.js";
 
@@ -60,14 +61,14 @@ function testEnv({ storedSnapshot = null } = {}) {
 }
 
 function draftWithSensitiveSources() {
-  return createSnapshotReviewDraft({
+  return createPublicSnapshotDraft({
     now: "2026-10-12T02:00:00.000Z",
     activityRange: { startDate: "2025-10-13", endDate: "2026-10-12" },
     data: {
       projects: [{
         id: "private-project-id",
         name: "Reviewed Workspace",
-        description: "Contact owner@example.com; token ghp_012345678901234567890123; local C:\\Users\\Daniel\\secret.",
+        description: "Contact owner@example.com; phone +1 (415) 555-0136; token ghp_012345678901234567890123; password=TopSecret123; local C:\\Users\\Daniel\\secret.",
         status: "进行中",
         stage: "MVP",
         next: "Ship the reviewed demo",
@@ -91,38 +92,63 @@ function draftWithSensitiveSources() {
   });
 }
 
-test("snapshot draft is whitelist-only, redacts private values, and stays unchecked until reviewed", () => {
+test("snapshot draft automatically includes safe whitelisted data and redacts private values", () => {
   const draft = draftWithSensitiveSources();
   const project = draft.collections.projects[0];
   const task = draft.collections.tasks[0];
   const workLog = draft.collections.workLogs[0];
-  assert.equal(project.include, false);
-  assert.equal(task.include, false);
-  assert.equal(workLog.include, false);
   assert.equal(project.fields.url, "https://example.com/demo");
   assert.equal(project.fields.github, "https://github.com/acme/public-demo");
   assert.match(project.fields.description, /\[邮箱已隐藏\]/);
   assert.match(project.fields.description, /\[密钥已隐藏\]/);
+  assert.match(project.fields.description, /\[认证信息已隐藏\]/);
   assert.match(project.fields.description, /\[本机路径已隐藏\]/);
+  assert.doesNotMatch(project.fields.description, /415|555-0136/);
   assert.doesNotMatch(project.fields.notes, /drive\.google\.com/);
+  assert.equal(createPublicSnapshotDraft({ data: { projects: [{ id: "private-url", name: "Private link", url: "https://drive.google.com/file/d/secret" }] }, githubActivity: { complete: true, workLogsComplete: true } }).collections.projects[0].fields.url, "");
+  const summaryDraft = createPublicSnapshotDraft({ summaries: { dailyBrief: { status: "ready", value: { password: "hunter2", access_token: "eyJabcdefghijk.abcdefghijk.abcdefghijk" } } }, githubActivity: { complete: true, workLogsComplete: true } });
+  assert.doesNotMatch(summaryDraft.collections.summaries[0].fields.content, /hunter2|eyJabcdefghijk/);
+  assert.deepEqual(JSON.parse(summaryDraft.collections.summaries[0].fields.content), {});
   assert.doesNotMatch(task.fields.description, /linear\.app/);
   assert.equal(workLog.fields.evidenceLinkCount, 1);
   assert.equal(JSON.stringify(draft).includes("private-project-id"), true, "raw IDs stay only in the owner-side review draft");
 
-  project.sensitiveAcknowledged = true;
-  project.include = true;
-  task.sensitiveAcknowledged = true;
-  task.include = true;
-  workLog.sensitiveAcknowledged = true;
-  workLog.include = true;
-  draft.collections.githubActivity[0].include = true;
   const snapshot = buildPublishableSnapshot(draft);
   assert.equal(validatePublicSnapshot(snapshot), true);
+  assert.deepEqual(snapshotDraftCounts(draft), { projects: 1, tasks: 1, workLogs: 1, knowledge: 0, decisions: 0, githubActivity: 1, summaries: 0 });
   assert.equal(JSON.stringify(snapshot).includes("private-project-id"), false);
   assert.equal(JSON.stringify(snapshot).includes("private-task-id"), false);
   assert.equal(JSON.stringify(snapshot).includes("drive.google.com"), false);
   assert.equal(snapshot.workLogs[0].workDate, "2025-01-01", "older reviewed logs remain available in the full history");
   assert.equal(snapshot.activity.githubDailyCounts[0].count, 3);
+});
+
+test("one safe snapshot draft includes all 26 projects and every available record by default", () => {
+  const projects = Array.from({ length: 26 }, (_, index) => ({ id: `p${index + 1}`, name: `Project ${index + 1}`, github: index === 0 ? "https://github.com/acme/public-demo" : "" }));
+  const draft = createPublicSnapshotDraft({
+    now: "2026-10-12T02:00:00.000Z",
+    activityRange: { startDate: "2025-10-13", endDate: "2026-10-12" },
+    data: {
+      projects,
+      tasks: [{ id: "t1", title: "Task", projectId: "p1" }],
+      knowledge: [{ id: "k1", title: "Knowledge", content: "Safe note", projectId: "p1" }],
+      decisions: [{ id: "d1", question: "Decision", projectId: "p1" }],
+    },
+    workLogs: [{ id: "w1", projectId: "p1", workDate: "2026-10-12", completedItems: "Done" }],
+    publicRepositories: [{ repositoryName: "acme/public-demo", isPublic: true }],
+    githubActivity: { repositories: [{ fullName: "acme/public-demo", complete: true, dailyCounts: [{ date: "2026-10-12", count: 2 }] }], complete: true, workLogsComplete: true },
+    summaries: { dailyBrief: { status: "ready", value: { summary: "Safe summary" } } },
+  });
+  const snapshot = buildPublishableSnapshot(draft);
+  assert.equal(validatePublicSnapshot(snapshot), true);
+  assert.equal(snapshot.projects.length, 26);
+  assert.equal(snapshot.tasks.length, 1);
+  assert.equal(snapshot.workLogs.length, 1);
+  assert.equal(snapshot.knowledge.length, 1);
+  assert.equal(snapshot.decisions.length, 1);
+  assert.equal(snapshot.activity.githubRepositoryCount, 1);
+  assert.deepEqual(snapshot.activity.githubDailyCounts, [{ date: "2026-10-12", count: 2 }]);
+  assert.notEqual(snapshot.summaries.dailyBrief, "");
 });
 
 test("a partially read snapshot draft cannot be converted into a publishable snapshot", () => {
@@ -134,7 +160,7 @@ test("a partially read snapshot draft cannot be converted into a publishable sna
 });
 
 test("snapshot draft records missing read scopes and marks the preview incomplete", () => {
-  const draft = createSnapshotReviewDraft({
+  const draft = createPublicSnapshotDraft({
     data: { projects: [{ id: "p1", name: "Project" }] },
     githubActivity: {
       repositories: [],
@@ -161,7 +187,7 @@ test("public GET reads only the isolated KV snapshot and returns 404 until one i
   const populated = testEnv({ storedSnapshot: snapshotFixture() });
   const response = await worker.fetch(request("/api/public/snapshot"), populated.env);
   assert.equal(response.status, 200);
-  assert.match(response.headers.get("Cache-Control"), /public/);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
   assert.equal((await response.json()).projects.length, 1);
   assert.equal(populated.writes.length, 0);
 });
@@ -190,12 +216,21 @@ test("snapshot publish requires the configured owner, validates the payload, and
     assert.equal((await owner.json()).counts.projects, 1);
 
     const oldSnapshot = state.getSnapshot();
-    const unsafe = snapshotFixture();
-    unsafe.projects[0].notes = "Private details https://drive.google.com/doc";
-    const rejected = await worker.fetch(request("/api/public/snapshot", { method: "POST", token: "owner-token", body: unsafe }), state.env);
-    assert.equal(rejected.status, 400);
-    assert.equal(state.getSnapshot(), oldSnapshot);
-    assert.equal(state.writes.length, 1);
+    for (const mutate of [
+      (unsafe) => { unsafe.projects[0].notes = "Private details https://drive.google.com/doc"; },
+      (unsafe) => { unsafe.projects[0].notes = "password=secret123"; },
+      (unsafe) => { unsafe.projects[0].url = "https://drive.google.com/file/d/private"; },
+      (unsafe) => { unsafe.projects[0].notes = "Owner UUID 9dd41e63-bdbd-405c-8243-ebe7de99fcf9"; },
+      (unsafe) => { unsafe.activity.githubComplete = false; },
+      (unsafe) => { unsafe.activity.workLogsComplete = false; },
+    ]) {
+      const unsafe = snapshotFixture();
+      mutate(unsafe);
+      const rejected = await worker.fetch(request("/api/public/snapshot", { method: "POST", token: "owner-token", body: unsafe }), state.env);
+      assert.equal(rejected.status, 400);
+      assert.equal(state.getSnapshot(), oldSnapshot);
+      assert.equal(state.writes.length, 1);
+    }
   } finally { globalThis.fetch = originalFetch; }
 });
 
@@ -203,7 +238,7 @@ test("the visitor shell starts the shared app before snapshot fetch settles and 
   const gate = await (await import("node:fs/promises")).readFile(new URL("../src/auth/gate.js", import.meta.url), "utf8");
   const app = await (await import("node:fs/promises")).readFile(new URL("../src/app.js", import.meta.url), "utf8");
   const publicStart = gate.slice(gate.indexOf("async function startPublicDashboard"), gate.indexOf("function startPrivateEntry"));
-  assert.ok(publicStart.indexOf("await import(\"../app.js?v=3.8-l\")") < publicStart.indexOf("void snapshotPromise.then"));
+  assert.ok(publicStart.indexOf("await import(\"../app.js?v=3.8-m\")") < publicStart.indexOf("void snapshotPromise.then"));
   assert.doesNotMatch(publicStart, /await\s+snapshotPromise/);
   assert.match(publicStart, /void snapshotPromise\.then/);
   assert.match(app, /publicSnapshotMode \? \{\} : await import\("\.\/store\.js\?v=3\.8-l"\)/);
@@ -211,4 +246,15 @@ test("the visitor shell starts the shared app before snapshot fetch settles and 
   assert.match(app, /publicSnapshotMode \? \{\} : await import\("\.\/cloud\/sync\.js"\)/);
   assert.match(app, /function enforcePublicReadOnlyDom\(\)/);
   assert.doesNotMatch(gate, /public-dashboard\.js/);
+});
+
+test("the private publication action generates, sanitizes, and posts in one click without review UI", async () => {
+  const app = await (await import("node:fs/promises")).readFile(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(app, /data-action="publish-visitor-snapshot"/);
+  assert.match(app, /if \(action === "publish-visitor-snapshot"\) \{ void generateAndPublishVisitorSnapshot\(\); return; \}/);
+  assert.doesNotMatch(app, /data-snapshot-review|snapshot-final-review|openSnapshotPublishConfirmation|逐条选择/);
+  const publishFlow = app.slice(app.indexOf("async function generateAndPublishVisitorSnapshot"), app.indexOf("function render()", app.indexOf("async function generateAndPublishVisitorSnapshot")));
+  assert.ok(publishFlow.indexOf("buildPublishableSnapshot(draft)") < publishFlow.indexOf("await publishPublicSnapshot(snapshot, workspaceAuth)"));
+  assert.match(publishFlow, /数据读取不完整，本次未发布/);
+  assert.match(publishFlow, /status: "published"/);
 });

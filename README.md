@@ -1,10 +1,10 @@
 # Daniel Workspace
 
-Daniel Workspace V3.8-C 使用统一的完整工作台界面和两种数据模式。访客无需登录即可查看所有者逐条审核后发布的真实只读快照；登录后继续使用实时 Supabase、GitHub 和本机 Companion 私人工作台。访客模式只读取独立 Cloudflare KV 快照，不读取私人表、浏览器工作区缓存、本机文件或私有仓库。
+Daniel Workspace V3.8-C 使用统一的完整工作台界面和两种数据模式。所有者登录后可在私人工作台一键发布经过白名单筛选的真实只读快照；访客无需登录即可浏览快照中的项目、图表、任务和工作记录。私人工作台继续实时同步，访客版只在所有者手动发布后更新。访客模式只读取独立 Cloudflare KV 快照，不读取私人表、浏览器工作区缓存、本机文件或私有仓库。
 
 ## Status
 
-- **Stage:** V3.8-C.1 repairs the owner-only visitor snapshot preview flow on the V3.8-C shared workspace. Preview remains separate from publication; incomplete reads are marked and cannot be published. Verification and handoff are recorded in [HANDOFF](docs/HANDOFF.md).
+- **Stage:** V3.8-C.2 adds one-click owner publication with automatic field allowlisting, sensitive-value filtering, completeness checks, and immediate visitor reads. Verification and handoff are recorded in [HANDOFF](docs/HANDOFF.md).
 - **Last updated:** 2026-10-12
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -16,7 +16,7 @@ Daniel Workspace V3.8-C 使用统一的完整工作台界面和两种数据模�
 python local_companion.py
 ```
 
-在浏览器打开 [http://127.0.0.1:4174](http://127.0.0.1:4174) 即可浏览公开只读工作台；根网址先显示完整界面，不因已保存的 Supabase 会话自动进入私人模式。快照未发布时页面会明确说明尚无公开项目数据，不显示 Mock 统计。登录后在私人工作台点击「预览访客快照」，逐条审核脱敏候选，再勾选最终确认并二次确认发布；预览不会上传数据。已发布快照通过 Worker 的公开 GET 从独立 KV 读取，访客搜索、导航、项目详情和图表筛选均为只读。`?mode=guest` 是公开模式别名，`?mode=login` 是唯一私人入口；退出后回到公开根网址。FlowOps 网站明确标为虚构业务的模拟演示；TK-1001 流程模拟仅通过显式 `?mode=demo` 打开。登录后按 `Ctrl+K` 或 `⌘K` 聚焦全局搜索；Companion 仅在私人登录模式尝试从本机 `127.0.0.1:4174` 读取扫描。
+在浏览器打开 [http://127.0.0.1:4174](http://127.0.0.1:4174) 即可浏览公开只读工作台；根网址先显示完整界面，不因已保存的 Supabase 会话自动进入私人模式。快照未发布时页面会明确说明尚无公开项目数据，不显示 Mock 统计。登录后在私人工作台点击「一键发布访客快照」，应用自动汇总所有安全字段并直接写入独立 KV；读取不完整时会显示缺失范围并保持旧快照不变。已发布快照通过 Worker 的公开 GET 读取，访客搜索、导航、项目详情和图表筛选均为只读。`?mode=guest` 是公开模式别名，`?mode=login` 是唯一私人入口；退出后回到公开根网址。FlowOps 网站明确标为虚构业务的模拟演示；TK-1001 流程模拟仅通过显式 `?mode=demo` 打开。登录后按 `Ctrl+K` 或 `⌘K` 聚焦全局搜索；Companion 仅在私人登录模式尝试从本机 `127.0.0.1:4174` 读取扫描。
 
 手动控制 Companion：前台运行 `python local_companion.py` 时按 `Ctrl+C` 停止；开机任务启动的后台实例可在 PowerShell 执行 `Stop-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion"` 停止。取消后续登录自动启动，执行 `Unregister-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion" -Confirm:$false`。重新登录 Windows 会再次启动仍注册的任务。
 
@@ -73,16 +73,16 @@ python local_companion.py
 
 ## V3.8-C 完整工作台公开快照
 
-- 访客与私人模式复用同一 `src/app.js`、Dashboard、项目、任务、知识资料、决策与工作记录只读视图。访客数据来自 `PUBLIC_WORKSPACE_SNAPSHOTS` KV 的固定 `latest` JSON；没有已审核快照时只显示空状态，不回退到 Mock/随机数据。
-- 只有私人账号所有者可以打开「预览访客快照」。预览读取 Supabase 已同步记录和只核验为公开的 GitHub 每日聚合，默认不选任何记录；敏感提示需逐项确认，最终发布另有数量范围确认。普通文本中的外链、邮箱、电话、路径、Token 和私钥会清理；证据链接、仓库提交原文/SHA、Companion 与私人仓库内容不进入快照。
+- 访客与私人模式复用同一 `src/app.js`、Dashboard、项目、任务、知识资料、决策与工作记录只读视图。访客数据来自 `PUBLIC_WORKSPACE_SNAPSHOTS` KV 的固定 `latest` JSON；没有快照时只显示空状态，不回退到 Mock/随机数据。
+- 只有登录且通过 Worker 所有者校验的账号可以使用「一键发布访客快照」。发布自动包含所有已同步项目和可展示记录，以及核验为公开的 GitHub 每日聚合；字段白名单自动隐藏认证信息、路径、联系方式、证据链接、未核验仓库和私有仓库数据，不要求逐条选择。完整性未通过时保留当前访客快照，不把缺失活动填成零。
 - Worker 只为经 `getUser()` 校验且 UUID 与 `WORKSPACE_USER_ID` 完全匹配的所有者接受发布 POST；拒绝额外字段、未通过清洗的内容和私有 GitHub 仓库。访客只能匿名 GET 快照；公开 Worker 路由不查询 Supabase 表，不提供私人记录 API。未修改数据库、RLS 或同步序列化。
-- 本地目标验收为桌面与 390px 手机视口可浏览，以及已有会话根网址、无痕未登录、退出回根页和刷新不循环；访客不触发 AI、Auth、Workspace localStorage、Companion 或写操作。用户须在预览页确认数据后主动发布；不得由部署流程自动发布快照。
+- 已发布快照通过 `no-store` GET 返回，发布后访客请求读取最新值。私人工作台仍按 Supabase 实时同步；访客快照只在所有者手动点击按钮后更新。访客不触发 AI、Auth、Workspace localStorage、Companion 或写操作。
 
 ## V3.8-C.1 访客快照预览可靠性
 
 - 私人预览按 Supabase 工作记录、GitHub 仓库公开状态、GitHub 活动历史显示当前读取阶段与进度；每阶段都有截止时间、具体失败原因和安全重试入口。
 - 复用本机账号范围内完整的 GitHub 活动缓存，以及未过期且明确为公开的仓库快照；其余仓库每批最多核验 4 个，避免单次 Worker 子请求超限。缓存不完整或数据源失败时标明缺失范围并锁定发布。
-- 预览仅保存在当前页面内存中，不写私人数据库或访客 KV；发布仍需所有者逐条审核并明确确认。
+- 发布由单次所有者点击触发：生成脱敏快照后直接写入访客 KV。完整性错误会明确列出缺失项目并保持原快照；无需逐项审核或多级确认。
 
 ## V2.5 登录配置
 

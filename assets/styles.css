@@ -1388,7 +1388,7 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
   .guest-tour { right: 8px; bottom: 8px; width: calc(100vw - 16px); padding: 15px; }
 }
 
-/* Owner-reviewed snapshot publishing and the shared public read-only workspace. */
+/* One-click owner snapshot publishing and the shared public read-only workspace. */
 .public-snapshot-banner { display: flex; align-items: center; gap: 10px; margin: 0 0 16px; padding: 10px 13px; border: 1px solid color-mix(in srgb, var(--green) 24%, var(--line)); border-radius: 10px; background: color-mix(in srgb, var(--green) 5%, var(--panel)); color: var(--muted); font-size: 11px; }
 .public-snapshot-banner strong { color: var(--green); font-size: 11px; font-weight: 650; }
 .public-snapshot-banner.pending { border-color: color-mix(in srgb, var(--yellow) 24%, var(--line)); }
@@ -1435,6 +1435,7 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 .snapshot-progress-copy { display: grid; gap: 4px; min-width: 0; }
 .snapshot-progress-copy strong { color: var(--text); font-size: 13px; }
 .snapshot-progress-copy span { font-size: 11px; line-height: 1.55; overflow-wrap: anywhere; }
+.snapshot-publish-label-mobile { display: none; }
 .snapshot-incomplete { margin: 12px 0; border-color: color-mix(in srgb, var(--warning, #e5a642) 50%, var(--line)); }
 .snapshot-incomplete > strong { color: var(--warning, #e5a642); }
 .snapshot-incomplete p, .snapshot-incomplete li, .snapshot-publish-blocked { color: var(--muted); font-size: 11px; line-height: 1.65; overflow-wrap: anywhere; }
@@ -1453,6 +1454,9 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
   .public-ai-snapshot-grid { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 430px) {
+  .snapshot-publish-label-desktop { display: none; }
+  .snapshot-publish-label-mobile { display: inline; }
+  .snapshot-publish-action { white-space: nowrap; }
   .snapshot-page-heading { flex-direction: column; }
   .snapshot-page-heading > .button { align-self: stretch; }
   .snapshot-review-item-head { flex-direction: column; gap: 7px; }

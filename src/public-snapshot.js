@@ -13,14 +13,30 @@ export const PUBLIC_SNAPSHOT_COLLECTION_LABELS = Object.freeze({
 });
 
 const SECRET_PATTERNS = [
-  { reason: "疑似 Token 或密钥", pattern: /\b(?:Bearer\s+[A-Za-z0-9._~-]{12,}|(?:gh[pousr]_[A-Za-z0-9_]{16,}|github_pat_[A-Za-z0-9_]{16,}|sk-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}))\b/gi, replacement: "[密钥已隐藏]" },
-  { reason: "本机路径", pattern: /(?:\b[A-Z]:\\(?:[^\s<>:"|?*]+\\)*[^\s<>:"|?*]*|\\\\[^\s\\]+\\[^\s]+|\/(?:Users|home|private|Volumes|mnt)\/[^\s]+)/gi, replacement: "[本机路径已隐藏]" },
-  { reason: "邮箱地址", pattern: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, replacement: "[邮箱已隐藏]" },
-  { reason: "电话联系方式", pattern: /(?<!\d)(?:\+?86[-\s]?)?1[3-9]\d{9}(?!\d)/g, replacement: "[联系方式已隐藏]" },
-  { reason: "仓库地址（仅核验后的项目字段可保留）", pattern: /https?:\/\/(?:www\.)?github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+[^\s]*/gi, replacement: "[仓库地址已隐藏]" },
-  { reason: "外部链接（仅独立项目网址可保留）", pattern: /https?:\/\/[^\s<>"')\]]+/gi, replacement: "[外部链接已隐藏]" },
-  { reason: "私钥", pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gi, replacement: "[私钥已隐藏]" },
+  { pattern: /\b(?:Bearer\s+[A-Za-z0-9._~-]{12,}|(?:gh[pousr]_[A-Za-z0-9_]{16,}|github_pat_[A-Za-z0-9_]{16,}|sk-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}))\b/gi, replacement: "[密钥已隐藏]" },
+  { pattern: /[\"']?\b(?:api[_-]?key|client[_-]?secret|secret|password|passwd|access[_-]?token|refresh[_-]?token|authorization|auth[_-]?(?:token|key|secret|credential)|user[_-]?id|session[_-]?id|token)\b[\"']?\s*[:=]\s*[\"']?[^\s\"'`,;}{]{1,}[\"']?/gi, replacement: "[认证信息已隐藏]" },
+  { pattern: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/gi, replacement: "[认证信息已隐藏]" },
+  { pattern: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, replacement: "[账号标识已隐藏]" },
+  { pattern: /(?:\b[A-Z]:\\(?:[^\s<>:"|?*]+\\)*[^\s<>:"|?*]*|\\\\[^\s\\]+\\[^\s]+|\/(?:Users|home|private|Volumes|mnt)\/[^\s]+)/gi, replacement: "[本机路径已隐藏]" },
+  { pattern: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, replacement: "[邮箱已隐藏]" },
+  { pattern: /(?<!\d)(?:\+?86[-\s]?)?1[3-9]\d{9}(?!\d)/g, replacement: "[联系方式已隐藏]" },
+  { pattern: /(?<!\d)(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}(?!\d)/g, replacement: "[联系方式已隐藏]" },
+  { pattern: /(?<!\d)\+\d{1,3}[\s.-]?\(?\d{2,4}\)?[\s.-]?\d{3,4}[\s.-]?\d{3,4}(?!\d)/g, replacement: "[联系方式已隐藏]" },
+  { pattern: /https?:\/\/(?:www\.)?github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+[^\s]*/gi, replacement: "[仓库地址已隐藏]" },
+  { pattern: /https?:\/\/[^\s<>"')\]]+/gi, replacement: "[外部链接已隐藏]" },
+  { pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gi, replacement: "[私钥已隐藏]" },
 ];
+const PRIVATE_FIELD_NAME = /(?:^|_)(?:password|passwd|secret|token|authorization|api_key|client_secret|credential|user_id|session_id|auth|email|phone|mobile|address|path)(?:_|$)/i;
+const PRIVATE_SHARE_DOMAINS = ["drive.google.com", "docs.google.com", "dropbox.com", "notion.so", "linear.app", "figma.com", "1drv.ms", "onedrive.live.com", "sharepoint.com", "box.com", "slack.com", "atlassian.net", "airtable.com"];
+
+function isPrivateShareHost(host) {
+  return PRIVATE_SHARE_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`));
+}
+
+function isPrivateFieldName(value) {
+  const normalized = String(value).replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`).toLowerCase();
+  return PRIVATE_FIELD_NAME.test(normalized);
+}
 
 function normalizedText(value, maxLength = 8_000) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
@@ -34,63 +50,49 @@ function safePublicUrl(value, { allowGitHub = false } = {}) {
     if (url.search || url.hash) return "";
     const host = url.hostname.toLowerCase();
     if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal") || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host) || host.includes(":")) return "";
+    if (isPrivateShareHost(host)) return "";
     if (!allowGitHub && ["github.com", "www.github.com"].includes(host)) return "";
     return url.href;
   } catch { return ""; }
 }
 
-function scrubValue(value, fieldName, findings, depth = 0) {
+function scrubValue(value, fieldName, depth = 0) {
   if (depth > 5) return null;
   if (typeof value === "string") {
     let result = normalizedText(value, fieldName === "content" ? 20_000 : 8_000);
     for (const item of SECRET_PATTERNS) {
       item.pattern.lastIndex = 0;
       if (item.pattern.test(result)) {
-        findings.push({ field: fieldName, reason: item.reason });
         item.pattern.lastIndex = 0;
         result = result.replace(item.pattern, item.replacement);
       }
     }
     return result;
   }
-  if (Array.isArray(value)) return value.slice(0, 100).map((item, index) => scrubValue(item, `${fieldName}[${index + 1}]`, findings, depth + 1));
+  if (Array.isArray(value)) return value.slice(0, 100).map((item, index) => scrubValue(item, `${fieldName}[${index + 1}]`, depth + 1));
   if (typeof value === "number" || typeof value === "boolean" || value === null) return value;
   if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).slice(0, 100).map(([key, item]) => [key.slice(0, 80), scrubValue(item, `${fieldName}.${key}`, findings, depth + 1)]));
+    return Object.fromEntries(Object.entries(value).filter(([key]) => !isPrivateFieldName(key)).slice(0, 100)
+      .map(([key, item]) => [key.slice(0, 80), scrubValue(item, `${fieldName}.${key}`, depth + 1)]));
   }
   return null;
 }
 
-function reviewedItem(collection, index, sourceId, fields, findings = []) {
+function safeSnapshotItem(collection, index, sourceId, fields) {
   const safeFields = {};
   for (const [key, value] of Object.entries(fields)) {
     if (key === "url" || key === "github") {
       safeFields[key] = safePublicUrl(value, { allowGitHub: key === "github" });
-      if (value && !safeFields[key]) findings.push({ field: key, reason: "未通过公开 HTTPS 地址校验，已隐藏" });
       continue;
     }
-    safeFields[key] = scrubValue(value, key, findings);
+    safeFields[key] = scrubValue(value, key);
   }
   return {
-    reviewId: `${collection}-${index + 1}`,
+    safeId: `${collection}-${index + 1}`,
     sourceId: String(sourceId || ""),
     collection,
-    label: PUBLIC_SNAPSHOT_COLLECTION_LABELS[collection] || collection,
     fields: safeFields,
-    findings: uniqueFindings(findings),
-    include: false,
-    sensitiveAcknowledged: false,
   };
-}
-
-function uniqueFindings(items) {
-  const seen = new Set();
-  return items.filter((item) => {
-    const key = `${item.field}|${item.reason}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
 }
 
 function publicRepoSnapshot(repo) {
@@ -99,7 +101,7 @@ function publicRepoSnapshot(repo) {
   return { name, url: `https://github.com/${name}`, isPublic: true };
 }
 
-export function createSnapshotReviewDraft({ data = {}, workLogs = [], publicRepositories = [], githubActivity = {}, summaries = {}, now = new Date().toISOString(), activityRange = null } = {}) {
+export function createPublicSnapshotDraft({ data = {}, workLogs = [], publicRepositories = [], githubActivity = {}, summaries = {}, now = new Date().toISOString(), activityRange = null } = {}) {
   const sourceProjects = Array.isArray(data.projects) ? data.projects : [];
   const projectNameById = new Map(sourceProjects.map((item) => [String(item.id || ""), normalizedText(item.name, 200)]));
   const publicRepos = new Map((Array.isArray(publicRepositories) ? publicRepositories : [])
@@ -118,30 +120,27 @@ export function createSnapshotReviewDraft({ data = {}, workLogs = [], publicRepo
       notes: project.notes,
       isPinned: Boolean(project.isPinned),
     };
-    const findings = [];
-    if (project.path) findings.push({ field: "path", reason: "本机路径字段不会进入快照" });
-    if (project.github && !verifiedRepo) findings.push({ field: "github", reason: "仓库未核验为公开，地址与仓库内容均已隐藏" });
-    return reviewedItem("projects", index, project.id, fields, findings);
+    return safeSnapshotItem("projects", index, project.id, fields);
   });
 
-  const projectReviewId = new Map(projects.map((item) => [item.sourceId, item.reviewId]));
-  const tasks = (Array.isArray(data.tasks) ? data.tasks : []).map((item, index) => reviewedItem("tasks", index, item.id, {
+  const projectSafeId = new Map(projects.map((item) => [item.sourceId, item.safeId]));
+  const tasks = (Array.isArray(data.tasks) ? data.tasks : []).map((item, index) => safeSnapshotItem("tasks", index, item.id, {
     title: item.title,
     description: item.description,
-    projectId: projectReviewId.get(String(item.projectId || "")) || "",
+    projectId: projectSafeId.get(String(item.projectId || "")) || "",
     status: item.status,
     priority: item.priority,
     due: item.due,
   }));
-  const knowledge = (Array.isArray(data.knowledge) ? data.knowledge : []).map((item, index) => reviewedItem("knowledge", index, item.id, {
+  const knowledge = (Array.isArray(data.knowledge) ? data.knowledge : []).map((item, index) => safeSnapshotItem("knowledge", index, item.id, {
     type: item.type,
     title: item.title,
     content: item.content,
     summary: item.summary,
     tags: item.tags,
-    projectId: projectReviewId.get(String(item.projectId || "")) || "",
+    projectId: projectSafeId.get(String(item.projectId || "")) || "",
   }));
-  const decisions = (Array.isArray(data.decisions) ? data.decisions : []).map((item, index) => reviewedItem("decisions", index, item.id, {
+  const decisions = (Array.isArray(data.decisions) ? data.decisions : []).map((item, index) => safeSnapshotItem("decisions", index, item.id, {
     question: item.question,
     options: item.options,
     goal: item.goal,
@@ -151,20 +150,18 @@ export function createSnapshotReviewDraft({ data = {}, workLogs = [], publicRepo
     recommendation: item.recommendation,
     final: item.final,
     reason: item.reason,
-    projectId: projectReviewId.get(String(item.projectId || "")) || "",
+    projectId: projectSafeId.get(String(item.projectId || "")) || "",
   }));
   const logs = (Array.isArray(workLogs) ? workLogs : []).map((item, index) => {
-    const findings = [];
-    if (Array.isArray(item.evidenceLinks) && item.evidenceLinks.length) findings.push({ field: "evidenceLinks", reason: `${item.evidenceLinks.length} 个证据链接不会进入公开快照` });
-    return reviewedItem("workLogs", index, item.id, {
-      projectId: projectReviewId.get(String(item.projectId || "")) || "",
+    return safeSnapshotItem("workLogs", index, item.id, {
+      projectId: projectSafeId.get(String(item.projectId || "")) || "",
       projectName: projectNameById.get(String(item.projectId || "")) || "未关联项目",
       workDate: item.workDate,
       completedItems: item.completedItems,
       outcomes: item.outcomes,
       nextStep: item.nextStep,
       evidenceLinkCount: Array.isArray(item.evidenceLinks) ? item.evidenceLinks.length : 0,
-    }, findings);
+    });
   });
 
   const githubActivityItems = [];
@@ -179,27 +176,23 @@ export function createSnapshotReviewDraft({ data = {}, workLogs = [], publicRepo
       .filter((item) => /^\d{4}-\d{2}-\d{2}$/.test(item.date) && Number.isSafeInteger(item.count) && item.count > 0)
       .map((item) => ({ date: item.date, count: item.count }));
     githubActivityItems.push({
-      reviewId: `githubActivity-${index + 1}`,
-      collection: "githubActivity",
-      label: PUBLIC_SNAPSHOT_COLLECTION_LABELS.githubActivity,
-      sourceName: repo.name,
-      sourceProjectIds: projectIds,
-      fields: { repository: repo.name, projectNames, commits: dailyCounts.reduce((sum, item) => sum + item.count, 0), activeDays: dailyCounts.length, complete: activity.complete === true && activity.truncated !== true },
+      safeId: `githubActivity-${index + 1}`,
+      fields: { repository: repo.name, projectNames: projectNames.map((name) => safeSnapshotItem("githubActivity", index, repo.name, { name }).fields.name), commits: dailyCounts.reduce((sum, item) => sum + item.count, 0), activeDays: dailyCounts.length, complete: activity.complete === true && activity.truncated !== true },
       dailyCounts,
-      findings: [],
-      include: false,
-      sensitiveAcknowledged: false,
     });
   }
 
   const summaryItems = [];
   if (summaries.dailyBrief?.status === "ready" && summaries.dailyBrief.value) {
-    summaryItems.push(reviewedItem("summaries", 0, "dailyBrief", { type: "dailyBrief", title: "AI 今日简报", content: JSON.stringify(summaries.dailyBrief.value) }));
+    const item = safeSnapshotItem("summaries", 0, "dailyBrief", { type: "dailyBrief", title: "AI 今日简报", content: summaries.dailyBrief.value });
+    item.fields.content = JSON.stringify(item.fields.content);
+    summaryItems.push(item);
   }
   if (summaries.weeklySummary?.status === "ready" && summaries.weeklySummary.value) {
-    summaryItems.push(reviewedItem("summaries", 1, "weeklySummary", { type: "weeklySummary", title: "AI 每周总结", content: JSON.stringify(summaries.weeklySummary.value) }));
+    const item = safeSnapshotItem("summaries", 1, "weeklySummary", { type: "weeklySummary", title: "AI 每周总结", content: summaries.weeklySummary.value });
+    item.fields.content = JSON.stringify(item.fields.content);
+    summaryItems.push(item);
   }
-  for (const item of summaryItems) item.label = PUBLIC_SNAPSHOT_COLLECTION_LABELS.summaries;
 
   const workLogsComplete = githubActivity.workLogsComplete !== false;
   const githubComplete = githubActivity.complete !== false;
@@ -228,25 +221,24 @@ export function createSnapshotReviewDraft({ data = {}, workLogs = [], publicRepo
   };
 }
 
-function selectedItems(draft, collection) {
-  return (draft?.collections?.[collection] || []).filter((item) => item.include && (!item.findings?.length || item.sensitiveAcknowledged));
+function allSafeItems(draft, collection) {
+  return Array.isArray(draft?.collections?.[collection]) ? draft.collections[collection] : [];
 }
 
-export function selectedSnapshotCounts(draft) {
-  return Object.fromEntries(Object.keys(PUBLIC_SNAPSHOT_COLLECTION_LABELS).map((key) => [key, selectedItems(draft, key).length]));
+export function snapshotDraftCounts(draft) {
+  return Object.fromEntries(Object.keys(PUBLIC_SNAPSHOT_COLLECTION_LABELS).map((key) => [key, allSafeItems(draft, key).length]));
 }
 
 export function buildPublishableSnapshot(draft, { now = new Date().toISOString() } = {}) {
   if (!draft || draft.schemaVersion !== PUBLIC_SNAPSHOT_VERSION) throw new Error("访客快照草稿版本无效。");
-  if (draft.completeness?.complete === false || draft.completeness?.workLogs === false
-    || draft.completeness?.github === false || draft.completeness?.workLogsTruncated === true) {
+  if (draft.completeness?.complete !== true || draft.completeness?.workLogs !== true
+    || draft.completeness?.github !== true || draft.completeness?.workLogsTruncated === true) {
     throw new Error("快照数据源读取不完整，必须完成安全重试后才能发布。");
   }
-  const collections = draft.collections || {};
-  const selectedProjects = selectedItems(draft, "projects");
-  const projectIdMap = new Map(selectedProjects.map((item, index) => [item.reviewId, `project-${String(index + 1).padStart(3, "0")}`]));
-  const remapProject = (reviewId) => projectIdMap.get(reviewId) || "";
-  const projects = selectedProjects.map((item, index) => ({
+  const allProjects = allSafeItems(draft, "projects");
+  const projectIdMap = new Map(allProjects.map((item, index) => [item.safeId, `project-${String(index + 1).padStart(3, "0")}`]));
+  const remapProject = (safeId) => projectIdMap.get(safeId) || "";
+  const projects = allProjects.map((item, index) => ({
     id: `project-${String(index + 1).padStart(3, "0")}`,
     name: item.fields.name || "",
     description: item.fields.description || "",
@@ -258,7 +250,7 @@ export function buildPublishableSnapshot(draft, { now = new Date().toISOString()
     notes: item.fields.notes || "",
     isPinned: Boolean(item.fields.isPinned),
   }));
-  const buildRows = (collection, prefix, transform) => selectedItems(draft, collection).map((item, index) => ({
+  const buildRows = (collection, prefix, transform) => allSafeItems(draft, collection).map((item, index) => ({
     id: `${prefix}-${String(index + 1).padStart(4, "0")}`,
     ...transform(item.fields),
   }));
@@ -298,15 +290,14 @@ export function buildPublishableSnapshot(draft, { now = new Date().toISOString()
     nextStep: fields.nextStep || "",
   }));
 
-  const selectedActivity = selectedItems(draft, "githubActivity").filter((item) =>
-    item.sourceProjectIds.some((sourceId) => selectedProjects.some((project) => project.sourceId === sourceId)));
+  const githubActivityItems = allSafeItems(draft, "githubActivity");
   const activityCounts = new Map();
-  for (const item of selectedActivity) {
+  for (const item of githubActivityItems) {
     for (const entry of item.dailyCounts || []) activityCounts.set(entry.date, (activityCounts.get(entry.date) || 0) + entry.count);
   }
   const range = draft.activityRange || {};
   const githubDailyCounts = [...activityCounts.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([date, count]) => ({ date, count }));
-  const summaries = Object.fromEntries(selectedItems(draft, "summaries").map((item) => [item.fields.type, item.fields.content]));
+  const summaries = Object.fromEntries(allSafeItems(draft, "summaries").map((item) => [item.fields.type, item.fields.content]));
   return {
     schemaVersion: PUBLIC_SNAPSHOT_VERSION,
     generatedAt: draft.generatedAt,
@@ -314,8 +305,8 @@ export function buildPublishableSnapshot(draft, { now = new Date().toISOString()
       startDate: range.startDate || "",
       endDate: range.endDate || "",
       githubDailyCounts,
-      githubRepositoryCount: selectedActivity.length,
-      githubComplete: selectedActivity.every((item) => item.fields.complete === true),
+      githubRepositoryCount: githubActivityItems.length,
+      githubComplete: githubActivityItems.every((item) => item.fields.complete === true),
       workLogsComplete: draft.completeness?.workLogs === true && draft.completeness?.workLogsTruncated !== true,
     },
     projects,
@@ -345,9 +336,14 @@ function validSnapshotDate(value) {
 function safeSnapshotText(value, maximum = 8_000, allowEmpty = true) {
   return typeof value === "string" && value.length <= maximum && (allowEmpty || Boolean(value.trim()))
     && !/https?:\/\/|\b(?:Bearer\s+[A-Za-z0-9._~-]{12,}|(?:gh[pousr]_[A-Za-z0-9_]{16,}|github_pat_[A-Za-z0-9_]{16,}|sk-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}))\b/i.test(value)
+    && !/[\"']?\b(?:api[_-]?key|client[_-]?secret|secret|password|passwd|access[_-]?token|refresh[_-]?token|authorization|auth[_-]?(?:token|key|secret|credential)|user[_-]?id|session[_-]?id|token)\b[\"']?\s*[:=]\s*[\"']?[^\s\"'`,;}{]{1,}/i.test(value)
+    && !/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/i.test(value)
+    && !/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.test(value)
     && !/-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:\b[A-Z]:\\|\\\\[^\s\\]+\\|\/(?:Users|home|private|Volumes|mnt)\/)/i.test(value)
     && !/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(value)
-    && !/(?<!\d)(?:\+?86[-\s]?)?1[3-9]\d{9}(?!\d)/.test(value);
+    && !/(?<!\d)(?:\+?86[-\s]?)?1[3-9]\d{9}(?!\d)/.test(value)
+    && !/(?<!\d)(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}(?!\d)/.test(value)
+    && !/(?<!\d)\+\d{1,3}[\s.-]?\(?\d{2,4}\)?[\s.-]?\d{3,4}[\s.-]?\d{3,4}(?!\d)/.test(value);
 }
 
 function safeSnapshotUrl(value, kind) {
@@ -358,6 +354,7 @@ function safeSnapshotUrl(value, kind) {
     if (url.protocol !== "https:" || url.username || url.password || url.port || url.search || url.hash) return false;
     const host = url.hostname.toLowerCase();
     if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal") || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host) || host.includes(":")) return false;
+    if (isPrivateShareHost(host)) return false;
     if (kind === "github") return ["github.com", "www.github.com"].includes(host) && /^\/[A-Za-z0-9-]{1,39}\/[A-Za-z0-9_.-]{1,100}\/?$/.test(url.pathname);
     return !["github.com", "www.github.com"].includes(host);
   } catch { return false; }
@@ -374,7 +371,7 @@ export function validatePublicSnapshot(snapshot) {
   const daySpan = (Date.parse(`${activity.endDate}T00:00:00.000Z`) - Date.parse(`${activity.startDate}T00:00:00.000Z`)) / 86_400_000 + 1;
   if (daySpan > PUBLIC_SNAPSHOT_ACTIVITY_DAYS || !Array.isArray(activity.githubDailyCounts) || activity.githubDailyCounts.length > PUBLIC_SNAPSHOT_ACTIVITY_DAYS
     || !Number.isSafeInteger(activity.githubRepositoryCount) || activity.githubRepositoryCount < 0 || activity.githubRepositoryCount > 200
-    || typeof activity.githubComplete !== "boolean" || typeof activity.workLogsComplete !== "boolean") return false;
+    || activity.githubComplete !== true || activity.workLogsComplete !== true) return false;
   const dates = new Set();
   for (const item of activity.githubDailyCounts) {
     if (!exactKeys(item, ["date", "count"]) || !validSnapshotDate(item.date) || item.date < activity.startDate || item.date > activity.endDate
@@ -501,15 +498,28 @@ export async function fetchPublishedSnapshot({ fetchImpl = fetch } = {}) {
   return snapshot;
 }
 
+async function withTimeout(promise, timeoutMs, message) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), timeoutMs); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function publishPublicSnapshot(snapshot, workspaceAuth, { fetchImpl = fetch } = {}) {
   if (!validatePublicSnapshot(snapshot) || !workspaceAuth?.client?.auth) throw new Error("发布资料或已验证的登录会话无效。");
-  const sessionResult = await workspaceAuth.client.auth.getSession();
+  const sessionResult = await withTimeout(workspaceAuth.client.auth.getSession(), 8_000, "验证登录会话超时，请重试。");
   const accessToken = sessionResult?.data?.session?.access_token;
   if (sessionResult?.error || !accessToken) throw new Error("登录会话已失效，请重新登录后再发布。");
   const response = await fetchImpl(`${WORKER_BASE}/api/public/snapshot`, {
     method: "POST",
     credentials: "omit",
     referrerPolicy: "no-referrer",
+    signal: AbortSignal.timeout(15_000),
     headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify(snapshot),
   });

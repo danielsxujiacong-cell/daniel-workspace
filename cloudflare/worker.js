@@ -5,6 +5,7 @@ const MAX_HISTORY_CHARS = 8_000;
 const PUBLIC_SNAPSHOT_KEY = "latest";
 const MAX_PUBLIC_SNAPSHOT_CHARS = 1_500_000;
 const MAX_GITHUB_API_PAGES = 100;
+const PRIVATE_SHARE_DOMAINS = ["drive.google.com", "docs.google.com", "dropbox.com", "notion.so", "linear.app", "figma.com", "1drv.ms", "onedrive.live.com", "sharepoint.com", "box.com", "slack.com", "atlassian.net", "airtable.com"];
 
 function allowedOrigins(env) {
   return new Set((env.ALLOWED_ORIGINS || "").split(",").map((item) => item.trim()).filter(Boolean));
@@ -714,10 +715,15 @@ function unsafePublicText(value) {
   return typeof value !== "string"
     || value.length > 20_000
     || /\b(?:Bearer\s+[A-Za-z0-9._~-]{12,}|(?:gh[pousr]_[A-Za-z0-9_]{16,}|github_pat_[A-Za-z0-9_]{16,}|sk-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}))\b/i.test(value)
+    || /[\"']?\b(?:api[_-]?key|client[_-]?secret|secret|password|passwd|access[_-]?token|refresh[_-]?token|authorization|auth[_-]?(?:token|key|secret|credential)|user[_-]?id|session[_-]?id|token)\b[\"']?\s*[:=]\s*[\"']?[^\s\"'`,;}{]{1,}/i.test(value)
+    || /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/i.test(value)
+    || /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.test(value)
     || /-----BEGIN [A-Z ]*PRIVATE KEY-----/i.test(value)
     || /(?:\b[A-Z]:\\|\\\\[^\s\\]+\\|\/(?:Users|home|private|Volumes|mnt)\/)/i.test(value)
     || /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(value)
     || /(?<!\d)(?:\+?86[-\s]?)?1[3-9]\d{9}(?!\d)/.test(value)
+    || /(?<!\d)(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}(?!\d)/.test(value)
+    || /(?<!\d)\+\d{1,3}[\s.-]?\(?\d{2,4}\)?[\s.-]?\d{3,4}[\s.-]?\d{3,4}(?!\d)/.test(value)
     || /https?:\/\//i.test(value);
 }
 
@@ -733,6 +739,7 @@ function validSnapshotUrl(value, kind) {
   if (url.protocol !== "https:" || url.username || url.password || url.port || url.search || url.hash) return false;
   const host = url.hostname.toLowerCase();
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal") || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host) || host.includes(":")) return false;
+  if (PRIVATE_SHARE_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`))) return false;
   if (kind === "github") return ["github.com", "www.github.com"].includes(host) && /^\/[A-Za-z0-9-]{1,39}\/[A-Za-z0-9_.-]{1,100}\/?$/.test(url.pathname);
   return !["github.com", "www.github.com"].includes(host);
 }
@@ -749,7 +756,7 @@ function validPublicSnapshot(snapshot) {
   const activityDays = (Date.parse(`${snapshot.activity.endDate}T00:00:00.000Z`) - Date.parse(`${snapshot.activity.startDate}T00:00:00.000Z`)) / 86_400_000 + 1;
   if (activityDays > 366 || !Array.isArray(snapshot.activity.githubDailyCounts) || snapshot.activity.githubDailyCounts.length > 366
     || !Number.isSafeInteger(snapshot.activity.githubRepositoryCount) || snapshot.activity.githubRepositoryCount < 0 || snapshot.activity.githubRepositoryCount > 200
-    || typeof snapshot.activity.githubComplete !== "boolean" || typeof snapshot.activity.workLogsComplete !== "boolean") return false;
+    || snapshot.activity.githubComplete !== true || snapshot.activity.workLogsComplete !== true) return false;
   const activityDates = new Set();
   for (const item of snapshot.activity.githubDailyCounts) {
     if (!hasExactKeys(item, ["date", "count"]) || !validSnapshotDate(item.date) || item.date < snapshot.activity.startDate || item.date > snapshot.activity.endDate
@@ -832,7 +839,7 @@ async function publicSnapshotRoute(request, env) {
     const cors = corsHeaders(request, env);
     return new Response(JSON.stringify(snapshot), {
       status: 200,
-      headers: { ...cors, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "public, max-age=60, s-maxage=300" },
+      headers: { ...cors, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
     });
   }
   if (request.method !== "POST") return githubError(request, env, 405, "public_snapshot_method_not_allowed", "快照仅支持公开只读 GET 和所有者发布 POST。");
