@@ -23,13 +23,16 @@ test("visitor UI has no imports or private data and service interfaces", () => {
   assert.doesNotMatch(guest, /\b(?:fetch|XMLHttpRequest|WebSocket)\s*\(/);
   assert.doesNotMatch(guest, /\b(?:localStorage|sessionStorage|indexedDB)\b/);
   assert.doesNotMatch(guest, /127\.0\.0\.1|\/api\/|DANIEL_WORKSPACE_AUTH|supabase-js|AI_API_KEY|action_runner|local_companion/i);
-  assert.match(guest, /远岚科技集团/);
+  assert.doesNotMatch(guest, /github\.com|workspace\.danielxu\.cn|invest\.danielxu\.cn|D:\\\\_Codex project/i);
+  assert.match(guest, /不读取私人工作台、账号资料或本机项目/);
+  assert.match(guest, /https:\/\/hub\.danielxu\.cn\/flowops/);
+  assert.match(guest, /https:\/\/danielxu\.cn\//);
   assert.match(guest, /function mountGuestDemo/);
 });
 
 test("public entry loads only the gate module", () => {
   const scripts = [...index.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map((match) => match[1]);
-  assert.deepEqual(scripts, ["./src/auth/gate.js?v=3.6"]);
+  assert.deepEqual(scripts, ["./src/auth/gate.js?v=3.7-d"]);
 });
 
 test("private login still signs in, verifies the user, and checks the allowlist before opening app", () => {
@@ -40,7 +43,7 @@ test("private login still signs in, verifies the user, and checks the allowlist 
   const allowlistAt = loginFlow.indexOf("isAllowedUser(user)");
   const workspaceAt = loginFlow.indexOf("enterWorkspace(user)");
   assert.ok(signInAt >= 0 && signInAt < getUserAt && getUserAt < allowlistAt && allowlistAt < workspaceAt);
-  assert.match(gate, /async function enterWorkspace\(user\)\s*\{\s*if \(workspaceVisible\) return;\s*if \(!isAllowedUser\(user\)\) throw new Error\("Unauthorized user"\);[\s\S]*?import\("\.\.\/app\.js\?v=3\.6"\)/);
+  assert.match(gate, /async function enterWorkspace\(user\)\s*\{\s*if \(workspaceVisible\) return;\s*if \(!isAllowedUser\(user\)\) throw new Error\("Unauthorized user"\);[\s\S]*?import\("\.\.\/app\.js\?v=3\.7-d"\)/);
 
   const sessionRestore = gate.slice(gate.indexOf("async function boot"), gate.indexOf("async function startGuestDemo"));
   const getSessionAt = sessionRestore.indexOf("authClient.auth.getSession()");
@@ -57,7 +60,7 @@ function createGuestRoot() {
     addEventListener(type, listener) { listeners[type] = listener; },
     replaceChildren() { this.innerHTML = ""; },
     clickAction(action, extra = {}) {
-      listeners.click({ target: { closest: (selector) => selector === "[data-guest-action]" ? { dataset: { guestAction: action } } : selector === "[data-filter]" && extra.filter ? { dataset: { filter: extra.filter } } : null } });
+      listeners.click({ target: { closest: (selector) => selector === "[data-guest-action]" ? { dataset: { guestAction: action, projectId: extra.projectId } } : selector === "[data-filter]" && extra.filter ? { dataset: { filter: extra.filter } } : null } });
     },
     clickPage(page) {
       listeners.click({ target: { closest: (selector) => selector === "[data-guest-page]" ? { dataset: { guestPage: page } } : null } });
@@ -68,20 +71,32 @@ function createGuestRoot() {
   };
 }
 
-test("TK-1001 flow links rule, SOP, simulated Decision, completion, live stats, and reset in session memory", () => {
+test("visitor portfolio details use public demos while TK-1001 stays an isolated in-memory simulation", () => {
   const root = createGuestRoot();
   const secondSession = createGuestRoot();
   let exited = false;
   mountGuestDemo({ root, onExit: () => { exited = true; } });
   mountGuestDemo({ root: secondSession, onExit() {} });
 
-  assert.match(root.innerHTML, /企业 AI 自动化工作台/);
-  assert.match(root.innerHTML, /异常处理，从发现到闭环/);
-  assert.match(root.innerHTML, /固定规则驱动，不调用真实 AI；内容为模拟数据，不代表真实企业案例/);
+  assert.match(root.innerHTML, /把想法做成可体验的产品/);
+  assert.match(root.innerHTML, /Daniel Project Hub/);
+  assert.match(root.innerHTML, /https:\/\/hub\.danielxu\.cn\//);
+  assert.match(root.innerHTML, /隐私说明/);
   assert.match(root.innerHTML, /异常发现[\s\S]*规则判断[\s\S]*SOP[\s\S]*决策[\s\S]*完成/);
-  assert.match(root.innerHTML, /data-guest-action="view-ticket"[\s\S]*立即体验 TK-1001/);
+  assert.match(root.innerHTML, /data-guest-action="view-ticket"[\s\S]*体验流程演示/);
   assert.doesNotMatch(root.innerHTML, /class="guest-tour"/);
   assert.match(root.innerHTML, /data-guest-action="start-tour">开始导航/);
+
+  root.clickPage("projects");
+  assert.match(root.innerHTML, /查看项目用途、已验证成果和线上体验入口/);
+  assert.match(root.innerHTML, /查看详情[\s\S]*体验网站/);
+  root.clickAction("view-project", { projectId: "flowops" });
+  assert.match(root.innerHTML, /FlowOps AI/);
+  assert.match(root.innerHTML, /正常批准、审批拒绝和重复事件/);
+  assert.match(root.innerHTML, /href="https:\/\/hub\.danielxu\.cn\/flowops"/);
+  assert.match(root.innerHTML, /不代表真实客户或生产环境/);
+  root.clickAction("back-projects");
+
   root.clickAction("start-tour");
   assert.match(root.innerHTML, /class="guest-tour"/);
   root.clickAction("skip-tour");
@@ -114,14 +129,15 @@ test("TK-1001 flow links rule, SOP, simulated Decision, completion, live stats, 
   assert.match(root.innerHTML, /TK-1001 · 供应商交期异常升级处理[\s\S]*已完成/);
 
   root.clickPage("home");
-  assert.match(root.innerHTML, /data-guest-stat="open-tasks">4<\/strong>/);
-  assert.match(root.innerHTML, /data-guest-stat="completed-tasks">9<\/strong>/);
-  assert.match(secondSession.innerHTML, /data-guest-stat="open-tasks">5<\/strong>/);
-  assert.match(secondSession.innerHTML, /data-guest-stat="completed-tasks">8<\/strong>/);
+  root.clickPage("tasks");
+  secondSession.clickPage("tasks");
+  assert.match(root.innerHTML, /<span class="nav-count">4<\/span>/);
+  assert.match(secondSession.innerHTML, /<span class="nav-count">5<\/span>/);
+  assert.match(root.innerHTML, /工单、任务、负责人和日期均为虚构样例/);
 
   root.clickAction("reset");
-  assert.match(root.innerHTML, /data-guest-stat="open-tasks">5<\/strong>/);
-  assert.match(root.innerHTML, /data-guest-stat="completed-tasks">8<\/strong>/);
+  root.clickPage("tasks");
+  assert.match(root.innerHTML, /<span class="nav-count">5<\/span>/);
   assert.doesNotMatch(root.innerHTML, /class="guest-tour"/);
   root.clickPage("decisions");
   assert.doesNotMatch(root.innerHTML, /TK-1001：供应商交期异常处置/);

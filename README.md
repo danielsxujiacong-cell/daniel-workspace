@@ -1,10 +1,10 @@
 # Daniel Workspace
 
-私人 AI 工作台 V3.7-C。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI。首页按重点项目、最近进展和待办排列；置顶项目简介与近期成果用普通中文呈现，并保留 GitHub 原始提交链接。AI 今日简报、每周总结与下一步建议收进默认折叠的「AI 总结」，由用户主动生成。Projects 默认展示云端项目，本机扫描单独切换；项目技术状态默认折叠，工作记录表单按需展开。
+私人 AI 工作台 V3.7-D。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI。首页与 Projects 卡片提供明确的项目详情和已登记线上体验入口；项目详情优先呈现用途、核心功能、已核对成果和近期进展，路径及 GitHub 技术资料默认折叠。访客页展示精选公开作品和模拟流程演示，与私人工作台隔离。
 
 ## Status
 
-- **Stage:** V3.7-C project descriptions and recent progress use verified, reader-friendly copy; existing Supabase migration and data flow remain unchanged. Browser acceptance is recorded in [HANDOFF](docs/HANDOFF.md).
+- **Stage:** V3.7-D adds interview-friendly project cards/details and a curated, isolated visitor portfolio; Supabase data and auth flows remain unchanged. Verification and acceptance status are recorded in [HANDOFF](docs/HANDOFF.md).
 - **Last updated:** 2026-10-12
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -16,7 +16,7 @@
 python local_companion.py
 ```
 
-在浏览器打开 [http://127.0.0.1:4174](http://127.0.0.1:4174)，可登录私人工作区，也可选「访客演示」浏览模拟企业运营数据。访客首页先展示产品定位与五步工单流程，可直接选择「立即体验 TK-1001」查看固定规则判定、关联 SOP、处置方案、模拟 Decision 和完成状态；Home 统计和 Tasks 状态会随之更新。访客演示含手动启动的两分钟导航、重置和退出；模拟状态仅保存在当前页面内存中。登录前页面不会读取 Workspace/扫描缓存或请求 Companion；访客模式也不会读取 Supabase 配置或会话。登录后按 `Ctrl+K` 或 `⌘K` 聚焦全局搜索；部署站点会在登录后尝试从本机 `127.0.0.1:4174` 读取扫描，浏览器可能要求允许页面访问本地网络。
+在浏览器打开 [http://127.0.0.1:4174](http://127.0.0.1:4174)，可登录私人工作区，也可选「访客演示」浏览精选公开作品。访客页可打开已发布的 Project Hub、FlowOps 和个人作品集；TK-1001 是独立的虚构流程演示，可查看规则判定、关联 SOP、处置方案、模拟 Decision 和完成状态。演示状态只保存在当前页面内存中。登录前页面不会读取 Workspace/扫描缓存或请求 Companion；访客模式也不会读取 Supabase 配置或会话。登录后按 `Ctrl+K` 或 `⌘K` 聚焦全局搜索；部署站点会在登录后尝试从本机 `127.0.0.1:4174` 读取扫描，浏览器可能要求允许页面访问本地网络。
 
 手动控制 Companion：前台运行 `python local_companion.py` 时按 `Ctrl+C` 停止；开机任务启动的后台实例可在 PowerShell 执行 `Stop-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion"` 停止。取消后续登录自动启动，执行 `Unregister-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion" -Confirm:$false`。重新登录 Windows 会再次启动仍注册的任务。
 
@@ -34,6 +34,12 @@ python local_companion.py
 - 首页和项目详情会把已核实的五个重点项目介绍成一句普通中文；扫描器留下的 README 版本标记只影响展示，不会批量改写云端项目资料。项目介绍仍可在项目编辑表单中逐项修改。
 - 首页最近进展默认最多显示五条有依据的更新，按时间合并置顶项目最近 GitHub 提交和近七天工作记录。提交继续链接到原始 GitHub 记录；无法核实的英文提交标题不会直接当作成果展示。
 - 项目介绍和成果摘要在页面渲染时不调用 AI。每日简报、每周总结和下一步建议仍须由用户主动生成。
+
+## V3.7-D 项目作品化展示
+
+- Home 与 Projects 项目卡明确提供「查看详情」；只有填写有效远端 HTTP(S) 在线网址的项目才显示「体验网站」，GitHub 仓库地址不会被当成体验站点。
+- 项目详情依次展示用途、已核对的核心功能与成果，以及最多三条来自现有 GitHub 快照或工作记录的近期进展；路径、提交和仓库技术信息仍收在「技术详情」中。
+- 访客页将项目导航、FlowOps 演示和个人作品集作为精选作品。访客内容只来自静态公开摘要，TK-1001 及相关公司/团队资料继续作为明确标注的虚构样例，仅保存在页面内存；不读取私人工作台资料、仓库文件或密钥。
 
 ## V2.5 登录配置
 

@@ -102,7 +102,7 @@ async function enterWorkspace(user) {
   globalThis.DANIEL_WORKSPACE_AUTHENTICATED = true;
   globalThis.DANIEL_WORKSPACE_AUTH = { client: authClient, userId: user.id };
   try {
-    workspaceModule = await import("../app.js?v=3.7-c");
+    workspaceModule = await import("../app.js?v=3.7-d");
     workspaceVisible = true;
   } catch (error) {
     globalThis.DANIEL_WORKSPACE_AUTHENTICATED = false;
@@ -251,7 +251,7 @@ async function boot() {
 
 async function startGuestDemo() {
   app.innerHTML = `<main class="login-screen"><section class="login-card guest-loading"><div class="login-mark" aria-hidden="true">D</div><h1>正在打开访客演示…</h1></section></main>`;
-  const { mountGuestDemo } = await import("../guest-demo.js");
+  const { mountGuestDemo } = await import("../guest-demo.js?v=3.7-d");
   mountGuestDemo({
     root: app,
     onExit: () => window.location.replace(`${window.location.pathname}?mode=login`),

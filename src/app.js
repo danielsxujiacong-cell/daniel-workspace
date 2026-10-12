@@ -26,8 +26,8 @@ const { fetchPrivateGitHubSnapshots, listPrivateGitHubRepositories } = await imp
 const { localScanEndpointFor, shouldRenderDashboardGitHubActivity } = await import("./local-companion.js?v=3.5-a.2");
 const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = await import("./suggestions.js");
 const { fetchPublicGitHubRepositories, fetchPublicGitHubRepository, GITHUB_CACHE_TTL_MS, isGitHubSnapshotFresh, parsePublicGitHubRepository } = await import("./github/public-api.js?v=3.5-b.4");
-const { humanizeProjectCommit, projectDescriptionAfterEdit, projectDescriptionForEdit, projectIntroduction } = await import("./project-story.js?v=3.7-c");
-const { buildCloudDashboardModel, buildLocalDashboardModel, buildRecentProjectUpdates, chooseRecentCommit, compareLocalProjects, taskPriorityLabel } = await import("./dashboard.js?v=3.7-c");
+const { deployedWebsiteUrl, humanizeProjectCommit, projectDescriptionAfterEdit, projectDescriptionForEdit, projectIntroduction, projectShowcase } = await import("./project-story.js?v=3.7-d");
+const { buildCloudDashboardModel, buildLocalDashboardModel, buildRecentProjectUpdates, chooseRecentCommit, compareLocalProjects, taskPriorityLabel } = await import("./dashboard.js?v=3.7-d");
 const {
   countPinnedProjects,
   getHomePinnedProjects,
@@ -1174,7 +1174,8 @@ function renderDashboardFocusProjects(projects, dataAvailable) {
     const hasStage = stage && stage !== "未填写";
     const hasNext = next && next !== "未填写";
     const description = projectIntroduction(project);
-    return `<article class="dashboard-focus-card"><div class="dashboard-focus-top"><span class="project-glyph">${esc(initials(project.name))}</span>${statusPill(project.status)}</div><button class="dashboard-focus-name" data-action="view-project" data-id="${esc(project.id)}">${esc(project.name)}</button>${description ? `<p class="dashboard-project-description">${esc(description)}</p>` : ""}${hasStage ? `<div class="dashboard-project-detail"><small>当前阶段</small><span>${esc(stage)}</span></div>` : ""}${hasNext ? `<div class="dashboard-project-detail"><small>下一步</small><span>${esc(next)}</span></div>` : ""}<div class="dashboard-focus-actions"><button class="button quiet small" data-action="view-project" data-id="${esc(project.id)}">打开项目</button></div></article>`;
+    const website = deployedWebsiteUrl(project);
+    return `<article class="dashboard-focus-card"><div class="dashboard-focus-top"><span class="project-glyph">${esc(initials(project.name))}</span>${statusPill(project.status)}</div><button class="dashboard-focus-name" data-action="view-project" data-id="${esc(project.id)}">${esc(project.name)}</button>${description ? `<p class="dashboard-project-description">${esc(description)}</p>` : ""}${hasStage ? `<div class="dashboard-project-detail"><small>当前阶段</small><span>${esc(stage)}</span></div>` : ""}${hasNext ? `<div class="dashboard-project-detail"><small>下一步</small><span>${esc(next)}</span></div>` : ""}<div class="dashboard-focus-actions"><button class="button quiet small" data-action="view-project" data-id="${esc(project.id)}">查看详情</button>${website ? `<a class="button quiet small" href="${esc(website)}" target="_blank" rel="noopener noreferrer">体验网站 ${icon("external")}</a>` : ""}</div></article>`;
   }).join("");
   const empty = !dataAvailable
     ? "项目暂不可用。"
@@ -1203,10 +1204,19 @@ function projectRecentProgressCandidates(project, localProject = null) {
 }
 
 function renderProjectRecentProgress(project, localProject = null) {
-  const latest = projectRecentProgressCandidates(project, localProject)[0];
-  if (!latest) return "";
-  const url = safeExternal(latest.url);
-  return `<section class="card card-pad project-recent-progress"><div class="meta-label">最近进展</div><p>${esc(latest.text)}</p><small>${esc(latest.source)}${latest.at ? ` · ${esc(timeAgoIfKnown(latest.at))}` : ""}${url ? ` · <a href="${esc(url)}" target="_blank" rel="noopener noreferrer">查看 Commit ${icon("external")}</a>` : ""}</small></section>`;
+  const updates = projectRecentProgressCandidates(project, localProject).slice(0, 3);
+  if (!updates.length) return "";
+  return `<section class="card card-pad project-recent-progress"><div class="meta-label">最近进展</div><div class="project-story-updates">${updates.map((update) => {
+    const url = safeExternal(update.url);
+    return `<article class="project-story-update"><div><p>${esc(update.text)}</p><small>${esc(update.source)}${update.at ? ` · ${esc(timeAgoIfKnown(update.at))}` : ""}</small></div>${url ? `<a class="button quiet small" href="${esc(url)}" target="_blank" rel="noopener noreferrer">查看 Commit ${icon("external")}</a>` : ""}</article>`;
+  }).join("")}</div></section>`;
+}
+
+function renderProjectShowcase(project) {
+  const story = projectShowcase(project);
+  if (!story.features.length && !story.outcomes.length) return "";
+  const list = (items) => `<ul class="project-story-list">${items.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>`;
+  return `<section class="card card-pad project-showcase"><div class="project-showcase-column"><h3>核心功能</h3>${list(story.features)}</div><div class="project-showcase-column"><h3>已验证成果</h3>${list(story.outcomes)}</div></section>`;
 }
 
 function renderDashboardRecentProgress(projects, dataAvailable) {
@@ -1429,7 +1439,8 @@ function renderProjects() {
     const hasNext = next && next !== "未填写";
     const pending = ui.projectPinUpdatingId === project.id;
     const pinDisabled = ui.projectPinningAvailable !== true || !["synced", "error", "offline"].includes(ui.cloud.status) || cloudSyncRunning || Boolean(cloudSyncTimer) || Boolean(ui.projectPinUpdatingId) || (!project.isPinned && pinnedProjectCount >= MAX_HOME_PROJECT_PINS);
-    return `<article class="card project-card"><div class="project-card-top"><div class="project-glyph">${esc(initials(project.name))}</div><div class="project-main"><button class="project-card-title" data-action="view-project" data-id="${esc(project.id)}">${esc(project.name)}</button>${hasStage ? `<div class="project-meta">${esc(stage)}</div>` : ""}</div>${statusPill(project.status)}</div>${description ? `<p>${esc(description)}</p>` : ""}${hasNext ? `<div class="project-card-bottom"><span><span class="meta-label">下一步</span> ${esc(next)}</span></div>` : ""}<div class="project-card-actions"><button class="button quiet small" data-action="view-project" data-id="${esc(project.id)}">打开项目</button><button class="button quiet small project-pin-toggle" data-action="toggle-project-pin" data-id="${esc(project.id)}" aria-pressed="${project.isPinned === true}" title="首页重点项目" ${pinDisabled ? "disabled" : ""}>${pending ? "保存中…" : project.isPinned === true ? "取消重点" : "设为重点"}</button></div></article>`;
+    const website = deployedWebsiteUrl(project);
+    return `<article class="card project-card"><div class="project-card-top"><div class="project-glyph">${esc(initials(project.name))}</div><div class="project-main"><button class="project-card-title" data-action="view-project" data-id="${esc(project.id)}">${esc(project.name)}</button>${hasStage ? `<div class="project-meta">${esc(stage)}</div>` : ""}</div>${statusPill(project.status)}</div>${description ? `<p>${esc(description)}</p>` : ""}${hasNext ? `<div class="project-card-bottom"><span><span class="meta-label">下一步</span> ${esc(next)}</span></div>` : ""}<div class="project-card-actions"><button class="button quiet small" data-action="view-project" data-id="${esc(project.id)}">查看详情</button>${website ? `<a class="button quiet small" href="${esc(website)}" target="_blank" rel="noopener noreferrer">体验网站 ${icon("external")}</a>` : ""}<button class="button quiet small project-pin-toggle" data-action="toggle-project-pin" data-id="${esc(project.id)}" aria-pressed="${project.isPinned === true}" title="首页重点项目" ${pinDisabled ? "disabled" : ""}>${pending ? "保存中…" : project.isPinned === true ? "取消重点" : "设为重点"}</button></div></article>`;
   }).join("");
   const projectList = projects.length ? `<div class="project-cards">${projectCards}</div>` : `<div class="card empty-state"><strong>${cloudWorkspaceAvailable() ? ui.projectFilter === "active" ? "没有进行中的项目" : "还没有项目" : "项目暂不可用"}</strong>${cloudWorkspaceAvailable() ? `<button class="button primary" data-action="open-create-project">${icon("plus")} 新建项目</button>` : esc(dashboardUnavailableMessage())}</div>`;
   const githubAppError = ["error", "offline", "disconnected"].includes(ui.githubAppStatus);
@@ -1761,8 +1772,7 @@ function renderProjectDetail() {
   const knowledge = db.knowledge.filter((item) => item.projectId === project.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const activities = db.activities.filter((item) => item.projectId === project.id).slice(0, 6);
   const localProject = localProjectForWorkspace(project);
-  const github = safeExternal(project.github);
-  const live = safeExternal(project.url);
+  const live = deployedWebsiteUrl(project);
   const stage = typeof project.stage === "string" ? project.stage.trim() : "";
   const next = typeof project.next === "string" ? project.next.trim() : "";
   const meta = [
@@ -1772,9 +1782,10 @@ function renderProjectDetail() {
   ].filter(Boolean).join("");
   const description = projectIntroduction(project);
   return `<div class="detail-topline"><button class="icon-button" data-page="projects" aria-label="返回项目">${icon("back")}</button><span>Projects</span>${icon("chevron")}<span>${esc(project.name)}</span></div>
-    <section class="card detail-hero"><div class="detail-hero-head"><div class="detail-hero-copy">${statusPill(project.status)}<h2 style="margin-top:11px">${esc(project.name)}</h2>${description ? `<p>${esc(description)}</p>` : ""}</div><div class="detail-actions"><button class="button" data-action="edit-project" data-id="${esc(project.id)}">${icon("edit")} 编辑项目</button><button class="button quiet danger" data-action="delete-project" data-id="${esc(project.id)}">${icon("trash")} 删除</button></div></div><div class="detail-links">${live ? `<a class="detail-link" href="${esc(live)}" target="_blank" rel="noreferrer">${icon("external")} 在线网址</a>` : ""}${github ? `<a class="detail-link" href="${esc(github)}" target="_blank" rel="noreferrer">${icon("external")} GitHub</a>` : ""}</div></section>
-    ${meta ? `<div class="detail-meta-grid">${meta}</div>` : ""}
+    <section class="card detail-hero"><div class="detail-hero-head"><div class="detail-hero-copy">${statusPill(project.status)}<h2 style="margin-top:11px">${esc(project.name)}</h2>${description ? `<div class="meta-label project-purpose-label">项目用途</div><p>${esc(description)}</p>` : ""}</div><div class="detail-actions">${live ? `<a class="button primary small" href="${esc(live)}" target="_blank" rel="noopener noreferrer">${icon("external")} 体验网站</a>` : ""}<button class="button" data-action="edit-project" data-id="${esc(project.id)}">${icon("edit")} 编辑项目</button><button class="button quiet danger" data-action="delete-project" data-id="${esc(project.id)}">${icon("trash")} 删除</button></div></div></section>
+    ${renderProjectShowcase(project)}
     ${renderProjectRecentProgress(project, localProject)}
+    ${meta ? `<div class="detail-meta-grid">${meta}</div>` : ""}
     ${renderProjectNextStep(project, tasks)}
     ${project.notes ? `<section class="card card-pad project-notes"><div class="meta-label">备注</div><p>${esc(project.notes)}</p></section>` : ""}
     ${renderProjectWorkLogs(project)}

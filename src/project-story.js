@@ -27,6 +27,55 @@ const COMMIT_STORIES = {
   },
 };
 
+const PROJECT_SHOWCASES = {
+  "ai-investment-dashboard": {
+    features: [
+      "查看市场行情、自选列表和个人持仓趋势。",
+      "集中记录投资研究笔记，并按需生成 AI 市场简报。",
+    ],
+    outcomes: [
+      "AI 对话接口已按 EdgeOne 的线上目录规则调整。",
+    ],
+  },
+  "daniel-project-hub": {
+    features: [
+      "把 AI 产品、网站和实验作品整理成可浏览的作品目录。",
+      "FlowOps 提供可操作的采购流程回放与知识库问答入口。",
+    ],
+    outcomes: [
+      "FlowOps 演示覆盖正常批准、审批拒绝和重复事件三种路径。",
+      "作品导航站和 FlowOps 演示均有明确的线上入口。",
+    ],
+  },
+  "personal-portfolio": {
+    features: [
+      "通过随页面滚动变化的 3D 场景呈现个人作品。",
+      "以单页结构串起个人介绍和作品展示。",
+    ],
+    outcomes: [
+      "个人作品集已发布，并补齐页脚版权信息。",
+    ],
+  },
+  "daniel-workspace": {
+    features: [
+      "集中查看项目、待办和工作记录。",
+      "按需生成基于实际进展的 AI 总结和下一步建议。",
+    ],
+    outcomes: [
+      "首页与项目详情已将重点项目介绍和近期进展改为易读中文。",
+    ],
+  },
+  "n8n-ai-automation-lab": {
+    features: [
+      "用 n8n 串联采购审批、工单生成和 AI 分析步骤。",
+      "通过流程配置演示审批通过后的自动衔接。",
+    ],
+    outcomes: [
+      "已归档可复用的流程配置，并排除凭据与运行记录。",
+    ],
+  },
+};
+
 function repoKey(project) {
   return parsePublicGitHubRepository(project?.github)?.repository?.toLowerCase() || "";
 }
@@ -44,6 +93,37 @@ export function projectIntroduction(project) {
   const description = typeof project?.description === "string" ? project.description.trim() : "";
   if (description && !looksLikeScanMetadata(description)) return description;
   return PROJECT_INTROS[repoKey(project)] || "";
+}
+
+export function projectShowcase(project) {
+  const details = PROJECT_SHOWCASES[repoKey(project)];
+  return {
+    purpose: projectIntroduction(project),
+    features: details?.features || [],
+    outcomes: details?.outcomes || [],
+  };
+}
+
+export function deployedWebsiteUrl(project) {
+  const value = typeof project?.url === "string" ? project.url.trim() : "";
+  if (!value) return "";
+  try {
+    const parsed = new URL(value);
+    const hostname = parsed.hostname.toLowerCase();
+    const ipv4 = hostname.split(".").map(Number);
+    const isIpv4 = ipv4.length === 4 && ipv4.every((part) => Number.isInteger(part) && part >= 0 && part <= 255);
+    const isPrivateIpv4 = isIpv4 && (ipv4[0] === 0 || ipv4[0] === 10 || ipv4[0] === 127
+      || (ipv4[0] === 169 && ipv4[1] === 254) || (ipv4[0] === 172 && ipv4[1] >= 16 && ipv4[1] <= 31)
+      || (ipv4[0] === 192 && ipv4[1] === 168) || (ipv4[0] === 100 && ipv4[1] >= 64 && ipv4[1] <= 127));
+    if (!['http:', 'https:'].includes(parsed.protocol) || !hostname || parsed.username || parsed.password
+      || hostname === "github.com" || hostname === "www.github.com" || hostname === "localhost"
+      || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname === "127.0.0.1"
+      || hostname.endsWith(".internal") || hostname.endsWith(".githubusercontent.com")
+      || hostname === "0.0.0.0" || hostname === "[::1]" || hostname.startsWith("[") || isPrivateIpv4) return "";
+    return parsed.href;
+  } catch {
+    return "";
+  }
 }
 
 export function projectDescriptionForEdit(project) {
