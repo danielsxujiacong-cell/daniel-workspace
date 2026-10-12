@@ -17,7 +17,7 @@ const SECRET_PATTERNS = [
   { pattern: /[\"']?\b(?:api[_-]?key|client[_-]?secret|secret|password|passwd|access[_-]?token|refresh[_-]?token|authorization|auth[_-]?(?:token|key|secret|credential)|user[_-]?id|session[_-]?id|token)\b[\"']?\s*[:=]\s*[\"']?[^\s\"'`,;}{]{1,}[\"']?/gi, replacement: "[认证信息已隐藏]" },
   { pattern: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/gi, replacement: "[认证信息已隐藏]" },
   { pattern: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, replacement: "[账号标识已隐藏]" },
-  { pattern: /(?:\b[A-Z]:\\(?:[^\s<>:"|?*]+\\)*[^\s<>:"|?*]*|\\\\[^\s\\]+\\[^\s]+|\/(?:Users|home|private|Volumes|mnt)\/[^\s]+)/gi, replacement: "[本机路径已隐藏]" },
+  { pattern: /(?:\b[A-Z]:[\\/][^<>:"|?*\r\n,;，；。!?)]*|\\\\[^\\\s]+\\[^<>:"|?*\r\n,;，；。!?)]*|\/(?:Users|home|private|Volumes|mnt)\/[^<>"'`\r\n,;，；。!?)]*)/gi, replacement: "[本机路径已隐藏]" },
   { pattern: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, replacement: "[邮箱已隐藏]" },
   { pattern: /(?<!\d)(?:\+?86[-\s]?)?1[3-9]\d{9}(?!\d)/g, replacement: "[联系方式已隐藏]" },
   { pattern: /(?<!\d)(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}(?!\d)/g, replacement: "[联系方式已隐藏]" },

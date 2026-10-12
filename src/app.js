@@ -15,7 +15,7 @@ const {
   publishPublicSnapshot,
   PUBLIC_SNAPSHOT_ACTIVITY_DAYS,
   snapshotDraftCounts,
-} = await import("./public-snapshot.js?v=3.8-m");
+} = await import("./public-snapshot.js?v=3.8-n");
 let hydratedPublicData = publicSnapshotMode ? hydratePublicSnapshot(publishedSnapshot) : null;
 
 const {

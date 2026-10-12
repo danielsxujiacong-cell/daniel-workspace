@@ -74,7 +74,7 @@ function draftWithSensitiveSources() {
         next: "Ship the reviewed demo",
         url: "https://example.com/demo",
         github: "https://github.com/acme/public-demo",
-        notes: "Private Drive https://drive.google.com/private-doc",
+        notes: "Private Drive https://drive.google.com/private-doc. Source path: D:\\_Codex project\\02_Game\\fake-artist-new-york.",
         path: "D:\\Private\\Project",
         isPinned: true,
       }],
@@ -105,6 +105,8 @@ test("snapshot draft automatically includes safe whitelisted data and redacts pr
   assert.match(project.fields.description, /\[本机路径已隐藏\]/);
   assert.doesNotMatch(project.fields.description, /415|555-0136/);
   assert.doesNotMatch(project.fields.notes, /drive\.google\.com/);
+  assert.match(project.fields.notes, /\[本机路径已隐藏\]/);
+  assert.doesNotMatch(project.fields.notes, /_Codex project|02_Game|fake-artist-new-york/);
   assert.equal(createPublicSnapshotDraft({ data: { projects: [{ id: "private-url", name: "Private link", url: "https://drive.google.com/file/d/secret" }] }, githubActivity: { complete: true, workLogsComplete: true } }).collections.projects[0].fields.url, "");
   const summaryDraft = createPublicSnapshotDraft({ summaries: { dailyBrief: { status: "ready", value: { password: "hunter2", access_token: "eyJabcdefghijk.abcdefghijk.abcdefghijk" } } }, githubActivity: { complete: true, workLogsComplete: true } });
   assert.doesNotMatch(summaryDraft.collections.summaries[0].fields.content, /hunter2|eyJabcdefghijk/);
@@ -238,7 +240,7 @@ test("the visitor shell starts the shared app before snapshot fetch settles and 
   const gate = await (await import("node:fs/promises")).readFile(new URL("../src/auth/gate.js", import.meta.url), "utf8");
   const app = await (await import("node:fs/promises")).readFile(new URL("../src/app.js", import.meta.url), "utf8");
   const publicStart = gate.slice(gate.indexOf("async function startPublicDashboard"), gate.indexOf("function startPrivateEntry"));
-  assert.ok(publicStart.indexOf("await import(\"../app.js?v=3.8-m\")") < publicStart.indexOf("void snapshotPromise.then"));
+  assert.ok(publicStart.indexOf("await import(\"../app.js?v=3.8-n\")") < publicStart.indexOf("void snapshotPromise.then"));
   assert.doesNotMatch(publicStart, /await\s+snapshotPromise/);
   assert.match(publicStart, /void snapshotPromise\.then/);
   assert.match(app, /publicSnapshotMode \? \{\} : await import\("\.\/store\.js\?v=3\.8-l"\)/);
