@@ -1424,7 +1424,7 @@ function renderActivityStatus(activity, dataAvailable) {
   if (invalidProjects.length) notices.push(`${invalidProjects.length} 个项目的 GitHub 地址无效，未计入覆盖统计。`);
   if (!coverage.workLogsComplete) warnings.push("工作记录读取未完成；缺失日期不计为零。");
   const affectedList = affectedDetails.length
-    ? `<details class="dashboard-activity-gaps"><summary>查看 ${affectedDetails.length} 个未完整仓库及原因</summary><ul>${affectedDetails.map(({ fullName, reason, reasonCategory, operation, httpStatus }) => `<li><strong>${esc(fullName)}</strong>${reasonCategory ? `<small>${esc(activityReasonLabel(reasonCategory))}</small>` : ""}<span>${esc([operation, httpStatus ? `HTTP ${httpStatus}` : "", reason].filter(Boolean).join(" · "))}</span></li>`).join("")}</ul></details>`
+    ? `<details class="dashboard-activity-gaps"><summary>查看 ${affectedDetails.length} 个未完整仓库及原因</summary><ul>${affectedDetails.map(({ fullName, reason, reasonCategory, code, operation, httpStatus }) => `<li><strong>${esc(fullName)}</strong>${reasonCategory || code ? `<small>${esc([reasonCategory ? activityReasonLabel(reasonCategory) : "", code].filter(Boolean).join(" · "))}</small>` : ""}<span>${esc([operation, httpStatus ? `HTTP ${httpStatus}` : "", reason].filter(Boolean).join(" · "))}</span></li>`).join("")}</ul></details>`
     : "";
   const projectLinkIssues = [...unlinkedProjects, ...invalidProjects];
   const projectLinkList = projectLinkIssues.length
