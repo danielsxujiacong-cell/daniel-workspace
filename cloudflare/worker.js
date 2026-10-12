@@ -2,6 +2,11 @@ const rateBuckets = new Map();
 const MAX_BODY_CHARS = 32_000;
 const MAX_CONTEXT_CHARS = 12_000;
 const MAX_HISTORY_CHARS = 8_000;
+const PUBLIC_DASHBOARD_REPOSITORIES = Object.freeze([
+  { projectId: "workspace", fullName: "danielsxujiacong-cell/daniel-workspace" },
+  { projectId: "portfolio", fullName: "danielsxujiacong-cell/personal-portfolio" },
+  { projectId: "investment-dashboard", fullName: "danielsxujiacong-cell/AI-investment-dashboard" },
+]);
 
 function allowedOrigins(env) {
   return new Set((env.ALLOWED_ORIGINS || "").split(",").map((item) => item.trim()).filter(Boolean));
@@ -363,6 +368,20 @@ function activityDateKey(value) {
     : "";
 }
 
+function shiftActivityDate(dateKey, offset) {
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + offset);
+  return date.toISOString().slice(0, 10);
+}
+
+function publicDashboardDate(value = Date.now()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(value instanceof Date ? value : new Date(value));
+  const part = (name) => parts.find((item) => item.type === name)?.value || "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
 function validActivityDate(value) {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const parsed = new Date(`${value}T00:00:00.000Z`);
@@ -375,23 +394,23 @@ function activityDateBounds(startDate, endDate) {
   return { since: start.toISOString(), until: end.toISOString() };
 }
 
-async function activityGitHubJson(path, token, operation, { allowEmpty = false } = {}) {
+async function activityGitHubJson(path, token, operation, { allowEmpty = false, allowAnonymousFallback = false } = {}) {
   let response = await githubApi(path, token);
-  if (!response.ok && token && [401, 404].includes(response.status)) response = await githubApi(path, null);
+  if (!response.ok && token && ([401, 404].includes(response.status) || (allowAnonymousFallback && response.status === 403))) response = await githubApi(path, null);
   if (allowEmpty && response.status === 409) return [];
   if (!response.ok) throw await githubUpstreamFailure(response, operation);
   return response.json();
 }
 
-async function readRepositoryActivity(fullName, authorized, startDate, endDate) {
+async function readRepositoryActivity(fullName, authorized, startDate, endDate, requirePublic = false) {
   const encoded = fullName.split("/").map(encodeURIComponent).join("/");
   const authorizedEntry = authorized.get(fullName.toLowerCase());
   const token = authorizedEntry?.token || null;
   let repo = authorizedEntry?.repo;
   if (!repo) {
-    repo = await activityGitHubJson(`/repos/${encoded}`, null, "GitHub activity repository read");
+    repo = await activityGitHubJson(`/repos/${encoded}`, token, "GitHub activity repository read", { allowAnonymousFallback: requirePublic });
   }
-  if (repo?.full_name?.toLowerCase() !== fullName.toLowerCase() || repo.private !== false && !authorizedEntry) {
+  if (repo?.full_name?.toLowerCase() !== fullName.toLowerCase() || repo.private !== false && (requirePublic || !authorizedEntry)) {
     const error = new Error("当前仓库不在 GitHub App 授权范围内或不是公开仓库。");
     error.code = "github_activity_repository_unavailable";
     error.upstreamStatus = 404;
@@ -412,7 +431,7 @@ async function readRepositoryActivity(fullName, authorized, startDate, endDate) 
       `/repos/${encoded}/commits?per_page=100&since=${encodeURIComponent(since)}&until=${encodeURIComponent(until)}&page=${page}`,
       token,
       "GitHub historical activity read",
-      { allowEmpty: true },
+      { allowEmpty: true, allowAnonymousFallback: requirePublic },
     );
     if (!Array.isArray(pageRows)) throw new Error("github_invalid_activity_response");
     for (const commit of pageRows) {
@@ -490,6 +509,42 @@ async function githubActivityRoute(request, env) {
   });
   await Promise.all(workers);
   return jsonResponse(request, env, { repositories, errors });
+}
+
+async function publicDashboardRoute(request, env) {
+  if (request.method !== "GET") return githubError(request, env, 405, "public_dashboard_method_not_allowed", "公开 Dashboard 仅支持只读 GET 请求。");
+  if (isRateLimited(request, 12)) return githubError(request, env, 429, "public_dashboard_rate_limited", "公开活动请求过多，请稍后重试。");
+
+  const endDate = publicDashboardDate();
+  const startDate = shiftActivityDate(endDate, -29);
+  let publicReadToken = null;
+  try { publicReadToken = await createPublicReadToken(env); } catch { publicReadToken = null; }
+  const repositories = await Promise.all(PUBLIC_DASHBOARD_REPOSITORIES.map(async ({ projectId, fullName }) => {
+    try {
+      const key = fullName.toLowerCase();
+      const authorized = publicReadToken ? new Map([[key, { token: publicReadToken }]]) : new Map();
+      const result = await readRepositoryActivity(fullName, authorized, startDate, endDate, true);
+      return { projectId, complete: result.complete, truncated: result.truncated, dailyCounts: result.dailyCounts };
+    } catch (error) {
+      return {
+        projectId,
+        complete: false,
+        truncated: true,
+        dailyCounts: [],
+        errorCode: typeof error?.code === "string" ? error.code : "github_unavailable",
+        ...(Number.isInteger(error?.upstreamStatus) ? { upstreamStatus: error.upstreamStatus } : {}),
+      };
+    }
+  }));
+  const cors = corsHeaders(request, env);
+  return new Response(JSON.stringify({ period: { startDate, endDate }, repositories }), {
+    status: 200,
+    headers: {
+      ...cors,
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "public, max-age=300, s-maxage=300",
+    },
+  });
 }
 
 async function githubRoute(request, env, url) {
@@ -754,6 +809,7 @@ export default {
     const url = new URL(request.url);
     if (!corsHeaders(request, env)) return new Response(null, { status: 403, headers: { "Cache-Control": "no-store" } });
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(request, env) });
+    if (url.pathname === "/api/public/dashboard") return publicDashboardRoute(request, env);
     if (url.pathname === "/api/github/public-snapshots") return publicGitHubRoute(request, env);
     if (url.pathname === "/api/github/activity") return githubActivityRoute(request, env);
     if (url.pathname.startsWith("/api/github/")) return githubRoute(request, env, url);

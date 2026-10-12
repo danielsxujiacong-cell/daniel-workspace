@@ -1,6 +1,7 @@
 export function resolveEntryMode(search = "") {
   const mode = new URLSearchParams(search).get("mode");
-  if (mode === "guest") return "guest";
+  if (mode === "guest") return "public";
+  if (mode === "demo") return "demo";
   if (mode === "login") return "login";
-  return "auth";
+  return "default";
 }

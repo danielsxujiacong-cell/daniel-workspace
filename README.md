@@ -1,10 +1,10 @@
 # Daniel Workspace
 
-私人 AI 项目管理指挥中心 V3.8。登录用户继续使用现有 Supabase 云同步、本机 Companion 和私人 AI。Home 汇总真实项目/任务状态、GitHub 提交历史、Workspace 工作记录和项目阶段；Daniel Project Hub 继续负责作品导航，访客页展示精选公开作品和模拟流程演示，与私人工作台隔离。
+Daniel Workspace V3.8-A 是公开只读项目指挥中心。无需登录即可浏览白名单项目、公开网站和公开 GitHub 活动；登录后仍进入现有私人工作台，继续使用 Supabase 云同步、本机 Companion 和私人 AI。公开 Dashboard 与登录后的 V3.8 Dashboard 使用同一页面布局；公开页不读取私人项目表、任务、工作记录、私有仓库或本机缓存。
 
 ## Status
 
-- **Stage:** V3.8 upgrades Home to a Project Control Dashboard while preserving Supabase project/task/work-log rows, auth, sync, and AI service behavior. Verification and acceptance status are recorded in [HANDOFF](docs/HANDOFF.md).
+- **Stage:** V3.8-A makes the default route a public read-only Dashboard while preserving the authenticated workspace, Supabase rows, sync, and AI behavior. Verification and acceptance status are recorded in [HANDOFF](docs/HANDOFF.md).
 - **Last updated:** 2026-10-12
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
@@ -16,7 +16,7 @@
 python local_companion.py
 ```
 
-在浏览器打开 [http://127.0.0.1:4174](http://127.0.0.1:4174)，可登录私人工作区，也可选「访客演示」浏览精选公开作品。访客页可打开已发布的 Project Hub、FlowOps 和个人作品集；TK-1001 是独立的虚构流程演示，可查看规则判定、关联 SOP、处置方案、模拟 Decision 和完成状态。演示状态只保存在当前页面内存中。登录前页面不会读取 Workspace/扫描缓存或请求 Companion；访客模式也不会读取 Supabase 配置或会话。登录后按 `Ctrl+K` 或 `⌘K` 聚焦全局搜索；部署站点会在登录后尝试从本机 `127.0.0.1:4174` 读取扫描，浏览器可能要求允许页面访问本地网络。
+在浏览器打开 [http://127.0.0.1:4174](http://127.0.0.1:4174) 即可浏览公开项目指挥中心；右上角「登录」进入私人工作区，`?mode=login` 只显示登录表单且不恢复会话。`?mode=guest` 是公开页的兼容别名。FlowOps 网站明确标为模拟演示，使用虚构业务数据；旧 TK-1001 运营模拟仅通过显式 `?mode=demo` 打开，不再作为默认首页。公开页只访问固定的公开 GitHub 仓库白名单并显示每日 Commit 汇总，不请求 Supabase 业务表、工作记录、私有仓库原文或 Local Companion。登录后按 `Ctrl+K` 或 `⌘K` 聚焦全局搜索；部署站点会在登录后尝试从本机 `127.0.0.1:4174` 读取扫描，浏览器可能要求允许页面访问本地网络。
 
 手动控制 Companion：前台运行 `python local_companion.py` 时按 `Ctrl+C` 停止；开机任务启动的后台实例可在 PowerShell 执行 `Stop-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion"` 停止。取消后续登录自动启动，执行 `Unregister-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion" -Confirm:$false`。重新登录 Windows 会再次启动仍注册的任务。
 
@@ -61,6 +61,13 @@ python local_companion.py
 - GitHub 活动通过已认证的 Cloudflare Worker 按日期范围分页读取；Worker 在服务端按仓库和完整 SHA 去重，只返回每日计数。工作记录图表读取全部云端项目对应日期范围内的记录 ID、项目 ID 和日期，不读取正文或证据链接；两类来源分别统计和显示。
 - 日期范围支持近 7/30/90 天和不超过 366 天的自定义范围。仓库读取失败或达到分页上限时标记历史不完整，缺口日期不解释为零；没有保存阶段时显示「未分类」，重点项目只显示已保存状态、阶段、下一步和真实任务数，不显示百分比。
 - 不增加 Supabase 迁移或修改业务行；图表缓存只按账号和筛选范围保存在本机一小时，其他设备从相同云端项目和 Worker 独立读取。
+
+## V3.8-A 公开只读 Dashboard
+
+- 默认首页和 `?mode=guest` 直接展示只读项目指挥中心；登录入口位于右上角。有效的既有登录会话只有在 Supabase `getUser()` 验证后才进入完整私人工作台；`?mode=login` 不恢复会话。
+- 公开页与登录 Home 共用 `dashboard-layout.js`、Dashboard 样式和卡片结构。公开白名单当前列出 5 个项目，其中 3 个已发布网站、1 个明确标注为模拟的 FlowOps 演示和 1 个只链接公开源码的项目。
+- `/api/public/dashboard` 不访问 Supabase。Worker 只请求固定的 3 个已确认公开 GitHub 仓库，先验证仓库为公开，再返回近 30 个上海日期的每日 Commit 数；不返回 Commit 原文、SHA、私人表行、工作记录、安装仓库清单或令牌。接口响应公开缓存 5 分钟并受精确来源 CORS 与请求限流保护。
+- 公开状态图只按静态白名单分类为「线上作品」「模拟演示」「公开源码」，不会复制私人 Workspace 保存的项目状态或阶段。没有安全公开依据的项目、任务、阶段和工作记录不展示。
 
 ## V2.5 登录配置
 

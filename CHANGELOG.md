@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-12 · V3.8-A 公开只读 Dashboard
+
+- 默认入口无需登录即可查看公开只读项目指挥中心；登录页改为右上角低调入口，访客模式复用 Dashboard 布局，旧 TK-1001 模拟页只通过 `?mode=demo` 显式进入。
+- 新增 Worker `/api/public/dashboard` 固定仓库白名单接口，仅在确认仓库公开后读取 GitHub 活动并返回 30 天每日计数；不访问 Supabase 工作区表，不返回 Commit 原文、SHA、工作记录或私有仓库清单。
+- 增加公开项目详情和入口白名单，FlowOps 明确标识为虚构数据模拟；未公开状态、阶段、任务及工作记录不展示。登录认证、同步、数据库行和 AI 行为未改变。
+
 ## 2026-10-12 · V3.8 Project Control Dashboard
 
 - Home 改为项目指挥中心，增加四项真实云端 KPI、日期可筛选的 GitHub/Workspace 活动热力图与趋势、项目状态环形图和基于已保存阶段字段的分布图。

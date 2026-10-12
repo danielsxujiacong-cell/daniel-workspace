@@ -32,6 +32,7 @@ const { fetchGitHubActivity } = await import("./github/activity.js?v=3.8");
 const { deployedWebsiteUrl, humanizeProjectCommit, projectDescriptionAfterEdit, projectDescriptionForEdit, projectIntroduction, projectShowcase } = await import("./project-story.js?v=3.7-d");
 const { buildCloudDashboardModel, buildLocalDashboardModel, buildRecentProjectUpdates, chooseRecentCommit, compareLocalProjects, homeProjectField, projectTaskProgress, taskPriorityLabel } = await import("./dashboard.js?v=3.8");
 const { buildHomeActivity, projectStageBreakdown, projectStatusBreakdown, resolveActivityRange, shiftDateKey } = await import("./home-activity.js?v=3.8");
+const { renderDashboardLayout } = await import("./dashboard-layout.js?v=3.8-a");
 const {
   countPinnedProjects,
   getHomePinnedProjects,
@@ -1690,7 +1691,7 @@ function renderDashboard() {
   const completedProjects = projects.filter((project) => project.status === "已完成").length;
   const stats = `<section class="dashboard-overview grid-span-12" aria-label="项目指挥中心"><div class="dashboard-home-title"><div class="eyebrow">DANIEL WORKSPACE · PROJECT CONTROL CENTER</div><h1>项目指挥中心</h1></div><div class="dashboard-stat-row">${dashboardStatCard("项目总数", dataAvailable ? counts.projects : "—", "projects", "all", dataAvailable ? "查看全部项目" : "云端读取中", !dataAvailable)}${dashboardStatCard("进行中", dataAvailable ? counts.activeProjects : "—", "projects", "active", dataAvailable ? "查看进行中" : "云端读取中", !dataAvailable)}${dashboardStatCard("已完成", dataAvailable ? completedProjects : "—", "projects", "completed", dataAvailable ? "查看已完成" : "云端读取中", !dataAvailable)}${dashboardStatCard("待办任务", dataAvailable ? counts.openTasks : "—", "tasks", "todo", dataAvailable ? "查看待办任务" : "云端读取中", !dataAvailable)}</div></section>`;
   const activity = ui.homeActivity;
-  return `<div class="dashboard-home"><div class="dashboard-grid">${stats}${renderActivityHeatmap(activity, dataAvailable)}${renderActivityTrend(activity, dataAvailable)}${renderProjectStatusChart(projects, dataAvailable)}${renderProjectStageChart(projects, dataAvailable)}${renderDashboardFocusProjects(projects, dataAvailable)}${renderDashboardAISummary(today, suggestion)}</div></div>`;
+  return renderDashboardLayout([stats, renderActivityHeatmap(activity, dataAvailable), renderActivityTrend(activity, dataAvailable), renderProjectStatusChart(projects, dataAvailable), renderProjectStageChart(projects, dataAvailable), renderDashboardFocusProjects(projects, dataAvailable), renderDashboardAISummary(today, suggestion)]);
 }
 
 function renderProjects() {

@@ -8,6 +8,7 @@ let authClient = null;
 let supabaseConfigPromise = null;
 let authConfig = { SUPABASE_ALLOWED_USER: "" };
 let workspaceModule = null;
+let publicDashboard = null;
 let workspaceVisible = false;
 let signInBusy = false;
 let signOutBusy = false;
@@ -16,7 +17,7 @@ let authInitializationError = "";
 document.documentElement.dataset.theme = colorScheme.matches ? "light" : "dark";
 
 function loginMarkup() {
-  return `<main class="login-screen"><section class="login-card" aria-labelledby="login-title"><div class="login-mark" aria-hidden="true">D</div><h1 id="login-title">Daniel Workspace</h1><p class="login-subtitle">私人 AI 工作台</p><form id="login-form" class="login-form"><label for="login-email">邮箱</label><input id="login-email" name="email" type="email" autocomplete="username" inputmode="email" required /><label for="login-password">密码</label><input id="login-password" name="password" type="password" autocomplete="current-password" required /><button class="login-submit" type="submit">登录</button><p id="login-status" class="login-status" role="status" aria-live="polite"></p></form><div class="login-divider"><span>或</span></div><a class="guest-entry" href="?mode=guest">访客演示 <span>浏览模拟企业运营工作区</span></a></section></main>`;
+  return `<main class="login-screen"><section class="login-card" aria-labelledby="login-title"><div class="login-mark" aria-hidden="true">D</div><h1 id="login-title">Daniel Workspace</h1><p class="login-subtitle">私人 AI 工作台</p><form id="login-form" class="login-form"><label for="login-email">邮箱</label><input id="login-email" name="email" type="email" autocomplete="username" inputmode="email" required /><label for="login-password">密码</label><input id="login-password" name="password" type="password" autocomplete="current-password" required /><button class="login-submit" type="submit">登录</button><p id="login-status" class="login-status" role="status" aria-live="polite"></p></form><a class="public-return-link" href="${window.location.pathname}">返回公开项目指挥中心</a></section></main>`;
 }
 
 function showLogin(message = "") {
@@ -99,10 +100,12 @@ function loginErrorMessage(error) {
 async function enterWorkspace(user) {
   if (workspaceVisible) return;
   if (!isAllowedUser(user)) throw new Error("Unauthorized user");
+  publicDashboard?.destroy();
+  publicDashboard = null;
   globalThis.DANIEL_WORKSPACE_AUTHENTICATED = true;
   globalThis.DANIEL_WORKSPACE_AUTH = { client: authClient, userId: user.id };
   try {
-    workspaceModule = await import("../app.js?v=3.8");
+    workspaceModule = await import("../app.js?v=3.8-a");
     workspaceVisible = true;
   } catch (error) {
     globalThis.DANIEL_WORKSPACE_AUTHENTICATED = false;
@@ -208,7 +211,7 @@ async function handleLogout() {
   }
   clearAuthSessionStorage();
   authClient = null;
-  window.location.replace(`${window.location.pathname}${window.location.search}`);
+  window.location.replace(window.location.pathname);
 }
 
 app.addEventListener("submit", (event) => {
@@ -225,8 +228,12 @@ app.addEventListener("click", (event) => {
   void handleLogout();
 }, true);
 
-async function boot() {
-  showLogin();
+async function restoreExistingSession() {
+  try {
+    if (!localStorage.getItem(AUTH_STORAGE_KEY)) return;
+  } catch {
+    return;
+  }
   if (!(await isConfigured())) return;
 
   try {
@@ -239,29 +246,33 @@ async function boot() {
     if (userError || !user || !isAllowedUser(user)) {
       await authClient.auth.signOut({ scope: "local" }).catch(() => {});
       clearAuthSessionStorage();
-      if (user && !userError) showLogin(unauthorizedMessage());
       return;
     }
     await enterWorkspace(user);
   } catch (error) {
     authInitializationError = `登录服务初始化失败：${loginErrorMessage(error)}`;
-    showLogin(authInitializationError);
   }
 }
 
 async function startGuestDemo() {
-  app.innerHTML = `<main class="login-screen"><section class="login-card guest-loading"><div class="login-mark" aria-hidden="true">D</div><h1>正在打开访客演示…</h1></section></main>`;
+  app.innerHTML = `<main class="login-screen"><section class="login-card guest-loading"><div class="login-mark" aria-hidden="true">D</div><h1>正在打开模拟流程演示…</h1></section></main>`;
   const { mountGuestDemo } = await import("../guest-demo.js?v=3.7-d");
   mountGuestDemo({
     root: app,
-    onExit: () => window.location.replace(`${window.location.pathname}?mode=login`),
+    onExit: () => window.location.replace(window.location.pathname),
   });
 }
 
-if (entryMode === "guest") {
+async function startPublicDashboard(restoreSession = false) {
+  const { mountPublicDashboard } = await import("../public-dashboard.js?v=3.8-a");
+  publicDashboard = mountPublicDashboard({ root: app });
+  if (restoreSession) void restoreExistingSession();
+}
+
+if (entryMode === "demo") {
   void startGuestDemo();
 } else if (entryMode === "login") {
   showLogin();
 } else {
-  void boot();
+  void startPublicDashboard(entryMode === "default");
 }
