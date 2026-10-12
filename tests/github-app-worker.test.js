@@ -112,6 +112,43 @@ test("installation-token reads list authorized private repositories and return t
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test("GitHub App installation and authorized repository inventories follow Link pagination without truncating the repo list", async () => {
+  const { env } = await testEnv();
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  const firstPage = Array.from({ length: 100 }, (_, index) => {
+    const fullName = `acme/repo-${String(index + 1).padStart(3, "0")}`;
+    return { full_name: fullName, name: fullName.split("/")[1], owner: { login: "acme" }, private: true, default_branch: "main", html_url: `https://github.com/${fullName}` };
+  });
+  const secondPage = ["repo-101", "repo-102"].map((name) => ({
+    full_name: `acme/${name}`, name, owner: { login: "acme" }, private: true, default_branch: "main", html_url: `https://github.com/acme/${name}`,
+  }));
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(String(input));
+    calls.push(url);
+    if (url.pathname === "/auth/v1/user") return Response.json({ id: uid });
+    if (url.pathname === "/app/installations" && url.searchParams.get("page") === "1") {
+      return Response.json([{ id: 111, app_id: 99999 }], { headers: { Link: '<https://api.github.com/app/installations?per_page=100&page=2>; rel="next"' } });
+    }
+    if (url.pathname === "/app/installations" && url.searchParams.get("page") === "2") return Response.json([{ id: 987654, app_id: 12345 }]);
+    if (url.pathname.endsWith("/access_tokens")) return Response.json({ token: installationToken });
+    if (url.pathname === "/installation/repositories" && url.searchParams.get("page") === "1") {
+      return Response.json({ repositories: firstPage }, { headers: { Link: '<https://api.github.com/installation/repositories?per_page=100&page=2>; rel="next"' } });
+    }
+    if (url.pathname === "/installation/repositories" && url.searchParams.get("page") === "2") return Response.json({ repositories: secondPage });
+    return new Response(`unexpected ${init.method || "GET"} ${url}`, { status: 500 });
+  };
+  try {
+    const response = await worker.fetch(req("/api/github/repositories"), env);
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.repositories.length, 102);
+    assert.equal(payload.repositories.at(-1).fullName, "acme/repo-102");
+    assert.deepEqual(calls.filter((url) => url.pathname === "/app/installations").map((url) => url.searchParams.get("page")), ["1", "2"]);
+    assert.deepEqual(calls.filter((url) => url.pathname === "/installation/repositories").map((url) => url.searchParams.get("page")), ["1", "2"]);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("GitHub upstream HTTP failures are reported with a redacted status and message", async () => {
   const { env } = await testEnv();
   const originalFetch = globalThis.fetch;

@@ -170,7 +170,10 @@ test("GitHub activity reads history through pagination, deduplicates repository 
     if (url.pathname.endsWith("/access_tokens")) return Response.json({ token: installationToken });
     if (url.pathname === "/installation/repositories") return Response.json({ repositories: [publicRepository] });
     if (url.pathname === "/repos/acme/workspace/commits") {
-      if (url.searchParams.get("page") === "1") return Response.json(Array.from({ length: 100 }, () => publicCommit(firstSha, "commit a", "2026-10-12T01:00:00Z")));
+      if (url.searchParams.get("page") === "1") return Response.json(
+        Array.from({ length: 100 }, () => publicCommit(firstSha, "commit a", "2026-10-12T01:00:00Z")),
+        { headers: { Link: '<https://api.github.com/repos/acme/workspace/commits?per_page=100&sha=main&since=2026-10-09T16%3A00%3A00.000Z&until=2026-10-12T15%3A59%3A59.999Z&page=2>; rel="next"' } },
+      );
       return Response.json([
         publicCommit(firstSha, "commit a duplicate", "2026-10-12T01:00:00Z"),
         publicCommit(secondSha, "commit b", "2026-10-11T15:00:00Z"),
@@ -189,6 +192,7 @@ test("GitHub activity reads history through pagination, deduplicates repository 
     fullName: "acme/workspace",
     complete: true,
     truncated: false,
+    pagesRead: 2,
     commitsCount: 2,
     dailyCounts: [{ date: "2026-10-11", count: 1 }, { date: "2026-10-12", count: 1 }],
   }]);
@@ -198,6 +202,7 @@ test("GitHub activity reads history through pagination, deduplicates repository 
   const activityRequest = calls.find((url) => url.pathname.endsWith("/commits"));
   assert.equal(activityRequest.searchParams.get("since"), "2026-10-09T16:00:00.000Z");
   assert.equal(activityRequest.searchParams.get("until"), "2026-10-12T15:59:59.999Z");
+  assert.equal(activityRequest.searchParams.get("sha"), "main");
 });
 
 test("GitHub activity rejects an excessive date range before calling GitHub", async (t) => {
@@ -242,7 +247,41 @@ test("GitHub activity marks malformed commit history as incomplete", async (t) =
     fullName: "acme/workspace",
     complete: false,
     truncated: true,
+    pagesRead: 1,
+    incompleteReason: "GitHub 返回了无效 Commit SHA 或提交时间；已标记为不完整。",
     commitsCount: 1,
     dailyCounts: [{ date: "2026-10-12", count: 1 }],
   }]);
+});
+
+test("GitHub activity reports repository-specific rate-limit details without retrying before GitHub permits it", async (t) => {
+  const env = await envPromise;
+  const commitRequests = [];
+  await withFetch(t, async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/auth/v1/user") return Response.json({ id: uid });
+    if (url.pathname === "/app/installations") return Response.json([{ id: 987654, app_id: 12345 }]);
+    if (url.pathname.endsWith("/access_tokens")) return Response.json({ token: installationToken });
+    if (url.pathname === "/installation/repositories") return Response.json({ repositories: [publicRepository] });
+    if (url.pathname === "/repos/acme/workspace/commits") {
+      commitRequests.push(url);
+      return Response.json({ message: "API rate limit exceeded" }, {
+        status: 403,
+        headers: { "Retry-After": "60", "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1791780000" },
+      });
+    }
+    return new Response("unexpected", { status: 500 });
+  });
+
+  const response = await worker.fetch(request("/api/github/activity", {
+    body: { repositories: [{ fullName: "acme/workspace" }], startDate: "2026-10-10", endDate: "2026-10-12" },
+  }), env);
+  const payload = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(commitRequests.length, 1);
+  assert.deepEqual(payload.errors.map(({ fullName, code, httpStatus, retryAfterSeconds }) => ({ fullName, code, httpStatus, retryAfterSeconds })), [{
+    fullName: "acme/workspace", code: "github_rate_limited", httpStatus: 403, retryAfterSeconds: 60,
+  }]);
+  assert.match(payload.errors[0].message, /GitHub 限流/);
+  assert.equal(JSON.stringify(payload).includes(installationToken), false);
 });

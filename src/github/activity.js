@@ -1,6 +1,6 @@
 import { requestGitHubWorker } from "./worker-api.js";
 
-export const GITHUB_ACTIVITY_CACHE_TTL_MS = 60 * 60 * 1000;
+export const GITHUB_ACTIVITY_CACHE_TTL_MS = 15 * 60 * 1000;
 const MAX_REPOSITORIES_PER_REQUEST = 30;
 
 function validDate(value) {

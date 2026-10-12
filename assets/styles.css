@@ -192,6 +192,9 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 .dashboard-activity-gaps { flex-basis: 100%; color: var(--muted); }
 .dashboard-activity-gaps summary { width: fit-content; cursor: pointer; font-size: 9px; }
 .dashboard-activity-gaps > span { display: block; margin-top: 4px; overflow-wrap: anywhere; }
+.dashboard-activity-gaps ul { display: grid; gap: 5px; margin: 5px 0 0; padding-left: 17px; }
+.dashboard-activity-gaps li { display: grid; gap: 2px; overflow-wrap: anywhere; font-size: 10px; }
+.dashboard-activity-gaps li span { color: var(--muted); }
 .dashboard-activity-metrics { display: flex; flex-wrap: wrap; gap: 9px; }
 .activity-metric { display: flex; align-items: baseline; gap: 6px; padding: 6px 9px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--panel-raised); }
 .activity-metric strong { color: var(--text); font: 650 16px/1 Manrope, sans-serif; letter-spacing: -.035em; }

@@ -4,6 +4,7 @@ const MAX_CONTEXT_CHARS = 12_000;
 const MAX_HISTORY_CHARS = 8_000;
 const PUBLIC_SNAPSHOT_KEY = "latest";
 const MAX_PUBLIC_SNAPSHOT_CHARS = 1_500_000;
+const MAX_GITHUB_API_PAGES = 100;
 
 function allowedOrigins(env) {
   return new Set((env.ALLOWED_ORIGINS || "").split(",").map((item) => item.trim()).filter(Boolean));
@@ -93,11 +94,17 @@ async function appJwt(env) {
 }
 
 async function githubApi(path, token, options = {}) {
-  return fetch(`https://api.github.com${path}`, {
+  const request = () => fetch(`https://api.github.com${path}`, {
     ...options,
     headers: { Accept: "application/vnd.github+json", ...(token ? { Authorization: `Bearer ${token}` } : {}), "User-Agent": "Daniel-Workspace-GitHub-App-Reader/3.5", "X-GitHub-Api-Version": "2022-11-28", ...(options.headers || {}) },
     signal: AbortSignal.timeout(12_000),
   });
+  const response = await request();
+  if (response.ok || ![403, 429].includes(response.status)) return response;
+  const delayMs = await githubRateLimitRetryDelay(response);
+  if (delayMs === null || delayMs > 2_000) return response;
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+  return request();
 }
 
 
@@ -118,8 +125,39 @@ async function githubUpstreamFailure(response, operation) {
   error.upstreamStatus = response.status;
   error.upstreamOperation = operation;
   error.upstreamMessage = sanitizeGitHubMessage(payload?.message || body.replace(/<[^>]*>/g, " ").replace(/\s+/g, " "));
-  error.code = "github_upstream_error";
+  error.retryAfterSeconds = Number(response.headers.get("Retry-After")) || null;
+  const resetSeconds = Number(response.headers.get("X-RateLimit-Reset"));
+  error.rateLimitResetAt = Number.isFinite(resetSeconds) && resetSeconds > 0 ? new Date(resetSeconds * 1000).toISOString() : null;
+  error.rateLimited = response.status === 429 || response.headers.get("X-RateLimit-Remaining") === "0"
+    || /rate.?limit|secondary rate/i.test(error.upstreamMessage);
+  error.code = error.rateLimited ? "github_rate_limited" : "github_upstream_error";
   return error;
+}
+
+async function githubRateLimitRetryDelay(response) {
+  if (![403, 429].includes(response.status)) return null;
+  const body = await response.clone().text().catch(() => "");
+  const limited = response.status === 429 || response.headers.get("X-RateLimit-Remaining") === "0"
+    || /rate.?limit|secondary rate/i.test(body);
+  if (!limited) return null;
+  const retryAfter = Number(response.headers.get("Retry-After"));
+  if (Number.isFinite(retryAfter) && retryAfter >= 0) return retryAfter * 1000;
+  const resetSeconds = Number(response.headers.get("X-RateLimit-Reset"));
+  if (Number.isFinite(resetSeconds) && resetSeconds > 0) return Math.max(0, resetSeconds * 1000 - Date.now());
+  return Infinity;
+}
+
+function githubNextPagePath(response) {
+  const link = response.headers.get("Link") || "";
+  const next = link.split(",").map((part) => part.trim()).find((part) => /;\s*rel="?next"?(?:;|$)/i.test(part));
+  if (!next) return "";
+  const match = next.match(/^<([^>]+)>/);
+  if (!match) throw new Error("github_invalid_pagination_link");
+  const url = new URL(match[1], "https://api.github.com");
+  if (url.origin !== "https://api.github.com" || url.username || url.password || url.hash) {
+    throw new Error("github_invalid_pagination_link");
+  }
+  return `${url.pathname}${url.search}`;
 }
 
 function githubFailure(request, env, error) {
@@ -129,7 +167,7 @@ function githubFailure(request, env, error) {
     ? `${error?.upstreamOperation || "GitHub API"} HTTP ${httpStatus}: ${upstreamMessage}`
     : error?.code === "github_not_connected"
       ? "此 GitHub App 当前没有可读取的安装。请在 GitHub App 的安装设置中确认仓库范围。"
-      : "GitHub 私有仓库读取失败。请重试。";
+      : sanitizeGitHubMessage(error?.publicMessage || "GitHub 私有仓库读取失败。请重试。");
   return jsonResponse(request, env, {
     error: {
       code: error?.code || "github_unavailable",
@@ -140,10 +178,19 @@ function githubFailure(request, env, error) {
 }
 
 async function findAppInstallations(jwt, env) {
-  const response = await githubApi("/app/installations?per_page=100", jwt);
-  if (!response.ok) throw await githubUpstreamFailure(response, "GitHub App installation lookup");
-  const payload = await response.json();
-  if (!Array.isArray(payload)) throw new Error("github_invalid_installation_response");
+  const payload = [];
+  let path = "/app/installations?per_page=100&page=1";
+  for (let page = 1; page <= MAX_GITHUB_API_PAGES; page += 1) {
+    const response = await githubApi(path, jwt);
+    if (!response.ok) throw await githubUpstreamFailure(response, "GitHub App installation lookup");
+    const rows = await response.json();
+    if (!Array.isArray(rows)) throw new Error("github_invalid_installation_response");
+    payload.push(...rows);
+    const nextPath = githubNextPagePath(response);
+    if (!nextPath) break;
+    if (page === MAX_GITHUB_API_PAGES) throw new Error("github_installation_pagination_limit_reached");
+    path = nextPath;
+  }
   const installations = payload.filter((item) => String(item?.app_id) === String(env.GITHUB_APP_ID) && /^\d{1,20}$/.test(String(item?.id || "")));
   if (!installations.length) {
     const error = new Error("github_not_connected");
@@ -169,15 +216,27 @@ async function listAppAuthorizedRepositories(env, { includeTokens = false } = {}
   const installations = await findAppInstallations(jwt, env);
   const repositories = new Map();
   for (const installation of installations) {
-    const token = await createInstallationToken(installation.id, jwt);
-    const response = await githubApi("/installation/repositories?per_page=100", token);
-    if (!response.ok) throw await githubUpstreamFailure(response, "GitHub authorized repository list");
-    const payload = await response.json();
-    if (!Array.isArray(payload?.repositories)) throw new Error("github_invalid_repository_response");
-    for (const repo of payload.repositories) {
-      if (typeof repo?.full_name !== "string") continue;
-      const key = repo.full_name.toLowerCase();
-      if (!repositories.has(key)) repositories.set(key, { repo, ...(includeTokens ? { token } : {}) });
+    try {
+      const token = await createInstallationToken(installation.id, jwt);
+      let path = "/installation/repositories?per_page=100&page=1";
+      for (let page = 1; page <= MAX_GITHUB_API_PAGES; page += 1) {
+        const response = await githubApi(path, token);
+        if (!response.ok) throw await githubUpstreamFailure(response, "GitHub authorized repository list");
+        const payload = await response.json();
+        if (!Array.isArray(payload?.repositories)) throw new Error("github_invalid_repository_response");
+        for (const repo of payload.repositories) {
+          if (typeof repo?.full_name !== "string") continue;
+          const key = repo.full_name.toLowerCase();
+          if (!repositories.has(key)) repositories.set(key, { repo, ...(includeTokens ? { token } : {}) });
+        }
+        const nextPath = githubNextPagePath(response);
+        if (!nextPath) break;
+        if (page === MAX_GITHUB_API_PAGES) throw new Error("github_repository_pagination_limit_reached");
+        path = nextPath;
+      }
+    } catch (error) {
+      error.partialRepositories = repositories;
+      throw error;
     }
   }
   return repositories;
@@ -312,13 +371,36 @@ async function readPublicGitHubSnapshot(fullName, token) {
 function publicRepositoryError(fullName, error) {
   const httpStatus = Number.isInteger(error?.upstreamStatus) ? error.upstreamStatus : null;
   const upstreamMessage = httpStatus ? sanitizeGitHubMessage(error?.upstreamMessage) : null;
+  const rateLimitNote = error?.rateLimited
+    ? error.retryAfterSeconds !== null && error.retryAfterSeconds !== undefined
+      ? ` GitHub 限流，请在 ${error.retryAfterSeconds} 秒后重试。`
+      : error.rateLimitResetAt
+        ? ` GitHub 限流，请在 ${error.rateLimitResetAt} 后重试。`
+        : " GitHub 限流，请稍后重试。"
+    : "";
+  const knownMessage = error?.publicMessage
+    || (error?.message === "github_invalid_pagination_link" ? "GitHub 返回了格式无效或不安全的分页链接。"
+      : error?.message === "github_invalid_activity_response" ? "GitHub 历史提交响应格式无效。"
+        : error?.message === "github_repository_pagination_limit_reached" ? "GitHub 授权仓库清单超过 100 页读取上限。"
+          : error?.message === "github_installation_pagination_limit_reached" ? "GitHub App 安装清单超过 100 页读取上限。"
+            : error?.name === "TimeoutError" || error?.name === "AbortError" ? "GitHub API 请求超时。请重试。"
+              : error?.name === "TypeError" ? "GitHub API 网络请求失败。请检查 Worker 到 GitHub 的连接后重试。"
+                : "GitHub 仓库读取失败，请稍后重试。");
   return {
     fullName,
     code: error?.code || "github_unavailable",
-    ...(httpStatus ? { httpStatus, operation: error?.upstreamOperation || "GitHub API", upstreamMessage } : {}),
+    ...(httpStatus ? {
+      httpStatus,
+      operation: error?.upstreamOperation || "GitHub API",
+      upstreamMessage,
+      ...(error?.retryAfterSeconds !== null && error?.retryAfterSeconds !== undefined ? { retryAfterSeconds: error.retryAfterSeconds } : {}),
+      ...(error?.rateLimitResetAt ? { rateLimitResetAt: error.rateLimitResetAt } : {}),
+    } : {}),
     message: httpStatus
-      ? `${error?.upstreamOperation || "GitHub API"} HTTP ${httpStatus}: ${upstreamMessage}`
-      : "公开 GitHub 仓库读取失败，请稍后重试。",
+      ? error?.publicMessage
+        ? `${sanitizeGitHubMessage(error.publicMessage)}${rateLimitNote}`
+        : `${error?.upstreamOperation || "GitHub API"} HTTP ${httpStatus}: ${upstreamMessage}${rateLimitNote}`
+      : `${sanitizeGitHubMessage(knownMessage)}${rateLimitNote}`,
   };
 }
 
@@ -355,7 +437,7 @@ async function publicGitHubRoute(request, env) {
   return jsonResponse(request, env, { snapshots, errors });
 }
 
-const MAX_ACTIVITY_PAGES = 10;
+const MAX_ACTIVITY_PAGES = 100;
 const MAX_ACTIVITY_RANGE_DAYS = 366;
 
 function activityDateKey(value) {
@@ -377,12 +459,13 @@ function activityDateBounds(startDate, endDate) {
   return { since: start.toISOString(), until: end.toISOString() };
 }
 
-async function activityGitHubJson(path, token, operation, { allowEmpty = false, allowAnonymousFallback = false } = {}) {
+async function activityGitHubJson(path, token, operation, { allowEmpty = false, allowAnonymousFallback = false, withPagination = false } = {}) {
   let response = await githubApi(path, token);
   if (!response.ok && token && ([401, 404].includes(response.status) || (allowAnonymousFallback && response.status === 403))) response = await githubApi(path, null);
-  if (allowEmpty && response.status === 409) return [];
+  if (allowEmpty && response.status === 409) return withPagination ? { rows: [], nextPath: "" } : [];
   if (!response.ok) throw await githubUpstreamFailure(response, operation);
-  return response.json();
+  const rows = await response.json();
+  return withPagination ? { rows, nextPath: githubNextPagePath(response) } : rows;
 }
 
 async function readRepositoryActivity(fullName, authorized, startDate, endDate, requirePublic = false) {
@@ -403,19 +486,23 @@ async function readRepositoryActivity(fullName, authorized, startDate, endDate, 
   }
 
   const { since, until } = activityDateBounds(startDate, endDate);
+  const branch = typeof repo?.default_branch === "string" ? repo.default_branch : "";
   const seen = new Set();
   const counts = new Map();
   let complete = false;
   let recordsValid = true;
-  let page = 1;
+  let pagesRead = 0;
+  let nextPath = `/repos/${encoded}/commits?per_page=100${branch ? `&sha=${encodeURIComponent(branch)}` : ""}&since=${encodeURIComponent(since)}&until=${encodeURIComponent(until)}&page=1`;
   let pageRows = [];
-  for (; page <= MAX_ACTIVITY_PAGES; page += 1) {
-    pageRows = await activityGitHubJson(
-      `/repos/${encoded}/commits?per_page=100&since=${encodeURIComponent(since)}&until=${encodeURIComponent(until)}&page=${page}`,
+  for (; pagesRead < MAX_ACTIVITY_PAGES;) {
+    pagesRead += 1;
+    const page = await activityGitHubJson(
+      nextPath,
       token,
       "GitHub historical activity read",
-      { allowEmpty: true, allowAnonymousFallback: requirePublic },
+      { allowEmpty: true, allowAnonymousFallback: requirePublic, withPagination: true },
     );
+    pageRows = page.rows;
     if (!Array.isArray(pageRows)) throw new Error("github_invalid_activity_response");
     for (const commit of pageRows) {
       const sha = typeof commit?.sha === "string" && /^[a-f0-9]{40}$/i.test(commit.sha) ? commit.sha.toLowerCase() : "";
@@ -430,18 +517,29 @@ async function readRepositoryActivity(fullName, authorized, startDate, endDate, 
       const date = activityDateKey(committedAt);
       if (date) counts.set(date, (counts.get(date) || 0) + 1);
     }
-    if (pageRows.length < 100) {
+    const nextPage = page.nextPath || (pageRows.length === 100
+      ? `/repos/${encoded}/commits?per_page=100${branch ? `&sha=${encodeURIComponent(branch)}` : ""}&since=${encodeURIComponent(since)}&until=${encodeURIComponent(until)}&page=${pagesRead + 1}`
+      : "");
+    if (!nextPage) {
       complete = true;
       break;
     }
+    nextPath = nextPage;
   }
 
   const dailyCounts = [...counts.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([date, count]) => ({ date, count }));
   const truncated = !complete || !recordsValid;
+  const incompleteReason = !recordsValid
+    ? "GitHub 返回了无效 Commit SHA 或提交时间；已标记为不完整。"
+    : !complete
+      ? `近 ${MAX_ACTIVITY_PAGES} 页后仍有 GitHub 分页结果；请缩短日期范围后重试。`
+      : "";
   return {
     fullName: repo.full_name,
     complete: complete && recordsValid,
     truncated,
+    pagesRead,
+    ...(incompleteReason ? { incompleteReason } : {}),
     commitsCount: [...counts.values()].reduce((sum, count) => sum + count, 0),
     dailyCounts,
   };
@@ -472,9 +570,13 @@ async function githubActivityRoute(request, env) {
   }
 
   let authorized = new Map();
+  let authorizationLookupError = null;
   if (githubConfigured(env)) {
     try { authorized = await listAppAuthorizedRepositories(env, { includeTokens: true }); }
-    catch { authorized = new Map(); }
+    catch (error) {
+      authorizationLookupError = error;
+      if (error?.partialRepositories instanceof Map) authorized = error.partialRepositories;
+    }
   }
 
   const repositories = [];
@@ -484,8 +586,20 @@ async function githubActivityRoute(request, env) {
     while (nextIndex < requested.length) {
       const fullName = requested[nextIndex++];
       try {
-        repositories.push(await readRepositoryActivity(fullName, authorized, body.startDate, body.endDate));
+        repositories.push(await readRepositoryActivity(fullName, authorized, body.startDate, body.endDate, !authorized.has(fullName.toLowerCase())));
       } catch (error) {
+        if (authorizationLookupError && !authorized.has(fullName.toLowerCase())) {
+          const inventoryError = Number.isInteger(authorizationLookupError?.upstreamStatus)
+            ? `${authorizationLookupError.upstreamOperation} HTTP ${authorizationLookupError.upstreamStatus}: ${sanitizeGitHubMessage(authorizationLookupError.upstreamMessage)}`
+            : sanitizeGitHubMessage(authorizationLookupError?.publicMessage || "GitHub App 仓库授权清单读取失败。");
+          error.publicMessage = `${error?.upstreamOperation || "GitHub activity repository read"} 失败；GitHub App 授权清单也读取失败：${inventoryError}`;
+          if (authorizationLookupError?.rateLimited) {
+            error.code = "github_rate_limited";
+            error.rateLimited = true;
+            error.retryAfterSeconds = authorizationLookupError.retryAfterSeconds;
+            error.rateLimitResetAt = authorizationLookupError.rateLimitResetAt;
+          }
+        }
         errors.push(publicRepositoryError(fullName, error));
       }
     }
@@ -666,7 +780,7 @@ async function githubRoute(request, env, url) {
     if (request.method === "GET" && url.pathname === "/api/github/repositories") {
       const repositories = await listAppAuthorizedRepositories(env);
       return jsonResponse(request, env, {
-        repositories: [...repositories.values()].slice(0, 100).map(({ repo }) => ({
+        repositories: [...repositories.values()].map(({ repo }) => ({
           fullName: repo.full_name,
           name: repo.name,
           owner: repo.owner?.login,

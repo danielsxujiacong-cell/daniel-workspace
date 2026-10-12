@@ -144,6 +144,18 @@ export function buildHomeActivity({
     const result = resultsByRepo.get(name);
     return !result || result.complete !== true || result.truncated === true || errorsByRepo.has(name);
   });
+  const githubIncompleteDetails = githubIncompleteNames.map((fullName) => {
+    const result = resultsByRepo.get(fullName);
+    const error = errorsByRepo.get(fullName);
+    return {
+      fullName,
+      reason: typeof error?.message === "string" && error.message.trim()
+        ? error.message.trim()
+        : typeof result?.incompleteReason === "string" && result.incompleteReason.trim()
+          ? result.incompleteReason.trim()
+          : "GitHub Worker 未返回该仓库的完整结果。",
+    };
+  });
 
   for (const [fullName, result] of resultsByRepo) {
     const linkedProjects = repoProjects.get(fullName);
@@ -201,6 +213,7 @@ export function buildHomeActivity({
         return result?.complete === true && result?.truncated !== true && !errorsByRepo.has(name);
       }).length,
       githubIncompleteNames,
+      githubIncompleteDetails,
       githubErrors: [...errorsByRepo.values()],
       githubComplete,
       workLogsStatus,

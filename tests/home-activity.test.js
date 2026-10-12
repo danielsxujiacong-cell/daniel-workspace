@@ -80,7 +80,7 @@ test("unreadable GitHub history marks empty dates as incomplete instead of zero 
     projects: [{ id: "p1", name: "项目一" }],
     projectRepositories: [{ fullName: "acme/app", projectId: "p1", projectName: "项目一" }],
     githubResults: [],
-    githubErrors: [{ fullName: "acme/app", code: "github_unavailable" }],
+    githubErrors: [{ fullName: "acme/app", code: "github_rate_limited", message: "GitHub 历史读取 HTTP 403：API rate limit exceeded" }],
     githubStatus: "ready",
     workLogs: [],
     workLogsStatus: "ready",
@@ -88,5 +88,28 @@ test("unreadable GitHub history marks empty dates as incomplete instead of zero 
 
   assert.equal(model.coverage.complete, false);
   assert.equal(model.days.every((day) => day.partial), true);
+  assert.deepEqual(model.coverage.githubIncompleteDetails, [{
+    fullName: "acme/app",
+    reason: "GitHub 历史读取 HTTP 403：API rate limit exceeded",
+  }]);
   assert.deepEqual(model.totals, { githubCommits: 0, workLogs: 0, activityRecords: 0, activeDays: 0 });
+});
+
+test("truncated GitHub history identifies the affected repository and the pagination reason", () => {
+  const model = buildHomeActivity({
+    startDate: "2026-10-10",
+    endDate: "2026-10-11",
+    projects: [{ id: "p1", name: "项目一" }],
+    projectRepositories: [{ fullName: "acme/app", projectId: "p1", projectName: "项目一" }],
+    githubResults: [{
+      fullName: "acme/app", complete: false, truncated: true,
+      incompleteReason: "近 100 页后仍有 GitHub 分页结果。", commitsCount: 1,
+      dailyCounts: [{ date: "2026-10-10", count: 1 }],
+    }],
+    workLogs: [],
+  });
+
+  assert.deepEqual(model.coverage.githubIncompleteDetails, [{
+    fullName: "acme/app", reason: "近 100 页后仍有 GitHub 分页结果。",
+  }]);
 });

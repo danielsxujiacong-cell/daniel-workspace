@@ -31,7 +31,7 @@ const {
   saveData,
   saveLocalScanBaseline,
   saveLocalScanCache,
-} = publicSnapshotMode ? {} : await import("./store.js");
+} = publicSnapshotMode ? {} : await import("./store.js?v=3.8-d");
 const { buildAssistantContext } = publicSnapshotMode ? {} : await import("./ai/context.js");
 const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = publicSnapshotMode ? {} : await import("./ai/service.js?v=3.4.2");
 const { buildProjectNextStepContext, buildProjectNextStepPrompt, parseProjectNextStepResponse, verifiedProjectGitHubCommit } = publicSnapshotMode ? {} : await import("./ai/project-next-step.js?v=3.3.2");
@@ -43,10 +43,10 @@ const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = aw
 const { fetchPublicGitHubRepositories, fetchPublicGitHubRepository, GITHUB_CACHE_TTL_MS, isGitHubSnapshotFresh, parsePublicGitHubRepository } = publicSnapshotMode
   ? await import("./github/public-api.js?v=3.5-b.4")
   : await import("./github/public-api.js?v=3.5-b.4");
-const { fetchGitHubActivity } = publicSnapshotMode ? {} : await import("./github/activity.js?v=3.8");
+const { fetchGitHubActivity } = publicSnapshotMode ? {} : await import("./github/activity.js?v=3.8-d");
 const { deployedWebsiteUrl, humanizeProjectCommit, projectDescriptionAfterEdit, projectDescriptionForEdit, projectIntroduction, projectShowcase } = await import("./project-story.js?v=3.7-d");
 const { buildCloudDashboardModel, buildLocalDashboardModel, buildRecentProjectUpdates, chooseRecentCommit, compareLocalProjects, homeProjectField, projectTaskProgress, taskPriorityLabel } = await import("./dashboard.js?v=3.8");
-const { buildHomeActivity, projectStageBreakdown, projectStatusBreakdown, resolveActivityRange, shiftDateKey } = await import("./home-activity.js?v=3.8");
+const { buildHomeActivity, projectStageBreakdown, projectStatusBreakdown, resolveActivityRange, shiftDateKey } = await import("./home-activity.js?v=3.8-d");
 const { renderDashboardLayout } = await import("./dashboard-layout.js?v=3.8-a");
 const {
   countPinnedProjects,
@@ -456,7 +456,14 @@ async function loadHomeActivity({ force = false } = {}) {
 
   const githubReady = githubResult.status === "fulfilled";
   const workLogsReady = workLogsResult.status === "fulfilled";
-  const githubData = githubReady ? githubResult.value : { repositories: [], errors: [] };
+  const githubData = githubReady ? githubResult.value : {
+    repositories: [],
+    errors: repositories.map((fullName) => ({
+      fullName,
+      code: "github_request_failed",
+      message: githubResult.reason?.message || "GitHub Worker 请求失败；请重试。",
+    })),
+  };
   if (githubReady && repositories.length && !cachedGitHub) {
     saveGitHubActivityCache(workspaceAuth.userId, cacheKey, githubData);
   }
@@ -1409,23 +1416,20 @@ function renderActivityStatus(activity, dataAvailable) {
     ? `Workspace 工作记录 ${activity.model.totals.workLogs} 条`
     : "Workspace 工作记录读取失败，未按 0 计入";
   const warnings = [];
-  let affectedProjects = [];
+  let affectedDetails = [];
   if (!coverage.githubRequested) {
     warnings.push("未关联 GitHub 仓库，无法统计提交；此来源未按零计入。");
   } else if (!coverage.githubComplete) {
-    const namesByRepo = new Map();
-    for (const project of activityProjectRepositories(db.projects)) {
-      const key = project.fullName.toLowerCase();
-      if (!namesByRepo.has(key)) namesByRepo.set(key, []);
-      namesByRepo.get(key).push(project.projectName);
-    }
-    affectedProjects = [...new Set(coverage.githubIncompleteNames.flatMap((name) => namesByRepo.get(name.toLowerCase()) || [name]))];
+    affectedDetails = coverage.githubIncompleteDetails || coverage.githubIncompleteNames.map((fullName) => ({
+      fullName,
+      reason: "GitHub Worker 未返回该仓库的完整结果。",
+    }));
     const affectedCount = coverage.githubRequested - coverage.githubCompleteCount;
     warnings.push(`GitHub 历史不完整：${affectedCount} 个仓库未完整读取；缺失日期不计为零。`);
   }
   if (!coverage.workLogsComplete) warnings.push("工作记录读取未完成；缺失日期不计为零。");
-  const affectedList = affectedProjects.length
-    ? `<details class="dashboard-activity-gaps"><summary>查看受影响项目</summary><span>${esc(affectedProjects.join("、"))}</span></details>`
+  const affectedList = affectedDetails.length
+    ? `<details class="dashboard-activity-gaps"><summary>查看 ${affectedDetails.length} 个受影响仓库及原因</summary><ul>${affectedDetails.map(({ fullName, reason }) => `<li><strong>${esc(fullName)}</strong><span>${esc(reason)}</span></li>`).join("")}</ul></details>`
     : "";
   return `<div class="dashboard-activity-status ${warnings.length ? "warning" : ""}" role="status"><span>${esc(`${githubText} · ${workLogText}`)}</span>${warnings.length ? `<span>${esc(warnings.join(" "))}</span>` : ""}${affectedList}</div>`;
 }

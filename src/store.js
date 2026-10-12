@@ -59,13 +59,22 @@ export function saveCloudCache(userId, data, baseline, lastSyncedAt = "", projec
   }
 }
 
-export function loadGitHubActivityCache(userId, cacheKey, now = Date.now(), ttlMs = 60 * 60 * 1000) {
+function completeGitHubActivityData(data, cacheKey = "") {
+  if (!Array.isArray(data?.repositories) || !Array.isArray(data?.errors) || data.errors.length) return false;
+  const results = data.repositories;
+  if (results.some((repo) => repo?.complete !== true || repo?.truncated === true)) return false;
+  const expected = cacheKey.split("|").slice(2).join("|").split(",").filter(Boolean).map((name) => name.toLowerCase());
+  const returned = new Set(results.map((repo) => typeof repo?.fullName === "string" ? repo.fullName.toLowerCase() : ""));
+  return expected.every((name) => returned.has(name)) && results.length === new Set(expected).size;
+}
+
+export function loadGitHubActivityCache(userId, cacheKey, now = Date.now(), ttlMs = 15 * 60 * 1000) {
   try {
     const cached = JSON.parse(localStorage.getItem(GITHUB_ACTIVITY_CACHE_KEY) || "null");
     if (cached?.version !== 1 || cached.userId !== userId || !cached.entries || typeof cached.entries !== "object") return null;
     const entry = cached.entries[cacheKey];
     const fetchedAt = new Date(entry?.fetchedAt || "").getTime();
-    if (!entry?.data || !Array.isArray(entry.data.repositories) || !Array.isArray(entry.data.errors)
+    if (!entry?.data || !completeGitHubActivityData(entry.data, cacheKey)
       || !Number.isFinite(fetchedAt) || fetchedAt > now || now - fetchedAt >= ttlMs) return null;
     return { ...entry.data, fetchedAt: entry.fetchedAt };
   } catch {
@@ -74,6 +83,7 @@ export function loadGitHubActivityCache(userId, cacheKey, now = Date.now(), ttlM
 }
 
 export function saveGitHubActivityCache(userId, cacheKey, data, fetchedAt = new Date().toISOString()) {
+  if (!completeGitHubActivityData(data, cacheKey)) return false;
   try {
     const existing = JSON.parse(localStorage.getItem(GITHUB_ACTIVITY_CACHE_KEY) || "null");
     const entries = existing?.version === 1 && existing.userId === userId && existing.entries && typeof existing.entries === "object"
