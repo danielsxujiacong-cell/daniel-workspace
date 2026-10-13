@@ -87,6 +87,7 @@ function createDay(date) {
     githubCommits: 0,
     workLogs: 0,
     githubProjects: new Set(),
+    githubProjectCounts: new Map(),
     workLogProjects: new Map(),
   };
 }
@@ -134,6 +135,12 @@ export function buildHomeActivity({
   }));
 
   const projectList = Array.isArray(projects) ? projects.filter((project) => project?.id && project?.name) : [];
+  const projectActivity = new Map(projectList.map((project) => [String(project.id), {
+    projectId: String(project.id),
+    projectName: String(project.name),
+    githubCommits: 0,
+    workLogs: 0,
+  }]));
   const linkedProjectIds = new Set((Array.isArray(projectRepositories) ? projectRepositories : [])
     .filter((entry) => entry?.projectId)
     .map((entry) => String(entry.projectId)));
@@ -195,7 +202,29 @@ export function buildHomeActivity({
       const day = byDate.get(date);
       if (!day || !Number.isSafeInteger(count) || count <= 0) continue;
       day.githubCommits += count;
-      for (const project of linkedProjects.values()) day.githubProjects.add(project);
+      for (const [projectId, projectName] of linkedProjects.entries()) {
+        day.githubProjects.add(projectName);
+        day.githubProjectCounts.set(projectName, (day.githubProjectCounts.get(projectName) || 0) + count);
+        const item = projectActivity.get(projectId);
+        if (item) item.githubCommits += count;
+      }
+    }
+  }
+
+  const hourlyResultValid = (name) => {
+    const counts = resultsByRepo.get(name)?.hourlyCounts;
+    return Array.isArray(counts) && counts.length === 24
+      && new Set(counts.map((item) => item?.hour)).size === 24
+      && counts.every((item) => Number.isInteger(item?.hour) && item.hour >= 0 && item.hour < 24
+        && Number.isSafeInteger(item?.count) && item.count >= 0);
+  };
+  const hourlyNames = [...repoProjects.keys()].filter((name) => resultsByRepo.get(name)?.complete === true && hourlyResultValid(name));
+  const hourlyAvailable = hourlyNames.length > 0;
+  const hourlyComplete = hourlyAvailable && githubComplete && hourlyNames.length === repoProjects.size;
+  const hourlyCounts = Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0 }));
+  if (hourlyAvailable) {
+    for (const name of hourlyNames) {
+      for (const item of resultsByRepo.get(name).hourlyCounts) hourlyCounts[item.hour].count += item.count;
     }
   }
 
@@ -218,6 +247,8 @@ export function buildHomeActivity({
     day.workLogs += 1;
     const projectName = projectNames.get(projectId);
     day.workLogProjects.set(projectName, (day.workLogProjects.get(projectName) || 0) + 1);
+    const project = projectActivity.get(projectId);
+    if (project) project.workLogs += 1;
   }
 
   const workLogsCompleteResult = workLogsStatus === "ready" && workLogsComplete === true;
@@ -230,9 +261,17 @@ export function buildHomeActivity({
     days: days.map((day) => ({
       ...day,
       githubProjects: [...day.githubProjects].sort((a, b) => a.localeCompare(b, "zh-CN")),
+      githubProjectCounts: [...day.githubProjectCounts.entries()].map(([name, count]) => ({ name, count })),
       workLogProjects: [...day.workLogProjects.entries()].map(([name, count]) => ({ name, count })),
+      githubPartial: !githubComplete,
       partial: !githubComplete || !workLogsCompleteResult,
     })),
+    projectActivity: [...projectActivity.values()]
+      .filter((item) => item.githubCommits > 0 || item.workLogs > 0)
+      .sort((left, right) => (right.githubCommits + right.workLogs) - (left.githubCommits + left.workLogs)
+        || left.projectName.localeCompare(right.projectName, "zh-CN")),
+    hourlyCounts,
+    hourlyAvailable,
     totals: { githubCommits: githubCount, workLogs: workLogCount, activityRecords: githubCount + workLogCount, activeDays },
     coverage: {
       githubStatus: repoProjects.size ? githubStatus : "unlinked",
@@ -247,6 +286,8 @@ export function buildHomeActivity({
       githubIncompleteDetails,
       githubErrors: [...errorsByRepo.values()],
       githubComplete,
+      hourlyAvailable,
+      hourlyComplete,
       workLogsStatus,
       workLogsComplete: workLogsCompleteResult,
       complete: githubComplete && workLogsCompleteResult,

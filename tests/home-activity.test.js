@@ -73,6 +73,49 @@ test("activity keeps commit and work-log counts separate and deduplicates repeat
   assert.equal(model.coverage.complete, true);
 });
 
+test("activity ranking and hour distribution use real repository aggregates", () => {
+  const hours = (activeHour, count) => Array.from({ length: 24 }, (_, hour) => ({ hour, count: hour === activeHour ? count : 0 }));
+  const model = buildHomeActivity({
+    startDate: "2026-10-10",
+    endDate: "2026-10-12",
+    projects: [{ id: "p1", name: "项目一" }, { id: "p2", name: "项目二" }],
+    projectRepositories: [
+      { fullName: "acme/one", projectId: "p1", projectName: "项目一" },
+      { fullName: "acme/two", projectId: "p2", projectName: "项目二" },
+    ],
+    githubResults: [
+      { fullName: "acme/one", complete: true, dailyCounts: [{ date: "2026-10-11", count: 3 }], hourlyCounts: hours(9, 3) },
+      { fullName: "acme/two", complete: true, dailyCounts: [{ date: "2026-10-12", count: 2 }], hourlyCounts: hours(18, 2) },
+    ],
+    workLogs: [{ id: "log-1", projectId: "p1", workDate: "2026-10-12" }],
+    githubStatus: "ready",
+    workLogsStatus: "ready",
+  });
+
+  assert.deepEqual(model.projectActivity, [
+    { projectId: "p1", projectName: "项目一", githubCommits: 3, workLogs: 1 },
+    { projectId: "p2", projectName: "项目二", githubCommits: 2, workLogs: 0 },
+  ]);
+  assert.equal(model.hourlyAvailable, true);
+  assert.equal(model.coverage.hourlyComplete, true);
+  assert.equal(model.hourlyCounts[9].count, 3);
+  assert.equal(model.hourlyCounts[18].count, 2);
+  assert.equal(model.hourlyCounts.reduce((sum, item) => sum + item.count, 0), 5);
+});
+
+test("hour distribution stays hidden when no complete repository hours are available", () => {
+  const model = buildHomeActivity({
+    startDate: "2026-10-10",
+    endDate: "2026-10-10",
+    projects: [{ id: "p1", name: "项目一" }],
+    projectRepositories: [{ fullName: "acme/one", projectId: "p1", projectName: "项目一" }],
+    githubResults: [{ fullName: "acme/one", complete: true, dailyCounts: [{ date: "2026-10-10", count: 1 }] }],
+    githubStatus: "ready",
+  });
+  assert.equal(model.hourlyAvailable, false);
+  assert.equal(model.coverage.hourlyComplete, false);
+});
+
 test("unreadable GitHub history marks empty dates as incomplete instead of zero activity", () => {
   const model = buildHomeActivity({
     startDate: "2026-10-10",

@@ -568,6 +568,7 @@ async function readRepositoryActivity(fullName, authorized, startDate, endDate, 
   const branches = await listActivityBranches(encoded, token, requirePublic);
   const seen = new Set();
   const counts = new Map();
+  const hourCounts = Array(24).fill(0);
   let recordsValid = true;
   let pagesRead = 0;
   for (const branch of branches) {
@@ -594,7 +595,11 @@ async function readRepositoryActivity(fullName, authorized, startDate, endDate, 
         if (timestamp < Date.parse(since) || timestamp > Date.parse(until) || seen.has(sha)) continue;
         seen.add(sha);
         const date = activityDateKey(committedAt);
-        if (date) counts.set(date, (counts.get(date) || 0) + 1);
+        if (date) {
+          counts.set(date, (counts.get(date) || 0) + 1);
+          const shanghaiHour = new Date(timestamp + 8 * 60 * 60 * 1000).getUTCHours();
+          hourCounts[shanghaiHour] += 1;
+        }
       }
       nextPath = page.nextPath || (page.rows.length === 100
         ? `/repos/${encoded}/commits?per_page=100&sha=${encodeURIComponent(branch)}&since=${encodeURIComponent(since)}&until=${encodeURIComponent(until)}&page=${branchPagesRead + 1}`
@@ -622,6 +627,7 @@ async function readRepositoryActivity(fullName, authorized, startDate, endDate, 
     ...(incompleteReason ? { incompleteReason } : {}),
     commitsCount: [...counts.values()].reduce((sum, count) => sum + count, 0),
     dailyCounts,
+    hourlyCounts: hourCounts.map((count, hour) => ({ hour, count })),
   };
 }
 
@@ -705,6 +711,12 @@ function hasExactKeys(value, keys) {
     && Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key)));
 }
 
+function hasAllowedKeys(value, required, optional = []) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value)
+    && required.every((key) => Object.hasOwn(value, key))
+    && Object.keys(value).every((key) => required.includes(key) || optional.includes(key)));
+}
+
 function validSnapshotDate(value) {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const date = new Date(`${value}T00:00:00.000Z`);
@@ -750,8 +762,9 @@ function validTextList(value, maximumItems = 100, maximumLength = 2_000) {
 
 function validPublicSnapshot(snapshot) {
   const rootKeys = ["schemaVersion", "generatedAt", "activity", "projects", "tasks", "workLogs", "knowledge", "decisions", "summaries", "publishedAt"];
-  if (!hasExactKeys(snapshot, rootKeys) || snapshot.schemaVersion !== 1 || !validSnapshotDate(String(snapshot.generatedAt || "").slice(0, 10))) return false;
-  if (!hasExactKeys(snapshot.activity, ["startDate", "endDate", "githubDailyCounts", "githubRepositoryCount", "githubComplete", "workLogsComplete"])) return false;
+  if (!hasAllowedKeys(snapshot, rootKeys, ["tokenUsage"]) || snapshot.schemaVersion !== 1 || !validSnapshotDate(String(snapshot.generatedAt || "").slice(0, 10))) return false;
+  const activityKeys = ["startDate", "endDate", "githubDailyCounts", "githubRepositoryCount", "githubComplete", "workLogsComplete"];
+  if (!hasAllowedKeys(snapshot.activity, activityKeys, ["githubProjectDailyCounts", "githubHourlyCounts", "githubHourlyComplete"])) return false;
   if (!validSnapshotDate(snapshot.activity.startDate) || !validSnapshotDate(snapshot.activity.endDate) || snapshot.activity.startDate > snapshot.activity.endDate) return false;
   const activityDays = (Date.parse(`${snapshot.activity.endDate}T00:00:00.000Z`) - Date.parse(`${snapshot.activity.startDate}T00:00:00.000Z`)) / 86_400_000 + 1;
   if (activityDays > 366 || !Array.isArray(snapshot.activity.githubDailyCounts) || snapshot.activity.githubDailyCounts.length > 366
@@ -763,6 +776,26 @@ function validPublicSnapshot(snapshot) {
       || activityDates.has(item.date) || !Number.isSafeInteger(item.count) || item.count < 0 || item.count > 1_000_000) return false;
     activityDates.add(item.date);
   }
+  if (Object.hasOwn(snapshot.activity, "githubProjectDailyCounts")) {
+    if (!Array.isArray(snapshot.activity.githubProjectDailyCounts) || snapshot.activity.githubProjectDailyCounts.length > 100_000) return false;
+    for (const item of snapshot.activity.githubProjectDailyCounts) {
+      if (!hasExactKeys(item, ["projectId", "date", "count"]) || !/^project-\d{3}$/.test(item.projectId)
+        || !validSnapshotDate(item.date) || item.date < snapshot.activity.startDate || item.date > snapshot.activity.endDate
+        || !Number.isSafeInteger(item.count) || item.count < 0 || item.count > 1_000_000) return false;
+    }
+  }
+  if (Object.hasOwn(snapshot.activity, "githubHourlyCounts")) {
+    if (!Array.isArray(snapshot.activity.githubHourlyCounts) || (snapshot.activity.githubHourlyCounts.length !== 0 && snapshot.activity.githubHourlyCounts.length !== 24)) return false;
+    const hours = new Set();
+    for (const item of snapshot.activity.githubHourlyCounts) {
+      if (!hasExactKeys(item, ["hour", "count"]) || !Number.isInteger(item.hour) || item.hour < 0 || item.hour > 23
+        || hours.has(item.hour) || !Number.isSafeInteger(item.count) || item.count < 0 || item.count > 1_000_000) return false;
+      hours.add(item.hour);
+    }
+  }
+  if (Object.hasOwn(snapshot.activity, "githubHourlyComplete") && (typeof snapshot.activity.githubHourlyComplete !== "boolean"
+    || snapshot.activity.githubHourlyComplete && snapshot.activity.githubHourlyCounts?.length !== 24)) return false;
+  if (snapshot.activity.githubHourlyCounts?.length === 24 && snapshot.activity.githubHourlyComplete !== true) return false;
   if (!Array.isArray(snapshot.projects) || snapshot.projects.length > 200 || !Array.isArray(snapshot.tasks) || snapshot.tasks.length > 2_000
     || !Array.isArray(snapshot.workLogs) || snapshot.workLogs.length > 5_000 || !Array.isArray(snapshot.knowledge) || snapshot.knowledge.length > 2_000
     || !Array.isArray(snapshot.decisions) || snapshot.decisions.length > 2_000) return false;
@@ -775,6 +808,7 @@ function validPublicSnapshot(snapshot) {
       || !validSnapshotUrl(item.url, "website") || !validSnapshotUrl(item.github, "github") || typeof item.isPinned !== "boolean") return false;
     projectIds.add(item.id);
   }
+  for (const item of snapshot.activity.githubProjectDailyCounts || []) if (!projectIds.has(item.projectId)) return false;
   const seen = { task: new Set(), workLog: new Set(), knowledge: new Set(), decision: new Set() };
   for (const item of snapshot.tasks) {
     if (!hasExactKeys(item, ["id", "title", "description", "projectId", "status", "priority", "due"])
@@ -807,6 +841,24 @@ function validPublicSnapshot(snapshot) {
     seen.decision.add(item.id);
   }
   if (!hasExactKeys(snapshot.summaries, ["dailyBrief", "weeklySummary"]) || !validSnapshotText(snapshot.summaries.dailyBrief, 20_000) || !validSnapshotText(snapshot.summaries.weeklySummary, 20_000)) return false;
+  if (Object.hasOwn(snapshot, "tokenUsage")) {
+    const tokenUsage = snapshot.tokenUsage;
+    const tokenKeys = ["coverageStartDate", "coverageEndDate", "generatedAt", "inputAvailable", "outputAvailable", "cachedInputAvailable", "days"];
+    if (!hasExactKeys(tokenUsage, tokenKeys) || !validSnapshotDate(tokenUsage.coverageStartDate) || !validSnapshotDate(tokenUsage.coverageEndDate)
+      || tokenUsage.coverageStartDate > tokenUsage.coverageEndDate || !Number.isFinite(Date.parse(tokenUsage.generatedAt))
+      || ![tokenUsage.inputAvailable, tokenUsage.outputAvailable, tokenUsage.cachedInputAvailable].every((value) => typeof value === "boolean")
+      || !Array.isArray(tokenUsage.days) || tokenUsage.days.length > 366) return false;
+    const tokenDays = (Date.parse(`${tokenUsage.coverageEndDate}T00:00:00.000Z`) - Date.parse(`${tokenUsage.coverageStartDate}T00:00:00.000Z`)) / 86_400_000 + 1;
+    if (tokenDays > 366) return false;
+    const seenTokenDates = new Set();
+    for (const item of tokenUsage.days) {
+      if (!hasExactKeys(item, ["date", "inputTokens", "outputTokens", "cachedInputTokens"]) || !validSnapshotDate(item.date)
+        || item.date < tokenUsage.coverageStartDate || item.date > tokenUsage.coverageEndDate || seenTokenDates.has(item.date)
+        || ![["inputTokens", tokenUsage.inputAvailable], ["outputTokens", tokenUsage.outputAvailable], ["cachedInputTokens", tokenUsage.cachedInputAvailable]].every(([key, available]) =>
+          available ? Number.isSafeInteger(item[key]) && item[key] >= 0 : item[key] === null)) return false;
+      seenTokenDates.add(item.date);
+    }
+  }
   return typeof snapshot.publishedAt === "string" && snapshot.publishedAt.length <= 40;
 }
 

@@ -1,16 +1,16 @@
 # Daniel Workspace
 
-Daniel Workspace V3.8-C 使用统一的完整工作台界面和两种数据模式。所有者登录后可在私人工作台一键发布经过白名单筛选的真实只读快照；访客无需登录即可浏览快照中的项目、图表、任务和工作记录。私人工作台继续实时同步，访客版只在所有者手动发布后更新。访客模式只读取独立 Cloudflare KV 快照，不读取私人表、浏览器工作区缓存、本机文件或私有仓库。
+Daniel Workspace V3.9 使用统一的 Dashboard 2.0 和两种数据模式。私人 Dashboard 显示真实 Supabase 项目数据、GitHub 活动和本机 Codex Token 汇总；访客只读取所有者手动发布到独立 Cloudflare KV 的安全快照。访客模式不读取私人表、浏览器工作区缓存、本机文件或私有仓库。
 
 ## Status
 
-- **Stage:** V3.8-C.2 adds one-click owner publication with automatic field allowlisting, sensitive-value filtering, completeness checks, and immediate visitor reads. Verification and handoff are recorded in [HANDOFF](docs/HANDOFF.md).
-- **Last updated:** 2026-10-12
+- **Stage:** V3.9 Dashboard 2.0 adds real-data heatmaps, rankings, hourly activity, and private local Token summaries. Verification and handoff are recorded in [HANDOFF](docs/HANDOFF.md).
+- **Last updated:** 2026-10-13
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
 ## Quick start
 
-先完成 [Supabase 登录配置](#v25-登录配置)。本地预览需要 Python 3 和 Git。Windows 登录后，任务计划程序会静默启动 Companion（`pythonw.exe`，任务名 `DanielWorkspaceLocalCompanion`）；它会同时提供静态页面和只读扫描 API。也可以手动运行：
+先完成 [Supabase 登录配置](#v25-登录配置)。本地预览需要 Python 3 和 Git。Windows 登录后，任务计划程序会静默启动 Companion（`pythonw.exe`，任务名 `DanielWorkspaceLocalCompanion`）；它会同时提供静态页面和 loopback 只读 API。也可以手动运行：
 
 ```powershell
 python local_companion.py
@@ -21,6 +21,15 @@ python local_companion.py
 手动控制 Companion：前台运行 `python local_companion.py` 时按 `Ctrl+C` 停止；开机任务启动的后台实例可在 PowerShell 执行 `Stop-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion"` 停止。取消后续登录自动启动，执行 `Unregister-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion" -Confirm:$false`。重新登录 Windows 会再次启动仍注册的任务。
 
 主题、本机 Companion 扫描缓存、GitHub 只读快照和云端离线副本保存在当前浏览器的 `localStorage`。云端业务资料以 Supabase 为准，可在已登录设备间共享；首次遇到旧版本机内容时会先询问是否迁移。旧 `daniel-workspace-v1` 数据不会因迁移或云端读取而被删除。
+
+## V3.9 Dashboard 2.0
+
+- Dashboard 保留四个 KPI、GitHub 与 Codex 双热力图、活动趋势、项目状态环图、项目活跃排行榜、重点项目和 AI 总结；移除项目阶段图。图表使用当前可信来源，缺失或不完整的历史保持未知，无法可靠汇总的图表会隐藏。桌面使用紧凑网格，390px 手机视口纵向排列并支持减少动态效果。
+- 活动范围默认近 30 天，支持近 7/30/90 天和自定义日期。GitHub 小时分布按北京时间统计已去重提交；项目排行榜只聚合真实提交与工作记录。
+- 私人模式通过 Companion 的 `/api/codex-usage` 只汇总本机 Codex 日志中的 Token 计数元数据，不把聊天正文上传、公开或保存进 Workspace 业务表。它按北京时间区分输入、输出与缓存 Token，对累计快照去重并计算增量；Companion 离线时使用账号本机上次可信汇总，并把覆盖外日期显示为未知。
+- 2026-10-13 本机日志核验覆盖 2026-08-19 至 2026-10-13，输入、输出和缓存字段均可用。该范围只描述这台设备的本地日志，不代表云端、其他设备或 Plus 额度。
+- 访客快照默认不含 Token 用量。只有登录用户勾选 Token 发布选项并主动发布时，快照才带上最多近 90 天的逐日汇总；不自动同步私人用量。
+- 不增加 Supabase 迁移或修改原始项目数据、登录授权、GitHub 权限或访客隔离机制。复杂数据状态收在 Dashboard 的「数据详情」内。
 
 ## V3.6 工作记录与 AI 总结
 
@@ -56,6 +65,8 @@ python local_companion.py
 - 仅调整 Home 展示、首页样式和静态资源缓存版本；不改数据库、数据同步、其他页面、访客权限或 AI 服务。
 
 ## V3.8 Project Control Dashboard
+
+> 历史版本说明；V3.9 Dashboard 2.0 以本页上方说明为准。
 
 - Home 按顺序展示 Supabase 项目/任务 KPI、近 30 天默认的 GitHub 风格活动热力图与每日趋势、当前项目状态占比、已保存阶段分布、最多五个置顶项目，以及默认折叠的 AI 总结。
 - GitHub 活动通过已认证的 Cloudflare Worker 分页读取 App 安装仓库清单、各仓库所有分支和分支 Commit 历史；客户端每次最多请求 4 个仓库，以控制 Worker 子请求量；刷新会优先重试同一页面会话中上次被限流的仓库，并保留其他仓库已读结果。提交按仓库和完整 SHA 去重，只返回每日计数。每个分支最多读取 100 页、每仓库最多读取 200 个分支；达到上限、限流、授权清单失败、分支读取失败或仓库 404 时显示仓库、操作和原因。App 范围外的 404 可能是未授权私有仓库、已删除仓库或名称不匹配，GitHub 不会披露更细原因。缺失数据不按零计算。工作记录图表读取全部云端项目对应日期范围内的记录 ID、项目 ID 和日期，不读取正文或证据链接；热力图和每日趋势复用同一份每日统计，来源分别标注。

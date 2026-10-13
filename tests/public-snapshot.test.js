@@ -117,12 +117,60 @@ test("snapshot draft automatically includes safe whitelisted data and redacts pr
 
   const snapshot = buildPublishableSnapshot(draft);
   assert.equal(validatePublicSnapshot(snapshot), true);
-  assert.deepEqual(snapshotDraftCounts(draft), { projects: 1, tasks: 1, workLogs: 1, knowledge: 0, decisions: 0, githubActivity: 1, summaries: 0 });
+  assert.equal(Object.hasOwn(snapshot, "tokenUsage"), false);
+  assert.deepEqual(snapshotDraftCounts(draft), { projects: 1, tasks: 1, workLogs: 1, knowledge: 0, decisions: 0, githubActivity: 1, summaries: 0, codexTokenDays: 0 });
   assert.equal(JSON.stringify(snapshot).includes("private-project-id"), false);
   assert.equal(JSON.stringify(snapshot).includes("private-task-id"), false);
   assert.equal(JSON.stringify(snapshot).includes("drive.google.com"), false);
   assert.equal(snapshot.workLogs[0].workDate, "2025-01-01", "older reviewed logs remain available in the full history");
   assert.equal(snapshot.activity.githubDailyCounts[0].count, 3);
+});
+
+test("hour aggregates and opted-in daily Token totals survive both public snapshot allowlists", async () => {
+  const draft = createPublicSnapshotDraft({
+    now: "2026-10-13T04:00:00.000Z",
+    activityRange: { startDate: "2026-10-10", endDate: "2026-10-12" },
+    data: { projects: [{ id: "p1", name: "Reviewed project", github: "https://github.com/acme/public-demo" }] },
+    publicRepositories: [{ repositoryName: "acme/public-demo", isPublic: true }],
+    githubActivity: {
+      repositories: [{
+        fullName: "acme/public-demo",
+        complete: true,
+        dailyCounts: [{ date: "2026-10-12", count: 2 }],
+        hourlyCounts: Array.from({ length: 24 }, (_, hour) => ({ hour, count: hour === 9 ? 2 : 0 })),
+      }],
+      complete: true,
+      workLogsComplete: true,
+    },
+    tokenUsage: {
+      complete: true,
+      coverageStartDate: "2026-10-10",
+      coverageEndDate: "2026-10-12",
+      generatedAt: "2026-10-13T04:00:00.000Z",
+      fieldAvailability: { inputTokens: true, outputTokens: true, cachedInputTokens: true },
+      days: [
+        { date: "2026-10-10", available: true, inputTokens: 30, outputTokens: 8, cachedInputTokens: 12 },
+        { date: "2026-10-11", available: false, inputTokens: null, outputTokens: null, cachedInputTokens: null },
+        { date: "2026-10-12", available: true, inputTokens: 40, outputTokens: 11, cachedInputTokens: 20 },
+      ],
+    },
+  });
+  const snapshot = buildPublishableSnapshot(draft);
+  assert.equal(validatePublicSnapshot(snapshot), true);
+  assert.equal(snapshot.activity.githubHourlyComplete, true);
+  assert.equal(snapshot.activity.githubHourlyCounts[9].count, 2);
+  assert.deepEqual(snapshot.tokenUsage.days.map(({ date }) => date), ["2026-10-10", "2026-10-12"]);
+  assert.equal(JSON.stringify(snapshot).includes("session-id"), false);
+  assert.equal(JSON.stringify(snapshot).includes("chat body"), false);
+  const incompleteHourlySnapshot = structuredClone(snapshot);
+  incompleteHourlySnapshot.activity.githubHourlyComplete = false;
+  assert.equal(validatePublicSnapshot(incompleteHourlySnapshot), false);
+
+  const stored = testEnv({ storedSnapshot: snapshot });
+  const response = await worker.fetch(request("/api/public/snapshot"), stored.env);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).tokenUsage.days.length, 2);
+  assert.equal(stored.writes.length, 0);
 });
 
 test("one safe snapshot draft includes all 26 projects and every available record by default", () => {
@@ -240,7 +288,7 @@ test("the visitor shell starts the shared app before snapshot fetch settles and 
   const gate = await (await import("node:fs/promises")).readFile(new URL("../src/auth/gate.js", import.meta.url), "utf8");
   const app = await (await import("node:fs/promises")).readFile(new URL("../src/app.js", import.meta.url), "utf8");
   const publicStart = gate.slice(gate.indexOf("async function startPublicDashboard"), gate.indexOf("function startPrivateEntry"));
-  assert.ok(publicStart.indexOf("await import(\"../app.js?v=3.8-n\")") < publicStart.indexOf("void snapshotPromise.then"));
+  assert.ok(publicStart.indexOf("await import(\"../app.js?v=3.9\")") < publicStart.indexOf("void snapshotPromise.then"));
   assert.doesNotMatch(publicStart, /await\s+snapshotPromise/);
   assert.match(publicStart, /void snapshotPromise\.then/);
   assert.match(app, /publicSnapshotMode \? \{\} : await import\("\.\/store\.js\?v=3\.8-l"\)/);
@@ -259,4 +307,8 @@ test("the private publication action generates, sanitizes, and posts in one clic
   assert.ok(publishFlow.indexOf("buildPublishableSnapshot(draft)") < publishFlow.indexOf("await publishPublicSnapshot(snapshot, workspaceAuth)"));
   assert.match(publishFlow, /数据读取不完整，本次未发布/);
   assert.match(publishFlow, /status: "published"/);
+  assert.match(publishFlow, /const includeCodexUsage = ui\.codexUsage\.approvePublic === true/);
+  assert.match(publishFlow, /if \(includeCodexUsage\)/);
+  assert.match(publishFlow, /approvedTokenUsage = publicTokenUsage\(trustedUsage, tokenRange\)/);
+  assert.match(app, /approvePublic: false/);
 });

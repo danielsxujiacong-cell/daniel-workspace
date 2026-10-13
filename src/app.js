@@ -15,7 +15,7 @@ const {
   publishPublicSnapshot,
   PUBLIC_SNAPSHOT_ACTIVITY_DAYS,
   snapshotDraftCounts,
-} = await import("./public-snapshot.js?v=3.8-n");
+} = await import("./public-snapshot.js?v=3.9");
 let hydratedPublicData = publicSnapshotMode ? hydratePublicSnapshot(publishedSnapshot) : null;
 
 const {
@@ -39,7 +39,8 @@ const { buildProjectNextStepContext, buildProjectNextStepPrompt, parseProjectNex
 const { buildDailyBriefContext, buildDailyBriefPrompt, getRecentWorkLogRange, parseDailyBriefResponse } = publicSnapshotMode ? {} : await import("./ai/daily-brief.js?v=3.6");
 const { buildWeeklySummaryContext, buildWeeklySummaryPrompt, getWeeklySummaryRange, parseWeeklySummaryResponse, shanghaiDateKey, weeklySummaryMarkdown } = publicSnapshotMode ? {} : await import("./ai/weekly-summary.js?v=3.6");
 const { fetchPrivateGitHubSnapshots, listPrivateGitHubRepositories } = publicSnapshotMode ? {} : await import("./github/private-api.js?v=3.5-b.4");
-const { localScanEndpointFor, shouldRenderDashboardGitHubActivity } = publicSnapshotMode ? { localScanEndpointFor: () => null, shouldRenderDashboardGitHubActivity: () => false } : await import("./local-companion.js?v=3.5-a.2");
+const { localScanEndpointFor, localCodexUsageEndpointFor, shouldRenderDashboardGitHubActivity } = publicSnapshotMode ? { localScanEndpointFor: () => null, localCodexUsageEndpointFor: () => null, shouldRenderDashboardGitHubActivity: () => false } : await import("./local-companion.js?v=3.9");
+const { codexUsageForRange, fetchCodexUsage, loadCodexUsageCache, mergeCodexUsageCache, publicTokenUsage, saveCodexUsageCache, formatTokenCount } = publicSnapshotMode ? {} : await import("./codex-usage.js?v=3.9");
 const { buildActionSuggestion, formatCodexTask, parseStructuredSuggestion } = await import("./suggestions.js");
 const { fetchPublicGitHubRepositories, fetchPublicGitHubRepository, GITHUB_CACHE_TTL_MS, isGitHubSnapshotFresh, parsePublicGitHubRepository } = publicSnapshotMode
   ? await import("./github/public-api.js?v=3.8-l")
@@ -48,7 +49,7 @@ const { fetchGitHubActivity, mergeGitHubActivityRetry, rateLimitedGitHubActivity
 const { mergePublicRepositoryVerification, missingCompleteRepositories, missingPublicRepositoryVerifications, reusablePublicRepositorySnapshot, snapshotGitHubActivityCacheKey, withSnapshotPreviewTimeout } = await import("./snapshot-preview-flow.js?v=3.8-l");
 const { deployedWebsiteUrl, humanizeProjectCommit, projectDescriptionAfterEdit, projectDescriptionForEdit, projectIntroduction, projectShowcase } = await import("./project-story.js?v=3.7-d");
 const { buildCloudDashboardModel, buildLocalDashboardModel, buildRecentProjectUpdates, chooseRecentCommit, compareLocalProjects, homeProjectField, projectTaskProgress, taskPriorityLabel } = await import("./dashboard.js?v=3.8");
-const { buildHomeActivity, projectStageBreakdown, projectStatusBreakdown, resolveActivityRange, shiftDateKey } = await import("./home-activity.js?v=3.8-e");
+const { buildHomeActivity, projectStatusBreakdown, resolveActivityRange, shiftDateKey } = await import("./home-activity.js?v=3.9");
 const { renderDashboardLayout } = await import("./dashboard-layout.js?v=3.8-a");
 const {
   countPinnedProjects,
@@ -87,11 +88,13 @@ let cloudInitializationRunning = false;
 let workspaceDataRevision = 0;
 let dashboardWorkLogsRequestId = 0;
 let homeActivityRequestId = 0;
+let codexUsageRequestId = 0;
 let snapshotPreviewRequestId = 0;
 const publicRepositoryVerificationCache = new Map();
 let migrationState = publicSnapshotMode ? null : loadCloudMigrationState(workspaceAuth.userId);
 let scanCache = publicSnapshotMode ? { inventory: null, baseline: null } : loadLocalScanCache();
 const localScanEndpoint = publicSnapshotMode ? null : localScanEndpointFor(window.location);
+const localCodexUsageEndpoint = publicSnapshotMode ? null : localCodexUsageEndpointFor(window.location);
 let workspaceActive = true;
 let activeLocalScanController = null;
 const ui = {
@@ -130,7 +133,9 @@ const ui = {
   activityCustomStartDate: "",
   activityCustomEndDate: "",
   selectedActivityDate: "",
+  selectedActivityHour: null,
   homeActivity: { key: "", status: "idle", model: null, range: null, githubStatus: "idle", workLogsStatus: "idle", error: "" },
+  codexUsage: { status: "idle", model: null, payload: null, requestKey: "", lastFetchedAt: "", error: "", approvePublic: false },
   projectWorkLogs: { projectId: null, status: "idle", items: [], error: "", editingId: "", saving: false, formOpen: false },
   projectNextStep: null,
   createdSuggestionKeys: [],
@@ -392,9 +397,58 @@ function currentHomeActivityRange() {
   });
 }
 
+async function loadCodexUsageRange(range = currentHomeActivityRange(), { force = false } = {}) {
+  if (publicSnapshotMode || !workspaceActive || ui.page !== "home" || !range?.valid) return;
+  const requestKey = `${range.startDate}|${range.endDate}`;
+  const cached = loadCodexUsageCache(workspaceAuth?.userId) || ui.codexUsage.payload;
+  const sameFreshRequest = ui.codexUsage.requestKey === requestKey
+    && ui.codexUsage.status === "ready"
+    && Date.now() - (Date.parse(ui.codexUsage.lastFetchedAt) || 0) < 5 * 60 * 1000;
+  ui.codexUsage = {
+    ...ui.codexUsage,
+    status: cached ? "loading" : "loading",
+    payload: cached || null,
+    model: cached ? codexUsageForRange(cached, range) : null,
+    requestKey,
+    error: "",
+  };
+  if (!force && sameFreshRequest) {
+    ui.codexUsage.status = "ready";
+    return;
+  }
+  const requestId = ++codexUsageRequestId;
+  try {
+    if (!localCodexUsageEndpoint) throw new Error("本机 Companion 不可用。");
+    const response = await fetchCodexUsage(localCodexUsageEndpoint, range);
+    if (!workspaceActive || requestId !== codexUsageRequestId) return;
+    const merged = mergeCodexUsageCache(cached, response) || response;
+    saveCodexUsageCache(workspaceAuth.userId, merged);
+    ui.codexUsage = {
+      ...ui.codexUsage,
+      status: "ready",
+      payload: merged,
+      model: codexUsageForRange(merged, range),
+      lastFetchedAt: response.generatedAt,
+      error: "",
+    };
+  } catch (error) {
+    if (!workspaceActive || requestId !== codexUsageRequestId) return;
+    ui.codexUsage = {
+      ...ui.codexUsage,
+      status: cached ? "stale" : "error",
+      payload: cached || null,
+      model: cached ? codexUsageForRange(cached, range) : null,
+      error: typeof error?.message === "string" ? error.message : "本机 Codex 用量暂不可读。",
+    };
+  }
+  render();
+}
+
 async function loadHomeActivity({ force = false } = {}) {
-  if (!workspaceActive || !cloudWorkspaceAvailable()) return;
+  if (!workspaceActive || ui.page !== "home") return;
   const range = currentHomeActivityRange();
+  void loadCodexUsageRange(range, { force });
+  if (!cloudWorkspaceAvailable()) return;
   if (!range.valid) {
     ui.homeActivity = { key: "", status: "invalid", model: null, range, githubStatus: "idle", workLogsStatus: "idle", error: range.error };
     render();
@@ -689,6 +743,8 @@ export function clearPrivateWorkspace() {
   if (!workspaceActive) return;
   workspaceActive = false;
   dashboardWorkLogsRequestId += 1;
+  homeActivityRequestId += 1;
+  codexUsageRequestId += 1;
   cloudSyncEnabled = false;
   cloudCacheActive = false;
   cloudBaseline = null;
@@ -708,6 +764,7 @@ export function clearPrivateWorkspace() {
   ui.localComparison = null;
   ui.localScanAttemptAt = "";
   ui.dashboardWorkLogs = { key: "", status: "idle", items: [] };
+  ui.codexUsage = { status: "idle", model: null, payload: null, requestKey: "", lastFetchedAt: "", error: "", approvePublic: false };
   ui.projectWorkLogs = { projectId: null, status: "idle", items: [], error: "", editingId: "", saving: false, formOpen: false };
   ui.dashboardSuggestion = null;
   ui.dashboardSuggestionKey = "";
@@ -1304,7 +1361,42 @@ function dashboardUnavailableMessage() {
 }
 
 function dashboardStatCard(label, value, page, filter, description, disabled = false) {
-  return `<button class="dashboard-stat-card" data-action="dashboard-stat" data-target-page="${page}" data-filter="${filter}" aria-label="${esc(`${label}：${value}，${description}`)}" ${disabled ? "disabled" : ""}><span class="dashboard-stat-label">${esc(label)}</span><strong>${esc(value)}</strong><span class="dashboard-stat-link">${esc(description)} ${icon("chevron")}</span></button>`;
+  const numeric = Number.isSafeInteger(value) && value >= 0 ? value : null;
+  const number = numeric === null
+    ? `<strong>${esc(value)}</strong>`
+    : `<strong class="dashboard-kpi-number" data-kpi-key="${page}-${filter}" data-kpi-target="${numeric}">0</strong>`;
+  return `<button class="dashboard-stat-card" data-action="dashboard-stat" data-target-page="${page}" data-filter="${filter}" aria-label="${esc(`${label}：${value}，${description}`)}" ${disabled ? "disabled" : ""}><span class="dashboard-stat-label">${esc(label)}</span>${number}<span class="dashboard-stat-link">${esc(description)} ${icon("chevron")}</span></button>`;
+}
+
+const animatedDashboardKpis = new Map();
+
+function animateDashboardKpiNumbers() {
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  for (const element of app.querySelectorAll(".dashboard-kpi-number[data-kpi-target]")) {
+    const key = element.dataset.kpiKey;
+    const target = Number(element.dataset.kpiTarget);
+    const previous = animatedDashboardKpis.get(key);
+    if (previous === target) {
+      element.textContent = new Intl.NumberFormat("zh-CN").format(target);
+      continue;
+    }
+    animatedDashboardKpis.set(key, target);
+    if (reducedMotion || !Number.isSafeInteger(target)) {
+      element.textContent = new Intl.NumberFormat("zh-CN").format(target);
+      continue;
+    }
+    const from = Number.isSafeInteger(previous) ? previous : 0;
+    const startedAt = performance.now();
+    const duration = 420;
+    const tick = (now) => {
+      if (!element.isConnected) return;
+      const progress = Math.min(1, (now - startedAt) / duration);
+      const eased = 1 - (1 - progress) ** 3;
+      element.textContent = new Intl.NumberFormat("zh-CN").format(Math.round(from + (target - from) * eased));
+      if (progress < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
 }
 
 function renderDashboardGitHubActivity(project, hasLocalProgress = false) {
@@ -1402,48 +1494,29 @@ function renderActivityRangeControl(activity, dataAvailable) {
   const busy = ui.homeActivity.status === "loading";
   const publicReady = !publicSnapshotMode || Boolean(hydratedPublicData);
   const maximumDate = publicSnapshotMode && snapshotEndDate ? snapshotEndDate : defaults.endDate;
-  return `<div class="dashboard-activity-controls"><label class="sr-only" for="dashboard-activity-range">活动统计时间范围</label><select id="dashboard-activity-range" aria-label="活动统计时间范围" ${dataAvailable && publicReady ? "" : "disabled"}><option value="7d" ${ui.activityRangePreset === "7d" ? "selected" : ""}>近 7 天</option><option value="30d" ${ui.activityRangePreset === "30d" ? "selected" : ""}>近 30 天</option><option value="90d" ${ui.activityRangePreset === "90d" ? "selected" : ""}>近 90 天</option><option value="custom" ${ui.activityRangePreset === "custom" ? "selected" : ""}>自定义日期</option></select>${ui.activityRangePreset === "custom" ? `<label class="sr-only" for="dashboard-activity-start">开始日期</label><input id="dashboard-activity-start" type="date" value="${esc(startDate)}" max="${esc(maximumDate)}" aria-label="开始日期"/><span class="activity-date-separator">至</span><label class="sr-only" for="dashboard-activity-end">结束日期</label><input id="dashboard-activity-end" type="date" value="${esc(endDate)}" max="${esc(maximumDate)}" aria-label="结束日期"/>` : ""}${publicSnapshotMode ? "" : `<button class="button quiet small" data-action="refresh-home-activity" ${!dataAvailable || busy ? "disabled" : ""} aria-label="刷新活动统计">${busy ? "读取中…" : "刷新"}</button>`}</div>`;
+  const rangeEnabled = publicSnapshotMode ? dataAvailable && publicReady : true;
+  const refreshBusy = publicSnapshotMode ? busy : busy || ui.codexUsage.status === "loading";
+  return `<div class="dashboard-activity-controls"><label class="sr-only" for="dashboard-activity-range">活动统计时间范围</label><select id="dashboard-activity-range" aria-label="活动统计时间范围" ${rangeEnabled ? "" : "disabled"}><option value="7d" ${ui.activityRangePreset === "7d" ? "selected" : ""}>近 7 天</option><option value="30d" ${ui.activityRangePreset === "30d" ? "selected" : ""}>近 30 天</option><option value="90d" ${ui.activityRangePreset === "90d" ? "selected" : ""}>近 90 天</option><option value="custom" ${ui.activityRangePreset === "custom" ? "selected" : ""}>自定义日期</option></select>${ui.activityRangePreset === "custom" ? `<label class="sr-only" for="dashboard-activity-start">开始日期</label><input id="dashboard-activity-start" type="date" value="${esc(startDate)}" max="${esc(maximumDate)}" aria-label="开始日期"/><span class="activity-date-separator">至</span><label class="sr-only" for="dashboard-activity-end">结束日期</label><input id="dashboard-activity-end" type="date" value="${esc(endDate)}" max="${esc(maximumDate)}" aria-label="结束日期"/>` : ""}${publicSnapshotMode ? "" : `<button class="button quiet small" data-action="refresh-home-activity" ${refreshBusy ? "disabled" : ""} aria-label="刷新活动统计">${refreshBusy ? "读取中…" : "刷新"}</button>`}</div>`;
 }
 
 function renderActivityStatus(activity, dataAvailable) {
-  if (!dataAvailable) return `<p class="dashboard-activity-status" role="status">${esc(dashboardUnavailableMessage())}</p>`;
-  if (activity.status === "loading") return `<p class="dashboard-activity-status" role="status">正在读取所选日期范围内的 GitHub 提交与 Workspace 工作记录…</p>`;
-  if (activity.status === "invalid") return `<p class="dashboard-activity-status error" role="alert">${esc(activity.error)}</p>`;
-  if (!activity.model) return `<p class="dashboard-activity-status error" role="alert">活动数据暂不可用。请重试。</p>`;
-
-  const coverage = activity.model.coverage;
-  const githubText = coverage.githubRequested
-    ? `GitHub 已关联仓库完整读取 ${coverage.githubCompleteCount}/${coverage.githubRequested}`
-    : "未关联 GitHub 仓库";
-  const workLogText = activity.workLogsStatus === "ready"
-    ? `Workspace 工作记录 ${activity.model.totals.workLogs} 条`
-    : "Workspace 工作记录读取失败，未按 0 计入";
-  const warnings = [];
-  const notices = [];
-  let affectedDetails = [];
-  if (!coverage.githubRequested) {
-    warnings.push("未关联 GitHub 仓库，无法统计提交；此来源未按零计入。");
-  } else if (!coverage.githubComplete) {
-    affectedDetails = coverage.githubIncompleteDetails || coverage.githubIncompleteNames.map((fullName) => ({
-      fullName,
-      reason: "GitHub Worker 未返回该仓库的完整结果。",
-    }));
-    const affectedCount = coverage.githubRequested - coverage.githubCompleteCount;
-    warnings.push(`GitHub 历史不完整：${affectedCount} 个仓库未完整读取；缺失日期不计为零。`);
-  }
-  const unlinkedProjects = coverage.githubUnlinkedProjects || [];
-  const invalidProjects = coverage.githubInvalidProjects || [];
-  if (unlinkedProjects.length) notices.push(`${unlinkedProjects.length} 个项目未关联 GitHub 仓库，已排除在覆盖统计之外。`);
-  if (invalidProjects.length) notices.push(`${invalidProjects.length} 个项目的 GitHub 地址无效，未计入覆盖统计。`);
-  if (!coverage.workLogsComplete) warnings.push("工作记录读取未完成；缺失日期不计为零。");
-  const affectedList = affectedDetails.length
-    ? `<details class="dashboard-activity-gaps"><summary>查看 ${affectedDetails.length} 个未完整仓库及原因</summary><ul>${affectedDetails.map(({ fullName, reason, reasonCategory, code, operation, httpStatus, errorType, diagnostic }) => `<li><strong>${esc(fullName)}</strong>${reasonCategory || code ? `<small>${esc([reasonCategory ? activityReasonLabel(reasonCategory) : "", code].filter(Boolean).join(" · "))}</small>` : ""}<span>${esc([operation, httpStatus ? `HTTP ${httpStatus}` : "", reason, diagnostic ? `诊断 ${errorType || ""}: ${diagnostic}` : ""].filter(Boolean).join(" · "))}</span></li>`).join("")}</ul></details>`
-    : "";
-  const projectLinkIssues = [...unlinkedProjects, ...invalidProjects];
-  const projectLinkList = projectLinkIssues.length
-    ? `<details class="dashboard-activity-gaps"><summary>查看 ${projectLinkIssues.length} 个未纳入仓库统计的项目</summary><ul>${projectLinkIssues.map(({ projectName, reason }) => `<li><strong>${esc(projectName)}</strong><span>${esc(reason)}</span></li>`).join("")}</ul></details>`
-    : "";
-  return `<div class="dashboard-activity-status ${warnings.length ? "warning" : ""}" role="status"><span>${esc(`${githubText} · ${workLogText}`)}</span>${warnings.length ? `<span>${esc(warnings.join(" "))}</span>` : ""}${notices.length ? `<span class="dashboard-activity-note">${esc(notices.join(" "))}</span>` : ""}${affectedList}${projectLinkList}</div>`;
+  const model = activity.model;
+  const coverage = model?.coverage;
+  const summary = !dataAvailable ? "暂不可用"
+    : activity.status === "loading" ? "读取中"
+      : activity.status === "invalid" ? "暂不可用"
+        : !coverage ? "暂不可用"
+          : coverage.complete ? "数据已更新" : "部分数据";
+  const incompleteDetails = coverage?.githubIncompleteDetails || [];
+  const unlinked = coverage?.githubUnlinkedProjects || [];
+  const invalid = coverage?.githubInvalidProjects || [];
+  const diagnostics = [
+    ...incompleteDetails.map(({ fullName, reason, reasonCategory, operation, httpStatus }) => `<li><strong>${esc(fullName)}</strong><span>${esc([reasonCategory ? activityReasonLabel(reasonCategory) : "", operation, httpStatus ? `HTTP ${httpStatus}` : "", reason].filter(Boolean).join(" · "))}</span></li>`),
+    ...unlinked.map(({ projectName, reason }) => `<li><strong>${esc(projectName)}</strong><span>${esc(reason)}</span></li>`),
+    ...invalid.map(({ projectName, reason }) => `<li><strong>${esc(projectName)}</strong><span>${esc(reason)}</span></li>`),
+  ];
+  const detailMarkup = `<details class="dashboard-data-details"><summary>数据详情</summary><div class="dashboard-data-detail-body"><span>${esc(summary)}</span>${activity.error ? `<span>${esc(activity.error)}</span>` : ""}${diagnostics.length ? `<ul>${diagnostics.join("")}</ul>` : ""}${model ? `<span>${esc(`${model.startDate} — ${model.endDate}`)}</span>` : ""}</div></details>`;
+  return `<div class="dashboard-activity-status ${coverage && !coverage.complete ? "partial" : ""}" role="status"><span class="dashboard-activity-dot"></span><span>${esc(summary)}</span>${detailMarkup}</div>`;
 }
 
 function activityReasonLabel(category) {
@@ -1466,36 +1539,134 @@ function activityReasonLabel(category) {
   })[category] || "GitHub 读取失败";
 }
 
-function renderActivityMetrics(activity) {
-  const totals = activity.model?.totals;
-  if (!totals) return `<div class="dashboard-activity-metrics"><span class="activity-metric pending">读取中</span></div>`;
-  const coverage = activity.model.coverage;
-  const githubValue = coverage.githubRequested ? `${coverage.githubComplete ? "" : "≥ "}${totals.githubCommits}` : "—";
-  const workLogValue = `${coverage.workLogsComplete ? "" : "≥ "}${totals.workLogs}`;
-  const activeDaysValue = `${coverage.complete ? "" : "≥ "}${totals.activeDays}`;
-  return `<div class="dashboard-activity-metrics"><span class="activity-metric"><strong>${githubValue}</strong><small>${coverage.githubComplete ? "GitHub 提交" : "已读取 GitHub 提交"}</small></span><span class="activity-metric"><strong>${workLogValue}</strong><small>${coverage.workLogsComplete ? "工作记录" : "已读取工作记录"}</small></span><span class="activity-metric"><strong>${activeDaysValue}</strong><small>${coverage.complete ? "有记录的日期" : "已确认有记录的日期"}</small></span></div>`;
+function githubHeatmapLabel(day) {
+  return `${day.date} · GitHub 提交 ${day.githubCommits}${day.githubPartial ? " · 部分历史未知" : ""}`;
 }
 
 function renderActivityHeatmap(activity, dataAvailable) {
   const model = activity.model;
-  if (!dataAvailable || !model) return `<section class="card dashboard-chart-card dashboard-heatmap-card grid-span-12"><header class="dashboard-chart-heading"><div><h2>开发活动</h2><p>GitHub 提交与 Workspace 工作记录</p></div>${renderActivityRangeControl(activity, dataAvailable)}</header>${renderActivityStatus(activity, dataAvailable)}<div class="dashboard-chart-empty">${activity.status === "loading" ? "活动数据读取中…" : publicSnapshotMode ? "等待已审核快照" : "等待云端数据"}</div></section>`;
-  const maximum = Math.max(1, ...model.days.map((day) => day.githubCommits + day.workLogs));
+  const range = activity.range || currentHomeActivityRange();
+  return `<section class="dashboard-dual-heatmap grid-span-12"><header class="dashboard-chart-heading"><div><h2>开发活动</h2></div>${renderActivityRangeControl(activity, dataAvailable)}</header>${renderActivityStatus(activity, dataAvailable)}<div class="dashboard-heatmap-columns">${renderGitHubHeatmap(model)}${renderCodexTokenHeatmap(range)}</div></section>`;
+}
+
+function renderGitHubHeatmap(model) {
+  if (!model) return `<section class="dashboard-heatmap-panel"><header><h3>GitHub 开发活动</h3></header><div class="dashboard-chart-empty">${ui.homeActivity.status === "loading" ? "读取中…" : "暂无数据"}</div></section>`;
+  const maximum = Math.max(1, ...model.days.map((day) => day.githubCommits));
   const cells = model.days.map((day, index) => {
-    const count = day.githubCommits + day.workLogs;
+    const count = day.githubCommits;
     const level = count ? Math.max(1, Math.min(4, Math.ceil(count / maximum * 4))) : 0;
     const selected = ui.selectedActivityDate === day.date ? "selected" : "";
-    const state = count === 0 && day.partial ? "unknown" : day.partial ? `partial level-${level}` : `level-${level}`;
-    const label = activityDayLabel(day);
+    const state = count === 0 && day.githubPartial ? "unknown" : day.githubPartial ? `partial level-${level}` : `level-${level}`;
+    const label = githubHeatmapLabel(day);
     const month = Number(day.date.slice(5, 7));
     const showMonth = index === 0 || model.days[index - 1].date.slice(0, 7) !== day.date.slice(0, 7);
     const monthMarker = showMonth ? ` data-month-label="${month}月"` : "";
-    return `<button type="button" class="dashboard-heatmap-cell ${state} ${selected}" data-action="select-home-activity-date" data-date="${day.date}" data-count="${count}" data-weekday="${activityWeekdayLabel(day.date)}"${monthMarker} aria-label="${esc(label)}" title="${esc(label)}" aria-pressed="${selected ? "true" : "false"}"><strong>${day.date.slice(-2)}</strong><small>${activityWeekdayLabel(day.date)}</small></button>`;
+    return `<button type="button" class="dashboard-heatmap-cell github ${state} ${selected}" data-action="select-home-activity-date" data-date="${day.date}" data-weekday="${activityWeekdayLabel(day.date)}"${monthMarker} aria-label="${esc(label)}" title="${esc(label)}" aria-pressed="${selected ? "true" : "false"}"><strong>${day.date.slice(-2)}</strong><small>${activityWeekdayLabel(day.date)}</small></button>`;
   }).join("");
   const selectedDay = model.days.find((day) => day.date === ui.selectedActivityDate);
   const dayDetails = selectedDay
-    ? `<div class="dashboard-activity-day-detail"><div><strong>${esc(selectedDay.date)}</strong><span>已读取 GitHub 提交 ${selectedDay.githubCommits} 条</span><span>已读取 Workspace 工作记录 ${selectedDay.workLogs} 条</span></div>${selectedDay.githubProjects.length ? `<p>GitHub 关联项目：${esc(selectedDay.githubProjects.join("、"))}</p>` : ""}${selectedDay.workLogProjects.length ? `<p>工作记录项目：${esc(selectedDay.workLogProjects.map((item) => `${item.name}（${item.count} 条）`).join("、"))}</p>` : ""}${selectedDay.githubCommits + selectedDay.workLogs === 0 ? `<p>${selectedDay.partial ? "来源读取不完整，无法判断这一天是否没有活动。" : "所选来源在这一天没有活动记录。"}</p>` : ""}</div>`
-    : `<p class="dashboard-activity-day-hint">悬停或点击日期查看来源数量与关联项目。</p>`;
-  return `<section class="card dashboard-chart-card dashboard-heatmap-card grid-span-12"><header class="dashboard-chart-heading"><div><h2>开发活动</h2><p>${esc(model.startDate)} 至 ${esc(model.endDate)} · GitHub 提交与 Workspace 工作记录</p></div>${renderActivityRangeControl(activity, dataAvailable)}</header>${renderActivityStatus(activity, dataAvailable)}${renderActivityMetrics(activity)}<div class="dashboard-heatmap-scroll"><div class="dashboard-heatmap-grid" role="group" aria-label="按日期排列的开发活动；每个日期方块标注星期，月份变化处显示月份">${cells}</div></div><div class="dashboard-heatmap-legend"><span>少</span><i class="level-0"></i><i class="level-1"></i><i class="level-2"></i><i class="level-3"></i><i class="level-4"></i><span>多</span><span class="unknown-key">斜纹表示历史不完整</span></div>${dayDetails}<p class="dashboard-chart-footnote">统计记录数量，不代表独立完成成果；工作记录与 Commit 分开标注，不强行合并。</p></section>`;
+    ? `<div class="dashboard-activity-day-detail"><strong>${esc(selectedDay.date)}</strong><span>GitHub ${selectedDay.githubCommits} 次提交</span>${selectedDay.githubPartial ? `<span>部分历史未知</span>` : ""}</div>`
+    : "";
+  return `<section class="dashboard-heatmap-panel"><header><h3>GitHub 开发活动</h3><span>${model.days.length} 天</span></header><div class="dashboard-heatmap-grid" role="group" aria-label="按日期排列的 GitHub 提交与 Workspace 工作记录">${cells}</div><div class="dashboard-heatmap-legend"><span>少</span><i class="level-0"></i><i class="level-1"></i><i class="level-2"></i><i class="level-3"></i><i class="level-4"></i><span>多</span><i class="unknown-key"></i><span>未知</span></div>${dayDetails}</section>`;
+}
+
+function publicCodexUsageForRange(range) {
+  const source = publishedSnapshot?.tokenUsage;
+  if (!source || !range?.valid) return null;
+  const sourceDays = new Map(source.days.map((day) => [day.date, day]));
+  const days = [];
+  for (let date = range.startDate; date <= range.endDate;) {
+    const item = sourceDays.get(date);
+    const covered = Boolean(item && date >= source.coverageStartDate && date <= source.coverageEndDate);
+    days.push({
+      date,
+      available: covered,
+      inputTokens: covered ? item.inputTokens : null,
+      outputTokens: covered ? item.outputTokens : null,
+      cachedInputTokens: covered ? item.cachedInputTokens : null,
+    });
+    date = shiftDateKey(date, 1);
+  }
+  return {
+    startDate: range.startDate,
+    endDate: range.endDate,
+    coverageStartDate: source.coverageStartDate,
+    coverageEndDate: source.coverageEndDate,
+    generatedAt: source.generatedAt,
+    latestEventAt: "",
+    complete: true,
+    fieldAvailability: {
+      inputTokens: source.inputAvailable,
+      outputTokens: source.outputAvailable,
+      cachedInputTokens: source.cachedInputAvailable,
+    },
+    days,
+  };
+}
+
+function currentCodexUsage(range) {
+  return publicSnapshotMode ? publicCodexUsageForRange(range) : ui.codexUsage.model || null;
+}
+
+function codexTokenLabel(day, fieldAvailability) {
+  const valuesAvailable = day.available && fieldAvailability.inputTokens && fieldAvailability.outputTokens
+    && Number.isSafeInteger(day.inputTokens) && Number.isSafeInteger(day.outputTokens);
+  const cached = fieldAvailability.cachedInputTokens && Number.isSafeInteger(day.cachedInputTokens)
+    ? formatTokenCount(day.cachedInputTokens)
+    : "不可用";
+  return valuesAvailable
+    ? `${day.date} · 输入 ${formatTokenCount(day.inputTokens)} · 输出 ${formatTokenCount(day.outputTokens)} · 缓存 ${cached} Token`
+    : `${day.date} · 用量未知`;
+}
+
+function renderCodexTokenDetails(model) {
+  if (!model) return `<details class="dashboard-data-details"><summary>数据详情</summary><div class="dashboard-data-detail-body"><span>${publicSnapshotMode ? "暂无获准发布的 Token 汇总" : esc(ui.codexUsage.error || (ui.codexUsage.status === "loading" ? "读取本机汇总中" : "本机用量暂不可用"))}</span></div></details>`;
+  const fields = model.fieldAvailability;
+  const coverage = model.coverageStartDate && model.coverageEndDate ? `${model.coverageStartDate} — ${model.coverageEndDate}` : "无可用记录";
+  const fetchedAt = model.generatedAt ? formattedTimestamp(model.generatedAt) : "—";
+  const lastEvent = model.latestEventAt ? formattedTimestamp(model.latestEventAt) : "—";
+  const warning = !publicSnapshotMode && ui.codexUsage.status === "stale" ? "Companion 离线 · 显示本机上次可信汇总" : "";
+  return `<details class="dashboard-data-details"><summary>数据详情</summary><div class="dashboard-data-detail-body"><span>${publicSnapshotMode ? "已发布汇总" : "本机 Codex 会话日志"} · ${esc(coverage)}</span><span>输入 ${fields.inputTokens ? "可用" : "不可用"} · 输出 ${fields.outputTokens ? "可用" : "不可用"} · 缓存 ${fields.cachedInputTokens ? "可用" : "不可用"}</span><span>汇总时间 ${esc(fetchedAt)}${publicSnapshotMode ? "" : ` · 最新事件 ${esc(lastEvent)}`}</span>${warning ? `<span>${esc(warning)}</span>` : ""}${!publicSnapshotMode && ui.codexUsage.error && ui.codexUsage.status !== "ready" ? `<span>${esc(ui.codexUsage.error)}</span>` : ""}</div></details>`;
+}
+
+function renderCodexTokenHeatmap(range) {
+  const model = currentCodexUsage(range);
+  const days = model?.days || [];
+  const availableCounts = days.flatMap((day) => day.available && Number.isSafeInteger(day.inputTokens) && Number.isSafeInteger(day.outputTokens)
+    ? [day.inputTokens + day.outputTokens] : []);
+  const maximum = Math.max(1, ...availableCounts);
+  const cells = days.map((day) => {
+    const total = day.available && Number.isSafeInteger(day.inputTokens) && Number.isSafeInteger(day.outputTokens)
+      ? day.inputTokens + day.outputTokens : null;
+    const level = total ? Math.max(1, Math.min(4, Math.ceil(total / maximum * 4))) : 0;
+    const selected = ui.selectedActivityDate === day.date ? "selected" : "";
+    const state = total === null ? "unknown" : `level-${level}`;
+    const label = codexTokenLabel(day, model?.fieldAvailability || {});
+    return `<button type="button" class="dashboard-heatmap-cell token ${state} ${selected}" data-action="select-home-activity-date" data-date="${day.date}" aria-label="${esc(label)}" title="${esc(label)}" aria-pressed="${selected ? "true" : "false"}"><strong>${day.date.slice(-2)}</strong><small>${activityWeekdayLabel(day.date)}</small></button>`;
+  }).join("");
+  const knownDays = days.filter((day) => day.available);
+  const sum = (key) => knownDays.every((day) => Number.isSafeInteger(day[key])) ? knownDays.reduce((total, day) => total + day[key], 0) : null;
+  const input = sum("inputTokens");
+  const output = sum("outputTokens");
+  const cached = sum("cachedInputTokens");
+  const prefix = knownDays.length < days.length ? "≥ " : "";
+  const eligible = Boolean(model?.complete && days.some((day) => day.available));
+  const shareApproval = !publicSnapshotMode
+    ? `<label class="codex-share-approval" title="仅在你勾选并主动发布访客快照时包含这份汇总"><input id="codex-share-token-usage" type="checkbox" ${ui.codexUsage.approvePublic ? "checked" : ""} ${eligible ? "" : "disabled"}/>允许下一次访客快照包含此汇总</label>`
+    : "";
+  const status = publicSnapshotMode
+    ? model ? "已发布" : "未发布"
+    : ui.codexUsage.status === "stale" ? "离线缓存"
+      : ui.codexUsage.status === "loading" ? "读取中"
+        : ui.codexUsage.status === "error" ? "不可用" : model ? "本机" : "不可用";
+  const selected = days.find((day) => day.date === ui.selectedActivityDate);
+  const selectedDetails = selected
+    ? `<div class="dashboard-activity-day-detail"><strong>${esc(selected.date)}</strong><span>${esc(codexTokenLabel(selected, model?.fieldAvailability || {}))}</span></div>`
+    : "";
+  const empty = !model
+    ? publicSnapshotMode ? "尚無已批准的用量快照" : status === "读取中" ? "读取本机汇总…" : "用量暂不可用"
+    : days.length ? "" : "此日期范围没有已知记录";
+  return `<section class="dashboard-heatmap-panel token-panel"><header><div><h3>Codex Token 消耗</h3><span class="dashboard-source-status">${status}</span></div>${shareApproval}</header>${empty ? `<div class="dashboard-chart-empty">${esc(empty)}</div>` : `<div class="dashboard-token-metrics"><span><strong>${input === null ? "—" : `${prefix}${formatTokenCount(input)}`}</strong><small>输入</small></span><span><strong>${output === null ? "—" : `${prefix}${formatTokenCount(output)}`}</strong><small>输出</small></span><span><strong>${cached === null ? "—" : `${prefix}${formatTokenCount(cached)}`}</strong><small>缓存</small></span></div><div class="dashboard-heatmap-grid" role="group" aria-label="按北京时间日期排列的 Codex Token 用量">${cells}</div><div class="dashboard-heatmap-legend"><span>少</span><i class="level-0"></i><i class="level-1"></i><i class="level-2"></i><i class="level-3"></i><i class="level-4"></i><span>多</span><i class="unknown-key"></i><span>未知</span></div>${selectedDetails}`}${renderCodexTokenDetails(model)}</section>`;
 }
 
 function renderActivityTrend(activity, dataAvailable) {
@@ -1527,8 +1698,8 @@ function renderActivityTrend(activity, dataAvailable) {
     const workLogHeight = day.workLogs * scale;
     const count = day.githubCommits + day.workLogs;
     const label = activityDayLabel(day);
-    const githubRect = githubHeight > 0 ? `<rect x="${x.toFixed(2)}" y="${(baseY - githubHeight).toFixed(2)}" width="${barWidth.toFixed(2)}" height="${githubHeight.toFixed(2)}" class="dashboard-trend-github-bar"/>` : "";
-    const workLogRect = workLogHeight > 0 ? `<rect x="${x.toFixed(2)}" y="${(baseY - githubHeight - workLogHeight).toFixed(2)}" width="${barWidth.toFixed(2)}" height="${workLogHeight.toFixed(2)}" class="dashboard-trend-worklog-bar"/>` : "";
+    const githubRect = githubHeight > 0 ? `<rect x="${x.toFixed(2)}" y="${(baseY - githubHeight).toFixed(2)}" width="${barWidth.toFixed(2)}" height="${githubHeight.toFixed(2)}" class="dashboard-trend-github-bar" style="--bar-index:${index}"/>` : "";
+    const workLogRect = workLogHeight > 0 ? `<rect x="${x.toFixed(2)}" y="${(baseY - githubHeight - workLogHeight).toFixed(2)}" width="${barWidth.toFixed(2)}" height="${workLogHeight.toFixed(2)}" class="dashboard-trend-worklog-bar" style="--bar-index:${index}"/>` : "";
     const unknown = !count && day.partial ? `<line x1="${(x + barWidth / 2).toFixed(2)}" y1="${baseY - 2}" x2="${(x + barWidth / 2).toFixed(2)}" y2="${baseY}" class="dashboard-trend-unknown-mark"/>` : "";
     const hitWidth = Math.max(slot, 2);
     return `<g class="dashboard-trend-day" data-action="select-home-activity-date" data-date="${day.date}" tabindex="0" role="button" aria-label="${esc(label)}"><title>${esc(label)}</title><rect x="${(left + index * slot).toFixed(2)}" y="${top}" width="${hitWidth.toFixed(2)}" height="${chartHeight}" class="dashboard-trend-hit-area"/>${githubRect}${workLogRect}${unknown}</g>`;
@@ -1538,7 +1709,64 @@ function renderActivityTrend(activity, dataAvailable) {
     const x = left + index * slot + slot / 2;
     return `<text x="${x.toFixed(2)}" y="${height - 5}" class="dashboard-trend-x-label" text-anchor="middle">${esc(day.date.slice(5).replace("-", "/"))}</text>`;
   }).join("");
-  return `<section class="card dashboard-chart-card dashboard-trend-card grid-span-7"><header class="dashboard-chart-heading"><div><h2>活动趋势</h2><p>每日已读取记录数 · ${model.days.length} 天</p></div></header><div class="dashboard-trend-legend"><span><i class="github"></i>GitHub 提交</span><span><i class="worklog"></i>Workspace 工作记录</span></div><div class="dashboard-trend-scroll"><svg class="dashboard-trend-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(`每日 GitHub 提交与 Workspace 工作记录趋势，共 ${model.totals.activityRecords} 条可读取记录`)}">${grid}${bars}${xLabels}</svg></div><p class="dashboard-chart-footnote">纵轴为已读取记录条数；数据不完整的日期不作为零活动解读。</p></section>`;
+  return `<section class="card dashboard-chart-card dashboard-trend-card grid-span-7"><header class="dashboard-chart-heading"><div><h2>活动趋势</h2></div></header><div class="dashboard-trend-legend"><span><i class="github"></i>GitHub 提交</span><span><i class="worklog"></i>工作记录</span></div><div class="dashboard-trend-scroll"><svg class="dashboard-trend-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(`每日 GitHub 提交与 Workspace 工作记录趋势，共 ${model.totals.activityRecords} 条可读取记录`)}">${grid}${bars}${xLabels}</svg></div></section>`;
+}
+
+function renderProjectActivityChart(activity, dataAvailable) {
+  const model = activity.model;
+  if (!dataAvailable || !model) return `<section class="card dashboard-chart-card dashboard-project-activity-card grid-span-6"><header class="dashboard-chart-heading"><div><h2>项目活跃排行榜</h2></div></header><div class="dashboard-chart-empty">暂无可显示数据</div></section>`;
+  const rows = model.projectActivity || [];
+  if (!rows.length) return `<section class="card dashboard-chart-card dashboard-project-activity-card grid-span-6"><header class="dashboard-chart-heading"><div><h2>项目活跃排行榜</h2></div></header><div class="dashboard-chart-empty">此范围没有已读活动</div></section>`;
+  const visible = rows.slice(0, 8);
+  const maximum = Math.max(1, ...visible.map((item) => item.githubCommits + item.workLogs));
+  const bars = visible.map((item, index) => {
+    const total = item.githubCommits + item.workLogs;
+    const githubWidth = item.githubCommits / maximum * 100;
+    const workLogWidth = item.workLogs / maximum * 100;
+    const title = `${item.projectName} · GitHub ${item.githubCommits} · 工作记录 ${item.workLogs}`;
+    return `<button type="button" class="dashboard-project-activity-row" data-action="view-project" data-id="${esc(item.projectId)}" title="${esc(title)}"><span class="dashboard-project-activity-name">${esc(item.projectName)}</span><span class="dashboard-project-activity-track"><i class="github" style="width:${githubWidth.toFixed(2)}%;--bar-index:${index}"></i><i class="worklog" style="width:${workLogWidth.toFixed(2)}%;--bar-index:${index}"></i></span><strong>${total}</strong></button>`;
+  }).join("");
+  const partial = !model.coverage.githubComplete || !model.coverage.workLogsComplete ? `<span class="dashboard-chart-partial">部分来源</span>` : "";
+  return `<section class="card dashboard-chart-card dashboard-project-activity-card grid-span-6"><header class="dashboard-chart-heading"><div><h2>项目活跃排行榜</h2></div>${partial}</header><div class="dashboard-project-activity-list">${bars}</div><div class="dashboard-project-activity-legend"><span><i class="github"></i>Commit</span><span><i class="worklog"></i>工作记录</span></div></section>`;
+}
+
+function renderHourlyActivityChart(activity) {
+  const model = activity.model;
+  if (!model?.coverage?.hourlyAvailable) return "";
+  const counts = model.hourlyCounts || [];
+  const maximum = Math.max(1, ...counts.map((item) => item.count));
+  const width = 720;
+  const height = 160;
+  const left = 28;
+  const right = 8;
+  const top = 10;
+  const bottom = 23;
+  const plotHeight = height - top - bottom;
+  const plotWidth = width - left - right;
+  const slot = plotWidth / 24;
+  const barWidth = slot * 0.54;
+  const grid = [0, 0.5, 1].map((ratio) => {
+    const y = top + plotHeight * (1 - ratio);
+    return `<line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" class="dashboard-trend-gridline"/><text x="${left - 7}" y="${y + 3}" class="dashboard-trend-y-label" text-anchor="end">${Math.round(maximum * ratio)}</text>`;
+  }).join("");
+  const bars = counts.map(({ hour, count }) => {
+    const x = left + hour * slot + (slot - barWidth) / 2;
+    const barHeight = count / maximum * plotHeight;
+    const y = top + plotHeight - barHeight;
+    const selected = ui.selectedActivityHour === hour ? "selected" : "";
+    const label = `${String(hour).padStart(2, "0")}:00 · ${count} Commit`;
+    return `<g class="dashboard-hour-bar ${selected}" data-action="select-activity-hour" data-hour="${hour}" tabindex="0" role="button" aria-label="${esc(label)}"><title>${esc(label)}</title><rect x="${(left + hour * slot).toFixed(2)}" y="${top}" width="${slot.toFixed(2)}" height="${plotHeight}" class="dashboard-trend-hit-area"/><rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${barWidth.toFixed(2)}" height="${barHeight.toFixed(2)}" class="dashboard-hour-bar-shape" style="--bar-index:${hour}"/></g>`;
+  }).join("");
+  const labels = [0, 6, 12, 18, 23].map((hour) => {
+    const x = left + hour * slot + slot / 2;
+    return `<text x="${x.toFixed(2)}" y="${height - 4}" class="dashboard-trend-x-label" text-anchor="middle">${String(hour).padStart(2, "0")}</text>`;
+  }).join("");
+  const selectedCount = counts.find((item) => item.hour === ui.selectedActivityHour)?.count;
+  const detail = Number.isInteger(ui.selectedActivityHour)
+    ? `<div class="dashboard-activity-day-detail"><strong>${String(ui.selectedActivityHour).padStart(2, "0")}:00</strong><span>${selectedCount ?? 0} Commit${model.coverage.hourlyComplete ? "" : " · 部分已读仓库"}</span></div>`
+    : "";
+  const partial = model.coverage.hourlyComplete ? "北京时间" : "北京时间 · 部分仓库";
+  return `<section class="card dashboard-chart-card dashboard-hourly-card grid-span-6"><header class="dashboard-chart-heading"><div><h2>每日开发活跃时间</h2></div><span class="dashboard-chart-caption">${partial}</span></header><div class="dashboard-trend-scroll"><svg class="dashboard-hourly-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="按北京时间汇总的 GitHub Commit 每小时分布">${grid}${bars}${labels}</svg></div>${detail}</section>`;
 }
 
 function renderProjectStatusChart(projects, dataAvailable) {
@@ -1551,27 +1779,16 @@ function renderProjectStatusChart(projects, dataAvailable) {
   const slices = breakdown.map((item, index) => {
     const length = total ? circumference * item.count / total : 0;
     const color = PROJECT_STATUS_COLORS[item.label] || DASHBOARD_CHART_COLORS[index % DASHBOARD_CHART_COLORS.length];
-    const ring = `<circle cx="76" cy="76" r="${radius}" fill="none" stroke="${color}" stroke-width="18" stroke-dasharray="${length.toFixed(2)} ${(circumference - length).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" ${publicSnapshotMode ? `tabindex="0" role="button" data-action="filter-project-status" data-status="${esc(item.label)}" aria-label="筛选${esc(item.label)}项目"` : ""}><title>${esc(`${item.label} ${item.count} 个项目 · 点击筛选`)}</title></circle>`;
+    const ring = `<circle class="dashboard-donut-slice" cx="76" cy="76" r="${radius}" fill="none" stroke="${color}" stroke-width="18" stroke-dasharray="${length.toFixed(2)} ${(circumference - length).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" style="--slice-index:${index}" tabindex="0" role="button" data-action="filter-project-status" data-status="${esc(item.label)}" aria-label="筛选${esc(item.label)}项目"><title>${esc(`${item.label} ${item.count} 个项目 · 点击筛选`)}</title></circle>`;
     offset += length;
     return ring;
   }).join("");
   const legend = breakdown.map((item, index) => {
     const color = PROJECT_STATUS_COLORS[item.label] || DASHBOARD_CHART_COLORS[index % DASHBOARD_CHART_COLORS.length];
     const ratio = total ? Math.round(item.count / total * 100) : 0;
-    return `<li ${publicSnapshotMode ? `data-action="filter-project-status" data-status="${esc(item.label)}" tabindex="0" role="button" aria-label="筛选${esc(item.label)}项目"` : ""}><i style="--status-color:${color}"></i><span>${esc(item.label)}</span><strong>${item.count}</strong><small>${ratio}%</small></li>`;
+    return `<li><button type="button" class="dashboard-status-item" data-action="filter-project-status" data-status="${esc(item.label)}" aria-label="筛选${esc(item.label)}项目"><i style="--status-color:${color}"></i><span>${esc(item.label)}</span><strong>${item.count}</strong><small>${ratio}%</small></button></li>`;
   }).join("");
-  return `<section class="card dashboard-chart-card dashboard-status-card grid-span-5"><header class="dashboard-chart-heading"><div><h2>项目状态</h2><p>${publicSnapshotMode ? "公开快照" : "当前 Supabase 快照"} · 不受日期筛选</p></div></header>${total ? `<div class="dashboard-status-body"><svg class="dashboard-status-donut" viewBox="0 0 152 152" role="img" aria-label="${esc(`当前 ${total} 个项目的状态分布`)}"><circle cx="76" cy="76" r="${radius}" fill="none" stroke="var(--line)" stroke-width="18"/>${slices}<text x="76" y="73" class="dashboard-donut-total">${total}</text><text x="76" y="91" class="dashboard-donut-label">项目</text></svg><ul class="dashboard-status-legend">${legend}</ul></div>` : `<div class="dashboard-chart-empty">当前没有项目记录。</div>`}</section>`;
-}
-
-function renderProjectStageChart(projects, dataAvailable) {
-  if (!dataAvailable) return `<section class="card dashboard-chart-card dashboard-stage-card grid-span-12"><header class="dashboard-chart-heading"><div><h2>项目阶段</h2><p>使用已保存阶段字段</p></div></header><div class="dashboard-chart-empty">${esc(dashboardUnavailableMessage())}</div></section>`;
-  const breakdown = projectStageBreakdown(projects);
-  const maximum = Math.max(1, ...breakdown.map((item) => item.count));
-  const bars = breakdown.map((item, index) => {
-    const color = item.label === "未分类" ? "#c6cbd4" : DASHBOARD_CHART_COLORS[index % DASHBOARD_CHART_COLORS.length];
-    return `<div class="dashboard-stage-row"><span class="dashboard-stage-label" title="${esc(item.label)}">${esc(item.label)}</span><div class="dashboard-stage-track"><span style="width:${(item.count / maximum * 100).toFixed(1)}%;--stage-color:${color}"></span></div><strong>${item.count}</strong></div>`;
-  }).join("");
-  return `<section class="card dashboard-chart-card dashboard-stage-card grid-span-12"><header class="dashboard-chart-heading"><div><h2>项目阶段</h2><p>${publicSnapshotMode ? "按已发布快照字段统计；空值显示为未分类，不从 Commit 推断阶段" : "按 Supabase 已保存字段统计；空值显示为未分类，不从 Commit 推断阶段"}</p></div></header>${breakdown.length ? `<div class="dashboard-stage-list">${bars}</div>` : `<div class="dashboard-chart-empty">当前没有项目记录。</div>`}</section>`;
+  return `<section class="card dashboard-chart-card dashboard-status-card grid-span-5"><header class="dashboard-chart-heading"><div><h2>项目状态</h2></div></header>${total ? `<div class="dashboard-status-body"><svg class="dashboard-status-donut" viewBox="0 0 152 152" role="img" aria-label="${esc(`当前 ${total} 个项目的状态分布`)}"><circle cx="76" cy="76" r="${radius}" fill="none" stroke="var(--line)" stroke-width="18"/>${slices}<text x="76" y="73" class="dashboard-donut-total">${total}</text><text x="76" y="91" class="dashboard-donut-label">项目</text></svg><ul class="dashboard-status-legend">${legend}</ul></div>` : `<div class="dashboard-chart-empty">当前没有项目记录。</div>`}</section>`;
 }
 
 function latestProjectCommit(project, localProject = null) {
@@ -1809,7 +2026,16 @@ function renderDashboard() {
   const unavailableLabel = publicSnapshotMode ? "快照未发布" : "云端读取中";
   const stats = `<section class="dashboard-overview grid-span-12" aria-label="项目指挥中心"><div class="dashboard-home-title"><div class="eyebrow">DANIEL WORKSPACE · PROJECT CONTROL CENTER</div><h1>项目指挥中心</h1></div><div class="dashboard-stat-row">${dashboardStatCard("项目总数", dataAvailable ? counts.projects : "—", "projects", "all", dataAvailable ? "查看全部项目" : unavailableLabel, !dataAvailable)}${dashboardStatCard("进行中", dataAvailable ? counts.activeProjects : "—", "projects", "active", dataAvailable ? "查看进行中" : unavailableLabel, !dataAvailable)}${dashboardStatCard("已完成", dataAvailable ? completedProjects : "—", "projects", "completed", dataAvailable ? "查看已完成" : unavailableLabel, !dataAvailable)}${dashboardStatCard("待办任务", dataAvailable ? counts.openTasks : "—", "tasks", "todo", dataAvailable ? "查看待办任务" : unavailableLabel, !dataAvailable)}</div></section>`;
   const activity = ui.homeActivity;
-  return renderDashboardLayout([stats, renderActivityHeatmap(activity, dataAvailable), renderActivityTrend(activity, dataAvailable), renderProjectStatusChart(projects, dataAvailable), renderProjectStageChart(projects, dataAvailable), renderDashboardFocusProjects(projects, dataAvailable), renderDashboardAISummary(today, suggestion)]);
+  return renderDashboardLayout([
+    stats,
+    renderActivityHeatmap(activity, dataAvailable),
+    renderActivityTrend(activity, dataAvailable),
+    renderProjectStatusChart(projects, dataAvailable),
+    renderProjectActivityChart(activity, dataAvailable),
+    renderHourlyActivityChart(activity),
+    renderDashboardFocusProjects(projects, dataAvailable),
+    renderDashboardAISummary(today, suggestion),
+  ]);
 }
 
 function renderProjects() {
@@ -2526,7 +2752,7 @@ function renderSnapshotPreview() {
   const incomplete = draft ? !snapshotDraftPublishable(draft) : false;
   const counts = draft ? snapshotDraftCounts(draft) : null;
   const issues = Array.isArray(draft?.completeness?.issues) ? draft.completeness.issues : [];
-  const countSummary = counts ? `项目 ${counts.projects || 0} · 任务 ${counts.tasks || 0} · 工作记录 ${counts.workLogs || 0} · 资料 ${counts.knowledge || 0} · 决策 ${counts.decisions || 0} · 公开仓库活动 ${counts.githubActivity || 0} · AI 简报 ${counts.summaries || 0}` : "";
+  const countSummary = counts ? `项目 ${counts.projects || 0} · 任务 ${counts.tasks || 0} · 工作记录 ${counts.workLogs || 0} · 资料 ${counts.knowledge || 0} · 决策 ${counts.decisions || 0} · 公开仓库活动 ${counts.githubActivity || 0} · AI 简报 ${counts.summaries || 0}${counts.codexTokenDays ? ` · Codex 汇总 ${counts.codexTokenDays} 天` : ""}` : "";
   return `<section class="page-heading"><div><div class="eyebrow">访客快照</div><h1>${state.status === "published" ? "快照已发布" : incomplete ? "数据未完整，快照未发布" : "发布未完成"}</h1><p>${esc(state.error || (state.status === "published" ? `访客现在可读取此快照 · ${formattedTimestamp(state.publishedAt)}` : "当前数据没有写入公开存储，可从顶部按钮安全重试。"))}</p></div></section>
     ${incomplete ? `<section class="card card-pad snapshot-incomplete" role="alert"><strong>缺失数据仍保持缺失，没有按零发布。</strong><p>完成并核对所有必要读取之前不会更新访客快照。</p>${issues.length ? `<ul>${issues.map((issue) => `<li>${esc(issue)}</li>`).join("")}</ul>` : "<p>至少一个数据源未通过完整性核对。</p>"}</section>` : ""}
     ${draft ? `<section class="card card-pad snapshot-publish-panel" role="status"><h2>${state.status === "published" ? "本次访客快照" : "已安全汇总的数据"}</h2><p>${esc(countSummary)}</p><p>活动范围：${esc(draft.activityRange.startDate)} 至 ${esc(draft.activityRange.endDate)}</p><p>敏感信息、认证值、邮箱、联系方式、本机路径、证据链接和未核验仓库地址由白名单过滤器自动隐藏。访客页保持只读。</p>${state.status === "published" ? `<p class="snapshot-published-status">发布成功：${esc(formattedTimestamp(state.publishedAt))}。访客请求会直接读取最新快照。</p>` : ""}</section>` : ""}
@@ -2578,12 +2804,14 @@ function snapshotActivityForNames(result, names) {
 async function generateAndPublishVisitorSnapshot() {
   if (publicSnapshotMode || !workspaceActive) return;
   if (["loading", "publishing"].includes(ui.publicSnapshotPreview.status)) return;
+  const includeCodexUsage = ui.codexUsage.approvePublic === true;
   ui.page = "snapshot-preview";
   if (!workspaceAuth?.client || !workspaceAuth.userId || ui.cloud.status !== "synced" || cloudSyncRunning || cloudSyncTimer) {
     ui.publicSnapshotPreview = { status: "error", draft: null, error: "请先等待私人工作台完成 Supabase 同步，再发布快照。", progress: null };
     render();
     return;
   }
+  ui.codexUsage.approvePublic = false;
   const requestId = ++snapshotPreviewRequestId;
   const previousPublishedAt = ui.publicSnapshotPreview.publishedAt || "";
   const setProgress = (message, detail = "") => {
@@ -2757,6 +2985,31 @@ async function generateAndPublishVisitorSnapshot() {
       dailyBrief: { status: ui.dailyBriefStatus, value: ui.dailyBrief },
       weeklySummary: { status: ui.weeklySummaryStatus, value: ui.weeklySummary },
     };
+    let approvedTokenUsage = null;
+    if (includeCodexUsage) {
+      setProgress("读取已批准的 Codex 汇总", "只包含按日聚合的 Token 数值。");
+      const tokenRange = resolveActivityRange("90d", { now: new Date(`${today}T12:00:00+08:00`) });
+      const cachedUsage = loadCodexUsageCache(workspaceAuth.userId) || ui.codexUsage.payload;
+      let trustedUsage = cachedUsage;
+      try {
+        if (!localCodexUsageEndpoint) throw new Error("本机 Companion 不可用。");
+        const freshUsage = await fetchCodexUsage(localCodexUsageEndpoint, tokenRange);
+        trustedUsage = mergeCodexUsageCache(cachedUsage, freshUsage) || freshUsage;
+        saveCodexUsageCache(workspaceAuth.userId, trustedUsage);
+        ui.codexUsage = {
+          ...ui.codexUsage,
+          status: "ready",
+          payload: trustedUsage,
+          model: codexUsageForRange(trustedUsage, currentHomeActivityRange()),
+          lastFetchedAt: freshUsage.generatedAt,
+          error: "",
+        };
+      } catch (error) {
+        if (!cachedUsage?.complete) throw error;
+      }
+      approvedTokenUsage = publicTokenUsage(trustedUsage, tokenRange);
+      if (!approvedTokenUsage) throw new Error("没有可发布的可信 Codex 汇总；原有访客快照保持不变。");
+    }
     const workLogIssues = failedWorkLogs.map((result) => {
       const project = db.projects.find((item) => String(item.id) === String(result.projectId));
       return `工作记录：${project?.name || "未命名项目"} 未完整读取（${snapshotReadError(result.error)}）`;
@@ -2781,6 +3034,7 @@ async function generateAndPublishVisitorSnapshot() {
         workLogIssues,
       },
       summaries,
+      tokenUsage: approvedTokenUsage,
       activityRange: { startDate: range.startDate, endDate: range.endDate },
     });
     if (!range.valid) throw new Error(range.error || "快照日期范围无效。");
@@ -2819,6 +3073,7 @@ function render() {
     ? `<span class="today-label">公开只读快照</span><a class="button quiet small public-login-link" href="?mode=login">登录</a>`
     : `<button class="button primary small snapshot-publish-action" data-action="publish-visitor-snapshot" aria-label="一键发布访客快照" ${["loading", "publishing"].includes(ui.publicSnapshotPreview.status) ? "disabled" : ""}>${["loading", "publishing"].includes(ui.publicSnapshotPreview.status) ? "正在发布…" : `<span class="snapshot-publish-label-desktop">一键发布访客快照</span><span class="snapshot-publish-label-mobile">发布快照</span>`}</button><span class="today-label">${formattedDate()}</span><button class="cloud-sync-indicator ${esc(ui.cloud.status)}" data-action="retry-cloud-sync" title="点击重新检查 Supabase 同步状态" aria-live="polite" ${["loading", "syncing", "migrating"].includes(ui.cloud.status) ? "disabled" : ""}>${esc(cloudStatusLabel())}</button><button class="icon-button theme-toggle" data-action="toggle-theme" title="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式" aria-label="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式">${icon(document.documentElement.dataset.theme === "light" ? "moon" : "sun")}</button><button class="icon-button" data-action="open-assistant" title="打开 AI Assistant" aria-label="打开 AI Assistant">${icon("sparkle")}</button><button class="button quiet small logout-button" data-action="logout">退出登录</button>`;
   app.innerHTML = `${renderNav()}<main class="main-shell"><header class="topbar"><div class="breadcrumbs"><span>Daniel Workspace</span><span class="crumb-sep">/</span><strong>${esc(pageTitle())}</strong></div><div class="search-wrap"><div class="search-box">${icon("search")}<input id="global-search" type="search" value="${esc(ui.query)}" placeholder="搜索项目、资料、决策或任务…" autocomplete="off" aria-label="全局搜索"/><kbd class="search-hint">Ctrl K</kbd></div><div id="search-results"></div></div><div class="topbar-actions">${headerActions}</div></header><div class="content">${publicSnapshotMode ? renderPublicSnapshotNotice() : renderCloudNotice()}${page}</div></main>${renderAssistant()}${renderModal()}<div class="toast-region" id="toast-region" aria-live="polite"></div>`;
+  animateDashboardKpiNumbers();
   renderSearchResults();
   enforcePublicReadOnlyDom();
   if (ui.assistantOpen) document.querySelector("#assistant-messages")?.scrollTo({ top: 999999, behavior: "smooth" });
@@ -2830,6 +3085,7 @@ function render() {
       .map((project) => project.id);
     if (stalePinnedIds.length) void refreshGitHubData(stalePinnedIds, { force: false, silent: true });
   }
+  if (!publicSnapshotMode && ui.page === "home" && ui.codexUsage.status === "idle") void loadCodexUsageRange();
 }
 
 function toast(message) {
@@ -3168,7 +3424,7 @@ async function toggleProjectPinInCloud(projectId) {
 
 const PUBLIC_READ_ONLY_ACTIONS = new Set([
   "dashboard-stat", "filter-projects", "filter-project-status", "clear-project-status", "filter-tasks",
-  "select-home-activity-date", "toggle-decision", "toggle-more-menu", "view-project", "view-decision", "open-search-result",
+  "select-home-activity-date", "select-activity-hour", "toggle-decision", "toggle-more-menu", "view-project", "view-decision", "open-search-result",
 ]);
 
 function enforcePublicReadOnlyDom() {
@@ -3194,6 +3450,12 @@ function handleAction(action, element, sourceEvent) {
   if (action === "refresh-home-activity") { void loadHomeActivity({ force: true }); return; }
   if (action === "select-home-activity-date") {
     ui.selectedActivityDate = ui.selectedActivityDate === element.dataset.date ? "" : element.dataset.date || "";
+    render();
+    return;
+  }
+  if (action === "select-activity-hour") {
+    const hour = Number(element.dataset.hour);
+    ui.selectedActivityHour = Number.isInteger(hour) && hour >= 0 && hour < 24 && ui.selectedActivityHour !== hour ? hour : null;
     render();
     return;
   }
@@ -3421,10 +3683,16 @@ app.addEventListener("toggle", (event) => {
 
 app.addEventListener("change", (event) => {
   const target = event.target;
+  if (target.id === "codex-share-token-usage" && !publicSnapshotMode) {
+    ui.codexUsage.approvePublic = target.checked === true;
+    render();
+    return;
+  }
   if (publicSnapshotMode && !["dashboard-activity-range", "dashboard-activity-start", "dashboard-activity-end"].includes(target.id)) return;
   if (target.id === "dashboard-activity-range") {
     ui.activityRangePreset = ["7d", "30d", "90d", "custom"].includes(target.value) ? target.value : "30d";
     ui.selectedActivityDate = "";
+    ui.selectedActivityHour = null;
     if (ui.activityRangePreset === "custom") {
       const snapshotEndDate = publicSnapshotMode ? publishedSnapshot?.activity?.endDate : "";
       const defaults = resolveActivityRange("30d", { now: snapshotEndDate ? new Date(`${snapshotEndDate}T12:00:00+08:00`) : Date.now() });
@@ -3438,12 +3706,13 @@ app.addEventListener("change", (event) => {
     if (target.id === "dashboard-activity-start") ui.activityCustomStartDate = target.value;
     if (target.id === "dashboard-activity-end") ui.activityCustomEndDate = target.value;
     ui.selectedActivityDate = "";
+    ui.selectedActivityHour = null;
     void loadHomeActivity();
   }
 });
 
 app.addEventListener("keydown", (event) => {
-  const target = event.target.closest('[data-action="view-project"], [data-action="view-decision"], [data-action="toggle-decision"], [data-action="select-home-activity-date"], [data-action="filter-project-status"]');
+  const target = event.target.closest('[data-action="view-project"], [data-action="view-decision"], [data-action="toggle-decision"], [data-action="select-home-activity-date"], [data-action="select-activity-hour"], [data-action="filter-project-status"]');
   if (target && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); handleAction(target.dataset.action, target); }
   if (event.target.id === "assistant-input" && event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();

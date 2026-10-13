@@ -1,7 +1,8 @@
 """Read-only local companion for Daniel Workspace V2.4.1.
 
-Serves this app on loopback and exposes a single read-only project inventory
-endpoint. It never writes to scanned repositories or runs network Git commands.
+Serves this app on loopback with read-only project inventory and local Codex
+token-usage metadata endpoints. It never reads chat bodies, writes to scanned
+repositories, or runs network Git commands.
 """
 
 from __future__ import annotations
@@ -15,6 +16,8 @@ from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
+
+from codex_usage import CodexUsageError, summarize_codex_usage
 
 
 APP_ROOT = Path(__file__).resolve().parent
@@ -223,7 +226,7 @@ def project_inventory() -> dict[str, object]:
 
 
 class Handler(SimpleHTTPRequestHandler):
-    server_version = "DanielWorkspaceLocal/3.5-A"
+    server_version = "DanielWorkspaceLocal/3.9"
 
     def log_message(self, _format: str, *_args: object) -> None:
         return
@@ -285,6 +288,35 @@ class Handler(SimpleHTTPRequestHandler):
             self.wfile.write(payload)
             return
 
+        if request_path == "/api/codex-usage":
+            origin = self.allowed_origin()
+            if self.headers.get("Origin") and not origin:
+                self.send_error(403, "Origin not allowed")
+                return
+            query = dict(part.split("=", 1) if "=" in part else (part, "") for part in urlsplit(self.path).query.split("&") if part)
+            try:
+                payload = summarize_codex_usage(
+                    Path.home() / ".codex" / "sessions",
+                    query.get("startDate", ""),
+                    query.get("endDate", ""),
+                )
+                status = 200
+            except CodexUsageError as error:
+                payload = {"error": str(error)}
+                status = 400
+            except OSError:
+                payload = {"error": "本机 Codex 用量日志暂不可读。"}
+                status = 503
+            encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_api_cors_headers(origin)
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+            return
+
         raw_parts = [part for part in request_path.split("/") if part]
         if not raw_parts or raw_parts[0] not in STATIC_TOP_LEVEL or any(part.startswith(".") or part in {".", ".."} for part in raw_parts):
             if request_path in ("/", "/index.html"):
@@ -311,7 +343,7 @@ class Handler(SimpleHTTPRequestHandler):
         if not self.loopback_host():
             self.send_error(403, "Loopback host required")
             return
-        if unquote(urlsplit(self.path).path) != "/api/local-projects":
+        if unquote(urlsplit(self.path).path) not in {"/api/local-projects", "/api/codex-usage"}:
             self.send_error(404)
             return
         origin = self.allowed_origin()
@@ -344,7 +376,7 @@ if __name__ == "__main__":
         raise SystemExit(f"项目根目录不存在：{PROJECT_ROOT}")
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     if sys.stdout is not None:
-        print(f"Daniel Workspace V2.4.1: http://127.0.0.1:{PORT}")
+        print(f"Daniel Workspace V3.9: http://127.0.0.1:{PORT}")
         print(f"只读扫描目录：{PROJECT_ROOT}")
         print("按 Ctrl+C 停止本地 companion。")
     try:

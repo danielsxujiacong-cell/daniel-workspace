@@ -157,7 +157,7 @@ test("the public route preserves sanitized upstream HTTP diagnostics", async (t)
   assert.equal(JSON.stringify(payload).includes(installationToken), false);
 });
 
-test("GitHub activity reads history through pagination, deduplicates repository SHAs, and returns only daily counts", async (t) => {
+test("GitHub activity deduplicates commits and returns daily plus Beijing-hour aggregates", async (t) => {
   const env = await envPromise;
   const calls = [];
   const firstSha = "abcdef0123456789abcdef0123456789abcdef01";
@@ -169,6 +169,7 @@ test("GitHub activity reads history through pagination, deduplicates repository 
     if (url.pathname === "/app/installations") return Response.json([{ id: 987654, app_id: 12345 }]);
     if (url.pathname.endsWith("/access_tokens")) return Response.json({ token: installationToken });
     if (url.pathname === "/installation/repositories") return Response.json({ repositories: [publicRepository] });
+    if (url.pathname === "/repos/acme/workspace/branches") return Response.json([{ name: "main" }]);
     if (url.pathname === "/repos/acme/workspace/commits") {
       if (url.searchParams.get("page") === "1") return Response.json(
         Array.from({ length: 100 }, () => publicCommit(firstSha, "commit a", "2026-10-12T01:00:00Z")),
@@ -193,8 +194,10 @@ test("GitHub activity reads history through pagination, deduplicates repository 
     complete: true,
     truncated: false,
     pagesRead: 2,
+    branchesRead: 1,
     commitsCount: 2,
     dailyCounts: [{ date: "2026-10-11", count: 1 }, { date: "2026-10-12", count: 1 }],
+    hourlyCounts: Array.from({ length: 24 }, (_, hour) => ({ hour, count: [9, 23].includes(hour) ? 1 : 0 })),
   }]);
   assert.equal(JSON.stringify(payload).includes(firstSha), false);
   assert.equal(JSON.stringify(payload).includes(installationToken), false);
@@ -231,6 +234,7 @@ test("GitHub activity marks malformed commit history as incomplete", async (t) =
     if (url.pathname === "/app/installations") return Response.json([{ id: 987654, app_id: 12345 }]);
     if (url.pathname.endsWith("/access_tokens")) return Response.json({ token: installationToken });
     if (url.pathname === "/installation/repositories") return Response.json({ repositories: [publicRepository] });
+    if (url.pathname === "/repos/acme/workspace/branches") return Response.json([{ name: "main" }]);
     if (url.pathname === "/repos/acme/workspace/commits") return Response.json([
       publicCommit("short-sha", "invalid", "2026-10-12T01:00:00Z"),
       publicCommit("abcdef0123456789abcdef0123456789abcdef01", "valid", "2026-10-12T02:00:00Z"),
@@ -248,9 +252,11 @@ test("GitHub activity marks malformed commit history as incomplete", async (t) =
     complete: false,
     truncated: true,
     pagesRead: 1,
+    branchesRead: 1,
     incompleteReason: "GitHub 返回了无效 Commit SHA 或提交时间；已标记为不完整。",
     commitsCount: 1,
     dailyCounts: [{ date: "2026-10-12", count: 1 }],
+    hourlyCounts: Array.from({ length: 24 }, (_, hour) => ({ hour, count: hour === 10 ? 1 : 0 })),
   }]);
 });
 
@@ -263,6 +269,7 @@ test("GitHub activity reports repository-specific rate-limit details without ret
     if (url.pathname === "/app/installations") return Response.json([{ id: 987654, app_id: 12345 }]);
     if (url.pathname.endsWith("/access_tokens")) return Response.json({ token: installationToken });
     if (url.pathname === "/installation/repositories") return Response.json({ repositories: [publicRepository] });
+    if (url.pathname === "/repos/acme/workspace/branches") return Response.json([{ name: "main" }]);
     if (url.pathname === "/repos/acme/workspace/commits") {
       commitRequests.push(url);
       return Response.json({ message: "API rate limit exceeded" }, {

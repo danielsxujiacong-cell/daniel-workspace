@@ -2,6 +2,14 @@
 
 ## Current state
 
+- **Updated:** 2026-10-13
+- **Stage:** V3.9 Dashboard 2.0 is implemented and targeted verification passes; main push and online deployment are the remaining delivery steps for this handoff.
+- **Dashboard:** the stage chart is removed from the page while saved project stage fields remain untouched. Home now uses four compact KPI cards, dual GitHub/Codex heatmaps, interactive activity trend and status ring, project activity ranking, a GitHub Beijing-hour chart when complete data exists, and the existing focus/AI sections. The chart data model separates GitHub-only heatmap counts from trend/work-log counts; unavailable sources do not become zero. Mobile was visually checked at 390px and desktop at 1440px against the current real guest snapshot; the cards stack without horizontal overflow.
+- **Local Codex usage:** `codex_usage.py` scans only token-count event metadata; it does not decode message bodies or return session IDs. `/api/codex-usage` is a loopback-only GET on Local Companion. The current machine returned a complete local range from 2026-08-19 through 2026-10-13; input, output, and cached-input fields were available, with 30/30 known days for 2026-09-14–2026-10-13. Counts are intentionally omitted from this handoff. The Companion process was restarted to load the new route; its existing logon task remains registered.
+- **Snapshot boundary:** the existing visitor KV snapshot remains the 2026-10-12 22:23 publication. It does not contain the new hourly aggregate, so the visitor hourly chart stays hidden until a future owner publication. Token totals remain absent from the visitor snapshot; the new separate checkbox is required before any manual publication can include up to 90 days. No snapshot was republished and no local Token values were transmitted.
+- **Verification so far:** `npm test` passes 140/140; `python -m unittest tests.test_codex_usage` passes 3/3; `git diff --check` passes. The real guest page rendered 26 projects, the current 30-day GitHub heatmap/trend, status ring, project ranking and focus cards at 1440px; 390px inspection confirmed single-column flow without visible horizontal overflow. Companion API was verified against real local logs using only coverage/field metadata in command output.
+- **Delivery:** commit, push to `main`, Pages deployment and Cloudflare Worker deployment are pending.
+
 - **Updated:** 2026-10-12
 - **Stage:** V3.8-C.2 is implemented, deployed, published, and verified on the guest route. Main commits: `cbbce19` (one-click publishing), `a46b6a6` (full local-path redaction), and this handoff update. Pages runs `38259433372` and `38261996642` succeeded; Worker version `e1681a9c-7883-4fc4-ac07-cf5f3a1f2119` is deployed.
 - **V3.8-C.2 implementation:** the one-click action assembles every synced project/task/work log/knowledge/decision, generated summary, and complete verified-public GitHub activity; a fixed allowlist strips paths, links, contact details, UUIDs, and common credentials. Incomplete reads fail closed and keep the existing KV snapshot. The Worker still validates the authenticated owner and payload; GET is `no-store` so the next visitor request sees the latest KV value.
@@ -58,4 +66,4 @@
 
 ## Next action
 
-V3.8-B.1 implementation and deployment are complete. If the owner wants more than 16/26 repository coverage, first verify the 10 listed repository names and whether the existing GitHub App installation is authorized for them, then refresh the activity view. The V3.8-C visitor snapshot remains a separate owner-reviewed flow and was not changed or published by this task.
+Complete the `main` push and online Pages/Worker deployment, then verify the production sources and public read path. Keep the visitor Token summary out of KV until the owner checks its dedicated approval option and manually publishes it. The current snapshot can receive the new GitHub hourly series on a later ordinary owner publication.

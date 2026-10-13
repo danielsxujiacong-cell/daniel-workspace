@@ -1462,3 +1462,108 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
   .snapshot-review-item-head { flex-direction: column; gap: 7px; }
   .snapshot-sensitive-notice, .snapshot-review-detail { margin-left: 0; }
 }
+
+/* V3.9 Dashboard 2.0 */
+.dashboard-home .dashboard-grid { gap: 15px; }
+.dashboard-home .dashboard-stat-row { gap: 10px; }
+.dashboard-home .dashboard-stat-card { min-height: 84px; border-color: color-mix(in srgb, var(--line) 72%, transparent); box-shadow: 0 3px 12px rgb(25 32 48 / 3%); }
+.dashboard-home .dashboard-stat-link { opacity: .78; }
+.dashboard-kpi-number { font-variant-numeric: tabular-nums; }
+.dashboard-dual-heatmap { display: grid; grid-column: span 12; gap: 12px; min-width: 0; padding: 15px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); box-shadow: 0 4px 18px rgb(25 32 48 / 3%); }
+.dashboard-dual-heatmap > .dashboard-chart-heading { align-items: center; }
+.dashboard-dual-heatmap > .dashboard-chart-heading h2 { font-size: 14px; }
+.dashboard-heatmap-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; min-width: 0; }
+.dashboard-heatmap-panel { display: grid; align-content: start; gap: 10px; min-width: 0; padding: 12px; border: 1px solid var(--line-soft); border-radius: 11px; background: var(--panel-raised); }
+.dashboard-heatmap-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.dashboard-heatmap-panel > header > div { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.dashboard-heatmap-panel h3 { margin: 0; font-size: 11px; font-weight: 620; }
+.dashboard-source-status, .dashboard-heatmap-panel > header > span { color: var(--muted); font-size: 9px; }
+.dashboard-heatmap-panel .dashboard-heatmap-grid { grid-template-columns: repeat(auto-fill, minmax(28px, 1fr)); grid-auto-rows: 28px; gap: 11px 5px; }
+.dashboard-heatmap-panel .dashboard-heatmap-cell { height: 28px; border-radius: 6px; }
+.dashboard-heatmap-panel .dashboard-heatmap-cell strong { font-size: 9px; }
+.dashboard-heatmap-panel .dashboard-heatmap-cell small { font-size: 7px; }
+.dashboard-heatmap-cell.github.level-1 { background: #dedcf6; }
+.dashboard-heatmap-cell.github.level-2 { background: #bcb6ec; }
+.dashboard-heatmap-cell.github.level-3 { background: #9288e1; }
+.dashboard-heatmap-cell.github.level-4 { background: #6e63d8; }
+.dashboard-heatmap-cell.token.level-1 { background: #d9e3f3; }
+.dashboard-heatmap-cell.token.level-2 { background: #adc3e4; }
+.dashboard-heatmap-cell.token.level-3 { background: #7f9fd1; }
+.dashboard-heatmap-cell.token.level-4 { background: #5b7fb9; }
+.dashboard-heatmap-panel .dashboard-heatmap-legend { gap: 4px; font-size: 8px; }
+.dashboard-heatmap-panel .dashboard-heatmap-legend i { width: 10px; height: 10px; }
+.dashboard-token-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.dashboard-token-metrics > span { display: grid; gap: 3px; min-width: 0; padding: 7px 8px; border-radius: 8px; background: color-mix(in srgb, var(--line-soft) 48%, var(--panel-raised)); }
+.dashboard-token-metrics strong { overflow: hidden; color: var(--text); font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; text-overflow: ellipsis; }
+.dashboard-token-metrics small { color: var(--muted); font-size: 8px; }
+.codex-share-approval { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 8px; line-height: 1.3; }
+.codex-share-approval input { width: 12px; height: 12px; margin: 0; accent-color: var(--accent); }
+.dashboard-data-details { min-width: 0; color: var(--muted); font-size: 9px; }
+.dashboard-data-details > summary { width: fit-content; cursor: pointer; user-select: none; }
+.dashboard-data-detail-body { display: grid; gap: 5px; margin-top: 7px; overflow-wrap: anywhere; }
+.dashboard-data-detail-body ul { display: grid; gap: 6px; max-height: 180px; overflow: auto; margin: 0; padding-left: 16px; }
+.dashboard-data-detail-body li { display: grid; gap: 2px; }
+.dashboard-data-detail-body li strong { color: var(--text); }
+.dashboard-activity-status { align-items: center; gap: 6px; margin: 0; font-size: 9px; }
+.dashboard-activity-status > span { flex-basis: auto; }
+.dashboard-activity-status > span:nth-child(2) { color: var(--muted); }
+.dashboard-activity-dot { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--green); }
+.dashboard-activity-status.partial .dashboard-activity-dot { background: #c58d48; }
+.dashboard-activity-status .dashboard-data-details { margin-left: auto; }
+.dashboard-project-activity-card, .dashboard-hourly-card { grid-column: span 6; }
+.dashboard-project-activity-list { display: grid; gap: 9px; }
+.dashboard-project-activity-row { display: grid; grid-template-columns: minmax(75px, 1.1fr) minmax(0, 2fr) 28px; align-items: center; gap: 9px; width: 100%; min-width: 0; padding: 2px 0; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+.dashboard-project-activity-row:hover .dashboard-project-activity-name { color: var(--accent-strong); }
+.dashboard-project-activity-name { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.dashboard-project-activity-track { display: flex; overflow: hidden; height: 8px; border-radius: 8px; background: color-mix(in srgb, var(--line) 60%, var(--panel)); }
+.dashboard-project-activity-track i { display: block; height: 100%; min-width: 0; animation: dashboard-bar-grow .5s cubic-bezier(.2,.7,.2,1) both; animation-delay: calc(var(--bar-index, 0) * 28ms); }
+.dashboard-project-activity-track i.github { background: #7368da; }
+.dashboard-project-activity-track i.worklog { background: #88a4d1; }
+.dashboard-project-activity-row > strong { color: var(--text); font-size: 9px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+.dashboard-project-activity-legend { display: flex; gap: 12px; color: var(--muted); font-size: 8px; }
+.dashboard-project-activity-legend span { display: flex; align-items: center; gap: 5px; }
+.dashboard-project-activity-legend i { width: 7px; height: 7px; border-radius: 2px; }
+.dashboard-project-activity-legend i.github { background: #7368da; }
+.dashboard-project-activity-legend i.worklog { background: #88a4d1; }
+.dashboard-chart-partial { color: #a87837; font-size: 8px; }
+.dashboard-chart-caption { color: var(--muted); font-size: 9px; }
+.dashboard-hourly-svg { display: block; width: 100%; height: auto; }
+.dashboard-hour-bar { cursor: pointer; }
+.dashboard-hour-bar-shape { fill: #7188c2; transform-box: fill-box; transform-origin: center bottom; animation: dashboard-bar-grow .55s cubic-bezier(.2,.7,.2,1) both; animation-delay: calc(var(--bar-index, 0) * 12ms); }
+.dashboard-hour-bar:hover .dashboard-hour-bar-shape, .dashboard-hour-bar.selected .dashboard-hour-bar-shape { fill: #5c52c8; }
+.dashboard-status-item { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto auto; align-items: center; gap: 6px; width: 100%; padding: 1px 0; border: 0; color: var(--muted); background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.dashboard-status-item:hover { color: var(--text); }
+.dashboard-status-item i { width: 7px; height: 7px; border-radius: 2px; background: var(--status-color); }
+.dashboard-status-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dashboard-status-item strong { color: var(--text); font-size: 10px; font-weight: 600; }
+.dashboard-status-item small { width: 28px; color: var(--muted); font-size: 8px; text-align: right; }
+.dashboard-status-legend li { display: block; min-width: 0; }
+.dashboard-donut-slice { cursor: pointer; transform-box: fill-box; animation: dashboard-donut-in .65s cubic-bezier(.2,.7,.2,1) both; animation-delay: calc(var(--slice-index, 0) * 65ms); }
+.dashboard-donut-slice:hover, .dashboard-donut-slice:focus { filter: brightness(1.12); stroke-width: 21; }
+.dashboard-trend-github-bar, .dashboard-trend-worklog-bar { transform-box: fill-box; transform-origin: center bottom; animation: dashboard-bar-grow .55s cubic-bezier(.2,.7,.2,1) both; animation-delay: calc(var(--bar-index, 0) * 10ms); }
+@keyframes dashboard-bar-grow { from { transform: scaleY(.05); opacity: .4; } to { transform: scaleY(1); opacity: 1; } }
+@keyframes dashboard-donut-in { from { opacity: .25; transform: scale(.92) rotate(-90deg); } to { opacity: 1; transform: scale(1) rotate(-90deg); } }
+@media (max-width: 1050px) and (min-width: 761px) {
+  .dashboard-home .dashboard-trend-card, .dashboard-home .dashboard-status-card, .dashboard-project-activity-card, .dashboard-hourly-card { grid-column: span 6; }
+  .dashboard-dual-heatmap { grid-column: span 12; }
+  .dashboard-heatmap-panel .dashboard-heatmap-grid { grid-template-columns: repeat(auto-fill, minmax(24px, 1fr)); }
+}
+@media (max-width: 760px) {
+  .dashboard-home .dashboard-grid { gap: 12px; }
+  .dashboard-heatmap-columns { grid-template-columns: minmax(0, 1fr); }
+  .dashboard-dual-heatmap { gap: 10px; padding: 11px; }
+  .dashboard-dual-heatmap > .dashboard-chart-heading { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .dashboard-heatmap-panel { padding: 10px; }
+  .dashboard-heatmap-panel .dashboard-heatmap-grid { grid-template-columns: repeat(auto-fill, minmax(24px, 1fr)); grid-auto-rows: 24px; gap: 10px 5px; }
+  .dashboard-heatmap-panel .dashboard-heatmap-cell { height: 24px; }
+  .dashboard-activity-status { flex-wrap: wrap; }
+  .dashboard-activity-status .dashboard-data-details { margin-left: 0; }
+  .dashboard-home .dashboard-trend-card, .dashboard-home .dashboard-status-card, .dashboard-project-activity-card, .dashboard-hourly-card { grid-column: span 12; }
+  .dashboard-status-body { grid-template-columns: minmax(112px, .8fr) minmax(0, 1.2fr); }
+  .dashboard-project-activity-row { grid-template-columns: minmax(80px, 1fr) minmax(0, 2fr) 28px; }
+  .codex-share-approval { max-width: 180px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-trend-github-bar, .dashboard-trend-worklog-bar, .dashboard-hour-bar-shape, .dashboard-project-activity-track i, .dashboard-donut-slice { animation-duration: .01ms; animation-delay: 0ms; }
+  .dashboard-heatmap-cell, .dashboard-chart-card, .dashboard-stat-card { transition-duration: .01ms; }
+}
