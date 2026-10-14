@@ -198,6 +198,11 @@ test("GitHub activity deduplicates commits and returns daily plus Beijing-hour a
     commitsCount: 2,
     dailyCounts: [{ date: "2026-10-11", count: 1 }, { date: "2026-10-12", count: 1 }],
     hourlyCounts: Array.from({ length: 24 }, (_, hour) => ({ hour, count: [9, 23].includes(hour) ? 1 : 0 })),
+    weekdayHourCounts: Array.from({ length: 168 }, (_, index) => ({
+      weekday: Math.floor(index / 24),
+      hour: index % 24,
+      count: [9, 6 * 24 + 23].includes(index) ? 1 : 0,
+    })),
   }]);
   assert.equal(JSON.stringify(payload).includes(firstSha), false);
   assert.equal(JSON.stringify(payload).includes(installationToken), false);

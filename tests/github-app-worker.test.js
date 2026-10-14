@@ -204,6 +204,12 @@ test("GitHub activity reads every paginated branch and deduplicates full SHAs pe
       { date: "2026-10-11", count: 1 },
       { date: "2026-10-12", count: 1 },
     ]);
+    const fingerprint = payload.repositories[0].weekdayHourCounts;
+    assert.equal(fingerprint.length, 168);
+    assert.equal(fingerprint[5 * 24 + 16].count, 1); // Saturday, 16:00 Asia/Shanghai
+    assert.equal(fingerprint[6 * 24 + 16].count, 1); // Sunday, 16:00 Asia/Shanghai
+    assert.equal(fingerprint[0 * 24 + 16].count, 1); // Monday, 16:00 Asia/Shanghai
+    assert.equal(fingerprint.reduce((sum, item) => sum + item.count, 0), payload.repositories[0].commitsCount);
     assert.deepEqual(calls.filter(({ url }) => url.pathname.endsWith("/branches")).map(({ url }) => url.searchParams.get("page")), ["1", "2"]);
     assert.deepEqual(calls.filter(({ url }) => url.pathname.endsWith("/commits")).map(({ url }) => [url.searchParams.get("sha"), url.searchParams.get("page")]), [["main", "1"], ["main", "2"], ["feature/activity", "1"]]);
     assert.equal(Object.hasOwn(payload.repositories[0], "branchNames"), false);

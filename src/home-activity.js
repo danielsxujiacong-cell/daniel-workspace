@@ -228,6 +228,24 @@ export function buildHomeActivity({
     }
   }
 
+  const validWeekdayHourCounts = (counts) => Array.isArray(counts) && counts.length === 168
+    && new Set(counts.map((item) => `${item?.weekday}:${item?.hour}`)).size === 168
+    && counts.every((item) => Number.isInteger(item?.weekday) && item.weekday >= 0 && item.weekday < 7
+      && Number.isInteger(item?.hour) && item.hour >= 0 && item.hour < 24
+      && Number.isSafeInteger(item?.count) && item.count >= 0);
+  const weekdayNames = [...repoProjects.keys()].filter((name) => resultsByRepo.get(name)?.complete === true
+    && validWeekdayHourCounts(resultsByRepo.get(name)?.weekdayHourCounts));
+  const weekdayHourlyAvailable = weekdayNames.length > 0;
+  const weekdayHourlyComplete = weekdayHourlyAvailable && githubComplete && weekdayNames.length === repoProjects.size;
+  const weekdayHourCounts = Array.from({ length: 168 }, (_, index) => ({ weekday: Math.floor(index / 24), hour: index % 24, count: 0 }));
+  if (weekdayHourlyAvailable) {
+    for (const name of weekdayNames) {
+      for (const item of resultsByRepo.get(name).weekdayHourCounts) {
+        weekdayHourCounts[item.weekday * 24 + item.hour].count += item.count;
+      }
+    }
+  }
+
   const seenLogs = new Set();
   const projectNames = new Map((Array.isArray(projects) ? projects : [])
     .filter((project) => project?.id && project?.name)
@@ -252,6 +270,23 @@ export function buildHomeActivity({
   }
 
   const workLogsCompleteResult = workLogsStatus === "ready" && workLogsComplete === true;
+  const projectCoverage = projectList.map((project) => {
+    const id = String(project.id);
+    const repoNames = [...repoProjects.entries()]
+      .filter(([, linked]) => linked.has(id))
+      .map(([name]) => name);
+    const githubCompleteForProject = repoNames.length > 0 && repoNames.every((name) => {
+      const result = resultsByRepo.get(name);
+      return result?.complete === true && result?.truncated !== true && !errorsByRepo.has(name);
+    });
+    return {
+      projectId: id,
+      githubLinked: repoNames.length > 0,
+      githubComplete: githubCompleteForProject,
+      workLogsComplete: workLogsCompleteResult,
+      complete: githubCompleteForProject && workLogsCompleteResult,
+    };
+  });
   const githubCount = days.reduce((sum, day) => sum + day.githubCommits, 0);
   const workLogCount = days.reduce((sum, day) => sum + day.workLogs, 0);
   const activeDays = days.filter((day) => day.githubCommits + day.workLogs > 0).length;
@@ -270,8 +305,10 @@ export function buildHomeActivity({
       .filter((item) => item.githubCommits > 0 || item.workLogs > 0)
       .sort((left, right) => (right.githubCommits + right.workLogs) - (left.githubCommits + left.workLogs)
         || left.projectName.localeCompare(right.projectName, "zh-CN")),
+    projectCoverage,
     hourlyCounts,
     hourlyAvailable,
+    weekdayHourCounts: weekdayHourlyAvailable ? weekdayHourCounts : [],
     totals: { githubCommits: githubCount, workLogs: workLogCount, activityRecords: githubCount + workLogCount, activeDays },
     coverage: {
       githubStatus: repoProjects.size ? githubStatus : "unlinked",
@@ -288,6 +325,8 @@ export function buildHomeActivity({
       githubComplete,
       hourlyAvailable,
       hourlyComplete,
+      weekdayHourlyAvailable,
+      weekdayHourlyComplete,
       workLogsStatus,
       workLogsComplete: workLogsCompleteResult,
       complete: githubComplete && workLogsCompleteResult,

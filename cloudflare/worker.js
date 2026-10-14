@@ -569,6 +569,7 @@ async function readRepositoryActivity(fullName, authorized, startDate, endDate, 
   const seen = new Set();
   const counts = new Map();
   const hourCounts = Array(24).fill(0);
+  const weekdayHourCounts = Array(168).fill(0);
   let recordsValid = true;
   let pagesRead = 0;
   for (const branch of branches) {
@@ -598,7 +599,9 @@ async function readRepositoryActivity(fullName, authorized, startDate, endDate, 
         if (date) {
           counts.set(date, (counts.get(date) || 0) + 1);
           const shanghaiHour = new Date(timestamp + 8 * 60 * 60 * 1000).getUTCHours();
+          const shanghaiWeekday = (new Date(timestamp + 8 * 60 * 60 * 1000).getUTCDay() + 6) % 7;
           hourCounts[shanghaiHour] += 1;
+          weekdayHourCounts[shanghaiWeekday * 24 + shanghaiHour] += 1;
         }
       }
       nextPath = page.nextPath || (page.rows.length === 100
@@ -628,6 +631,7 @@ async function readRepositoryActivity(fullName, authorized, startDate, endDate, 
     commitsCount: [...counts.values()].reduce((sum, count) => sum + count, 0),
     dailyCounts,
     hourlyCounts: hourCounts.map((count, hour) => ({ hour, count })),
+    ...(complete ? { weekdayHourCounts: weekdayHourCounts.map((count, index) => ({ weekday: Math.floor(index / 24), hour: index % 24, count })) } : {}),
   };
 }
 
@@ -764,7 +768,7 @@ function validPublicSnapshot(snapshot) {
   const rootKeys = ["schemaVersion", "generatedAt", "activity", "projects", "tasks", "workLogs", "knowledge", "decisions", "summaries", "publishedAt"];
   if (!hasAllowedKeys(snapshot, rootKeys, ["tokenUsage"]) || snapshot.schemaVersion !== 1 || !validSnapshotDate(String(snapshot.generatedAt || "").slice(0, 10))) return false;
   const activityKeys = ["startDate", "endDate", "githubDailyCounts", "githubRepositoryCount", "githubComplete", "workLogsComplete"];
-  if (!hasAllowedKeys(snapshot.activity, activityKeys, ["githubProjectDailyCounts", "githubHourlyCounts", "githubHourlyComplete"])) return false;
+  if (!hasAllowedKeys(snapshot.activity, activityKeys, ["githubProjectDailyCounts", "githubHourlyCounts", "githubHourlyComplete", "githubWeekdayHourCounts", "githubWeekdayHourlyComplete"])) return false;
   if (!validSnapshotDate(snapshot.activity.startDate) || !validSnapshotDate(snapshot.activity.endDate) || snapshot.activity.startDate > snapshot.activity.endDate) return false;
   const activityDays = (Date.parse(`${snapshot.activity.endDate}T00:00:00.000Z`) - Date.parse(`${snapshot.activity.startDate}T00:00:00.000Z`)) / 86_400_000 + 1;
   if (activityDays > 366 || !Array.isArray(snapshot.activity.githubDailyCounts) || snapshot.activity.githubDailyCounts.length > 366
@@ -796,6 +800,21 @@ function validPublicSnapshot(snapshot) {
   if (Object.hasOwn(snapshot.activity, "githubHourlyComplete") && (typeof snapshot.activity.githubHourlyComplete !== "boolean"
     || snapshot.activity.githubHourlyComplete && snapshot.activity.githubHourlyCounts?.length !== 24)) return false;
   if (snapshot.activity.githubHourlyCounts?.length === 24 && snapshot.activity.githubHourlyComplete !== true) return false;
+  if (Object.hasOwn(snapshot.activity, "githubWeekdayHourCounts")) {
+    const matrix = snapshot.activity.githubWeekdayHourCounts;
+    if (!Array.isArray(matrix) || (matrix.length !== 0 && matrix.length !== 168)) return false;
+    const cells = new Set();
+    for (const item of matrix) {
+      const key = `${item?.weekday}:${item?.hour}`;
+      if (!hasExactKeys(item, ["weekday", "hour", "count"]) || !Number.isInteger(item.weekday) || item.weekday < 0 || item.weekday > 6
+        || !Number.isInteger(item.hour) || item.hour < 0 || item.hour > 23 || cells.has(key)
+        || !Number.isSafeInteger(item.count) || item.count < 0 || item.count > 1_000_000) return false;
+      cells.add(key);
+    }
+  }
+  if (Object.hasOwn(snapshot.activity, "githubWeekdayHourlyComplete") && (typeof snapshot.activity.githubWeekdayHourlyComplete !== "boolean"
+    || snapshot.activity.githubWeekdayHourlyComplete && snapshot.activity.githubWeekdayHourCounts?.length !== 168)) return false;
+  if (snapshot.activity.githubWeekdayHourCounts?.length === 168 && snapshot.activity.githubWeekdayHourlyComplete !== true) return false;
   if (!Array.isArray(snapshot.projects) || snapshot.projects.length > 200 || !Array.isArray(snapshot.tasks) || snapshot.tasks.length > 2_000
     || !Array.isArray(snapshot.workLogs) || snapshot.workLogs.length > 5_000 || !Array.isArray(snapshot.knowledge) || snapshot.knowledge.length > 2_000
     || !Array.isArray(snapshot.decisions) || snapshot.decisions.length > 2_000) return false;

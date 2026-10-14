@@ -271,7 +271,9 @@ test("malformed or incomplete AI output is rejected", () => {
 test("generation and editing stay in page state; only the adopt action persists the project change", () => {
   const generate = app.slice(app.indexOf("async function generateProjectNextStep("), app.indexOf("function adoptProjectNextStep("));
   const adopt = app.slice(app.indexOf("function adoptProjectNextStep("), app.indexOf("function renderProjectDetail("));
-  const input = app.slice(app.indexOf('app.addEventListener("input"'), app.indexOf('app.addEventListener("focusin"'));
+  const inputStart = app.indexOf('app.addEventListener("input"');
+  const inputEnd = app.indexOf('app.addEventListener("focusin"', inputStart);
+  const input = app.slice(inputStart, inputEnd);
 
   assert.match(generate, /getAIStatus\(\)\.mode !== "real"/);
   assert.match(generate, /result\.provider !== "real"/);

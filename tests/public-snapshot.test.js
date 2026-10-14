@@ -138,6 +138,7 @@ test("hour aggregates and opted-in daily Token totals survive both public snapsh
         complete: true,
         dailyCounts: [{ date: "2026-10-12", count: 2 }],
         hourlyCounts: Array.from({ length: 24 }, (_, hour) => ({ hour, count: hour === 9 ? 2 : 0 })),
+        weekdayHourCounts: Array.from({ length: 168 }, (_, index) => ({ weekday: Math.floor(index / 24), hour: index % 24, count: index === 9 ? 2 : 0 })),
       }],
       complete: true,
       workLogsComplete: true,
@@ -159,12 +160,18 @@ test("hour aggregates and opted-in daily Token totals survive both public snapsh
   assert.equal(validatePublicSnapshot(snapshot), true);
   assert.equal(snapshot.activity.githubHourlyComplete, true);
   assert.equal(snapshot.activity.githubHourlyCounts[9].count, 2);
+  assert.equal(snapshot.activity.githubWeekdayHourlyComplete, true);
+  assert.equal(snapshot.activity.githubWeekdayHourCounts.length, 168);
+  assert.equal(snapshot.activity.githubWeekdayHourCounts[9].count, 2);
   assert.deepEqual(snapshot.tokenUsage.days.map(({ date }) => date), ["2026-10-10", "2026-10-12"]);
   assert.equal(JSON.stringify(snapshot).includes("session-id"), false);
   assert.equal(JSON.stringify(snapshot).includes("chat body"), false);
   const incompleteHourlySnapshot = structuredClone(snapshot);
   incompleteHourlySnapshot.activity.githubHourlyComplete = false;
   assert.equal(validatePublicSnapshot(incompleteHourlySnapshot), false);
+  const malformedWeekdayMatrix = structuredClone(snapshot);
+  malformedWeekdayMatrix.activity.githubWeekdayHourCounts.pop();
+  assert.equal(validatePublicSnapshot(malformedWeekdayMatrix), false);
 
   const stored = testEnv({ storedSnapshot: snapshot });
   const response = await worker.fetch(request("/api/public/snapshot"), stored.env);
@@ -288,7 +295,7 @@ test("the visitor shell starts the shared app before snapshot fetch settles and 
   const gate = await (await import("node:fs/promises")).readFile(new URL("../src/auth/gate.js", import.meta.url), "utf8");
   const app = await (await import("node:fs/promises")).readFile(new URL("../src/app.js", import.meta.url), "utf8");
   const publicStart = gate.slice(gate.indexOf("async function startPublicDashboard"), gate.indexOf("function startPrivateEntry"));
-  assert.ok(publicStart.indexOf("await import(\"../app.js?v=3.9\")") < publicStart.indexOf("void snapshotPromise.then"));
+  assert.ok(publicStart.indexOf("await import(\"../app.js?v=4.0\")") < publicStart.indexOf("void snapshotPromise.then"));
   assert.doesNotMatch(publicStart, /await\s+snapshotPromise/);
   assert.match(publicStart, /void snapshotPromise\.then/);
   assert.match(app, /publicSnapshotMode \? \{\} : await import\("\.\/store\.js\?v=3\.8-l"\)/);

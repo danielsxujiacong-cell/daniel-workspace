@@ -182,11 +182,19 @@ export function createPublicSnapshotDraft({ data = {}, workLogs = [], publicRepo
         && Number.isSafeInteger(item?.count) && item.count >= 0)
       ? activity.hourlyCounts.map(({ hour, count }) => ({ hour, count }))
       : [];
+    const weekdayHourCounts = Array.isArray(activity.weekdayHourCounts) && activity.weekdayHourCounts.length === 168
+      && new Set(activity.weekdayHourCounts.map((item) => `${item?.weekday}:${item?.hour}`)).size === 168
+      && activity.weekdayHourCounts.every((item) => Number.isInteger(item?.weekday) && item.weekday >= 0 && item.weekday < 7
+        && Number.isInteger(item?.hour) && item.hour >= 0 && item.hour < 24
+        && Number.isSafeInteger(item?.count) && item.count >= 0)
+      ? activity.weekdayHourCounts.map(({ weekday, hour, count }) => ({ weekday, hour, count }))
+      : [];
     githubActivityItems.push({
       safeId: `githubActivity-${index + 1}`,
       fields: { repository: repo.name, projectNames: projectNames.map((name) => safeSnapshotItem("githubActivity", index, repo.name, { name }).fields.name), projectIds: safeProjectIds, commits: dailyCounts.reduce((sum, item) => sum + item.count, 0), activeDays: dailyCounts.length, complete: activity.complete === true && activity.truncated !== true },
       dailyCounts,
       hourlyCounts,
+      weekdayHourCounts,
     });
   }
 
@@ -322,6 +330,8 @@ export function buildPublishableSnapshot(draft, { now = new Date().toISOString()
   const projectActivityCounts = new Map();
   const hourlyCounts = Array(24).fill(0);
   const hourlyComplete = githubActivityItems.length > 0 && githubActivityItems.every((item) => item.fields.complete === true && item.hourlyCounts?.length === 24);
+  const weekdayHourCounts = Array(168).fill(0);
+  const weekdayHourlyComplete = githubActivityItems.length > 0 && githubActivityItems.every((item) => item.fields.complete === true && item.weekdayHourCounts?.length === 168);
   for (const item of githubActivityItems) {
     for (const entry of item.dailyCounts || []) activityCounts.set(entry.date, (activityCounts.get(entry.date) || 0) + entry.count);
     for (const projectSafeId of item.fields.projectIds || []) {
@@ -333,6 +343,7 @@ export function buildPublishableSnapshot(draft, { now = new Date().toISOString()
       }
     }
     if (hourlyComplete) for (const entry of item.hourlyCounts) hourlyCounts[entry.hour] += entry.count;
+    if (weekdayHourlyComplete) for (const entry of item.weekdayHourCounts) weekdayHourCounts[entry.weekday * 24 + entry.hour] += entry.count;
   }
   const range = draft.activityRange || {};
   const githubDailyCounts = [...activityCounts.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([date, count]) => ({ date, count }));
@@ -353,6 +364,10 @@ export function buildPublishableSnapshot(draft, { now = new Date().toISOString()
       }).sort((left, right) => left.date.localeCompare(right.date) || left.projectId.localeCompare(right.projectId)),
       githubHourlyCounts: hourlyComplete ? hourlyCounts.map((count, hour) => ({ hour, count })) : [],
       githubHourlyComplete: hourlyComplete,
+      githubWeekdayHourCounts: weekdayHourlyComplete
+        ? weekdayHourCounts.map((count, index) => ({ weekday: Math.floor(index / 24), hour: index % 24, count }))
+        : [],
+      githubWeekdayHourlyComplete: weekdayHourlyComplete,
     },
     ...(draft.tokenUsage ? { tokenUsage: draft.tokenUsage } : {}),
     projects,
@@ -419,7 +434,7 @@ export function validatePublicSnapshot(snapshot) {
     || typeof snapshot.publishedAt !== "string" || snapshot.publishedAt.length > 40) return false;
   const activity = snapshot.activity;
   const activityKeys = ["startDate", "endDate", "githubDailyCounts", "githubRepositoryCount", "githubComplete", "workLogsComplete"];
-  if (!allowedKeys(activity, activityKeys, ["githubProjectDailyCounts", "githubHourlyCounts", "githubHourlyComplete"])
+  if (!allowedKeys(activity, activityKeys, ["githubProjectDailyCounts", "githubHourlyCounts", "githubHourlyComplete", "githubWeekdayHourCounts", "githubWeekdayHourlyComplete"])
     || !validSnapshotDate(activity.startDate) || !validSnapshotDate(activity.endDate) || activity.startDate > activity.endDate) return false;
   const daySpan = (Date.parse(`${activity.endDate}T00:00:00.000Z`) - Date.parse(`${activity.startDate}T00:00:00.000Z`)) / 86_400_000 + 1;
   if (daySpan > PUBLIC_SNAPSHOT_ACTIVITY_DAYS || !Array.isArray(activity.githubDailyCounts) || activity.githubDailyCounts.length > PUBLIC_SNAPSHOT_ACTIVITY_DAYS
@@ -451,6 +466,21 @@ export function validatePublicSnapshot(snapshot) {
   if (Object.hasOwn(activity, "githubHourlyComplete") && (typeof activity.githubHourlyComplete !== "boolean"
     || activity.githubHourlyComplete && activity.githubHourlyCounts?.length !== 24)) return false;
   if (activity.githubHourlyCounts?.length === 24 && activity.githubHourlyComplete !== true) return false;
+  if (Object.hasOwn(activity, "githubWeekdayHourCounts")) {
+    const matrix = activity.githubWeekdayHourCounts;
+    if (!Array.isArray(matrix) || (matrix.length !== 0 && matrix.length !== 168)) return false;
+    const cells = new Set();
+    for (const item of matrix) {
+      const key = `${item?.weekday}:${item?.hour}`;
+      if (!exactKeys(item, ["weekday", "hour", "count"]) || !Number.isInteger(item.weekday) || item.weekday < 0 || item.weekday > 6
+        || !Number.isInteger(item.hour) || item.hour < 0 || item.hour > 23 || cells.has(key)
+        || !Number.isSafeInteger(item.count) || item.count < 0 || item.count > 1_000_000) return false;
+      cells.add(key);
+    }
+  }
+  if (Object.hasOwn(activity, "githubWeekdayHourlyComplete") && (typeof activity.githubWeekdayHourlyComplete !== "boolean"
+    || activity.githubWeekdayHourlyComplete && activity.githubWeekdayHourCounts?.length !== 168)) return false;
+  if (activity.githubWeekdayHourCounts?.length === 168 && activity.githubWeekdayHourlyComplete !== true) return false;
   const { projects, tasks, workLogs, knowledge, decisions } = snapshot;
   if (!Array.isArray(projects) || projects.length > 200 || !Array.isArray(tasks) || tasks.length > 2_000
     || !Array.isArray(workLogs) || workLogs.length > 5_000 || !Array.isArray(knowledge) || knowledge.length > 2_000
@@ -580,6 +610,7 @@ export function buildSnapshotActivity(snapshot, range) {
         || left.projectName.localeCompare(right.projectName, "zh-CN")),
     hourlyCounts: snapshot.activity.githubHourlyCounts || [],
     hourlyAvailable: snapshot.activity.githubHourlyCounts?.length === 24,
+    weekdayHourCounts: snapshot.activity.githubWeekdayHourCounts || [],
     totals: { githubCommits, workLogs, activityRecords: githubCommits + workLogs, activeDays },
     coverage: {
       githubStatus: snapshot.activity.githubRepositoryCount ? "ready" : "unlinked",
@@ -590,6 +621,8 @@ export function buildSnapshotActivity(snapshot, range) {
       githubComplete,
       hourlyAvailable: snapshot.activity.githubHourlyCounts?.length === 24,
       hourlyComplete: snapshot.activity.githubHourlyComplete === true,
+      weekdayHourlyAvailable: snapshot.activity.githubWeekdayHourCounts?.length === 168,
+      weekdayHourlyComplete: snapshot.activity.githubWeekdayHourlyComplete === true,
       workLogsStatus: "ready",
       workLogsComplete: snapshot.activity.workLogsComplete === true,
       complete: githubComplete && snapshot.activity.workLogsComplete === true,

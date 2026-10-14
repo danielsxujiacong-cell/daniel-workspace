@@ -116,6 +116,49 @@ test("hour distribution stays hidden when no complete repository hours are avail
   assert.equal(model.coverage.hourlyComplete, false);
 });
 
+test("weekday-hour matrix aggregates complete GitHub commits in Beijing time and marks coverage", () => {
+  const matrix = (weekday, hour, count) => Array.from({ length: 168 }, (_, index) => ({
+    weekday: Math.floor(index / 24), hour: index % 24,
+    count: index === weekday * 24 + hour ? count : 0,
+  }));
+  const model = buildHomeActivity({
+    startDate: "2026-10-10",
+    endDate: "2026-10-12",
+    projects: [{ id: "p1", name: "项目一" }, { id: "p2", name: "项目二" }],
+    projectRepositories: [
+      { fullName: "acme/one", projectId: "p1", projectName: "项目一" },
+      { fullName: "acme/two", projectId: "p2", projectName: "项目二" },
+    ],
+    githubResults: [
+      { fullName: "acme/one", complete: true, dailyCounts: [], weekdayHourCounts: matrix(5, 16, 2) },
+      { fullName: "acme/two", complete: true, dailyCounts: [], weekdayHourCounts: matrix(0, 8, 3) },
+    ],
+    githubStatus: "ready",
+    workLogsStatus: "ready",
+  });
+  assert.equal(model.weekdayHourCounts.length, 168);
+  assert.equal(model.weekdayHourCounts[5 * 24 + 16].count, 2);
+  assert.equal(model.weekdayHourCounts[8].count, 3);
+  assert.equal(model.weekdayHourCounts.reduce((sum, item) => sum + item.count, 0), 5);
+  assert.equal(model.coverage.weekdayHourlyAvailable, true);
+  assert.equal(model.coverage.weekdayHourlyComplete, true);
+  assert.equal(model.projectCoverage.find((item) => item.projectId === "p1").complete, true);
+});
+
+test("missing weekday-hour aggregates remain unavailable instead of zero-filled", () => {
+  const model = buildHomeActivity({
+    startDate: "2026-10-10",
+    endDate: "2026-10-10",
+    projects: [{ id: "p1", name: "项目一" }],
+    projectRepositories: [{ fullName: "acme/one", projectId: "p1", projectName: "项目一" }],
+    githubResults: [{ fullName: "acme/one", complete: true, dailyCounts: [] }],
+    githubStatus: "ready",
+  });
+  assert.deepEqual(model.weekdayHourCounts, []);
+  assert.equal(model.coverage.weekdayHourlyAvailable, false);
+  assert.equal(model.coverage.weekdayHourlyComplete, false);
+});
+
 test("unreadable GitHub history marks empty dates as incomplete instead of zero activity", () => {
   const model = buildHomeActivity({
     startDate: "2026-10-10",
