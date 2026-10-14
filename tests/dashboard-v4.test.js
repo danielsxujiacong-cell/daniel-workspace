@@ -62,6 +62,56 @@ test("universe node sizes follow real activity and treemap tiles cover the proje
   assert.ok(treemap.tiles.every((tile) => tile.width > 0 && tile.height > 0));
 });
 
+test("universe lays projects into separated category clusters without node overlap", () => {
+  const groups = [
+    ["AI 与数据", 8, "AI 数据分析"],
+    ["自动化", 6, "n8n 自动化工作流"],
+    ["效率工具", 5, "项目管理工作台"],
+    ["创作与展示", 4, "作品集 design"],
+    ["其他", 3, "未分类项目"],
+  ];
+  const projects = groups.flatMap(([type, count, description], groupIndex) => Array.from({ length: count }, (_, index) => ({
+    id: `${groupIndex}-${index}`,
+    name: `${type} 项目 ${index + 1}`,
+    description,
+  })));
+  const activity = {
+    projectActivity: projects.map((project, index) => ({
+      projectId: project.id,
+      githubCommits: index % 7,
+      workLogs: index % 3,
+    })),
+  };
+  for (const [width, height] of [[1280, 680], [720, 920]]) {
+    const graph = buildProjectUniverse({ projects, activity, width, height });
+    assert.equal(graph.nodes.length, 26);
+    assert.equal(graph.clusters.length, 5);
+    assert.equal(new Set(graph.nodes.map((node) => node.category)).size, 5);
+    assert.ok(graph.nodes.every((node) => node.x >= node.radius + 10 && node.x <= graph.width - node.radius - 10
+      && node.y >= node.radius + 10 && node.y <= graph.height - node.radius - 10));
+    for (let left = 0; left < graph.nodes.length; left += 1) {
+      for (let right = left + 1; right < graph.nodes.length; right += 1) {
+        const a = graph.nodes[left];
+        const b = graph.nodes[right];
+        const gap = Math.hypot(b.x - a.x, b.y - a.y) - a.radius - b.radius;
+        assert.ok(gap >= 8, `${width}×${height}: ${a.project.name} and ${b.project.name} overlap by ${-gap}px`);
+      }
+    }
+    const repeated = buildProjectUniverse({ projects, activity, width, height });
+    assert.deepEqual(graph.nodes.map(({ id, x, y }) => [id, x, y]), repeated.nodes.map(({ id, x, y }) => [id, x, y]));
+  }
+  const repositioned = buildProjectUniverse({ projects, activity, width: 1280, height: 680, positions: { "0-1": { x: 640, y: 340 } } });
+  assert.equal(repositioned.nodes.find((node) => node.id === "0-1").x, 640);
+  assert.equal(repositioned.nodes.find((node) => node.id === "0-1").y, 340);
+});
+
+test("missing activity remains distinguishable from verified zero activity", () => {
+  const graph = buildProjectUniverse({ projects: [{ id: "unknown", name: "Unlinked project" }] });
+  assert.equal(graph.activityAvailable, false);
+  assert.equal(graph.nodes[0].score, 0);
+  assert.equal(graph.nodes[0].coverage, undefined);
+});
+
 test("weekday-hour fingerprint accepts only a full 7 by 24 real aggregate", () => {
   const full = Array.from({ length: 168 }, (_, index) => ({ weekday: Math.floor(index / 24), hour: index % 24, count: index === 42 ? 3 : 0 }));
   assert.deepEqual(weekdayHourMatrix({ weekdayHourCounts: full, coverage: { weekdayHourlyComplete: true } }), {

@@ -109,37 +109,117 @@ function stableProjectId(project) {
   return String(project.id || project.name || "");
 }
 
-export function buildProjectUniverse({ projects = [], activity = null, tasks = [], workLogs = [], width = 960, height = 420 } = {}) {
+function projectUniverseCoordinates(projects, radii, width, height) {
+  const categories = PROJECT_TYPES.filter((type) => projects.some((project) => inferProjectType(project) === type));
+  const columns = Math.max(1, Math.ceil(Math.sqrt(categories.length)));
+  const rows = Math.max(1, Math.ceil(categories.length / columns));
+  const cellWidth = width / columns;
+  const cellHeight = height / rows;
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  const points = new Map();
+  const targets = new Map();
+  const clusters = [];
+
+  categories.forEach((category, clusterIndex) => {
+    const members = projects.filter((project) => inferProjectType(project) === category)
+      .sort((left, right) => String(left.name).localeCompare(String(right.name), "zh-CN"));
+    const column = clusterIndex % columns;
+    const row = Math.floor(clusterIndex / columns);
+    const center = { x: cellWidth * (column + 0.5), y: cellHeight * (row + 0.5) };
+    clusters.push({
+      category,
+      color: TYPE_COLORS[category],
+      count: members.length,
+      x: Math.max(16, cellWidth * column + 18),
+      y: Math.max(19, cellHeight * row + 24),
+      centerX: center.x,
+      centerY: center.y,
+    });
+    members.forEach((project, index) => {
+      const id = String(project.id);
+      const angle = index * goldenAngle + clusterIndex * 0.63 - Math.PI / 2;
+      const distance = members.length <= 1 ? 0 : Math.sqrt((index + 0.6) / members.length) * Math.min(cellWidth, cellHeight) * 0.34;
+      const point = { x: center.x + Math.cos(angle) * distance, y: center.y + Math.sin(angle) * distance };
+      points.set(id, point);
+      targets.set(id, { ...point });
+    });
+  });
+
+  // Resolve local overlaps while keeping each project close to its category's intended orbit.
+  const ordered = [...projects];
+  for (let iteration = 0; iteration < 110; iteration += 1) {
+    for (let left = 0; left < ordered.length; left += 1) {
+      for (let right = left + 1; right < ordered.length; right += 1) {
+        const a = points.get(String(ordered[left].id));
+        const b = points.get(String(ordered[right].id));
+        let dx = b.x - a.x;
+        let dy = b.y - a.y;
+        let distance = Math.hypot(dx, dy);
+        const minimum = radii.get(String(ordered[left].id)) + radii.get(String(ordered[right].id)) + 10;
+        if (distance >= minimum) continue;
+        if (distance < 0.001) {
+          const angle = (left + 1) * goldenAngle;
+          dx = Math.cos(angle);
+          dy = Math.sin(angle);
+          distance = 1;
+        }
+        const push = (minimum - distance) * 0.52;
+        const ux = dx / distance;
+        const uy = dy / distance;
+        a.x -= ux * push;
+        a.y -= uy * push;
+        b.x += ux * push;
+        b.y += uy * push;
+      }
+    }
+    for (const project of ordered) {
+      const id = String(project.id);
+      const point = points.get(id);
+      const target = targets.get(id);
+      const radius = radii.get(id);
+      point.x += (target.x - point.x) * 0.006;
+      point.y += (target.y - point.y) * 0.006;
+      point.x = Math.max(radius + 18, Math.min(width - radius - 18, point.x));
+      point.y = Math.max(radius + 18, Math.min(height - radius - 18, point.y));
+    }
+  }
+  return { points, clusters };
+}
+
+export function buildProjectUniverse({ projects = [], activity = null, tasks = [], workLogs = [], width = 1280, height = 680, positions = null } = {}) {
   const projectRows = (Array.isArray(projects) ? projects : []).filter((project) => project?.id && project?.name);
-  const activityById = new Map((activity?.projectActivity || []).map((item) => [String(item.projectId), item]));
+  const activityById = new Map((activity?.projectActivity || []).map((item) => [String(item.projectId), {
+    githubCommits: Number.isSafeInteger(item.githubCommits) && item.githubCommits > 0 ? item.githubCommits : 0,
+    workLogs: Number.isSafeInteger(item.workLogs) && item.workLogs > 0 ? item.workLogs : 0,
+  }]));
   const coverageById = new Map((activity?.projectCoverage || []).map((item) => [String(item.projectId), item]));
   const maxActivity = Math.max(0, ...[...activityById.values()].map((item) => item.githubCommits + item.workLogs));
-  const sorted = [...projectRows].sort((a, b) => {
-    const left = activityById.get(String(a.id));
-    const right = activityById.get(String(b.id));
-    return (right?.githubCommits + right?.workLogs || 0) - (left?.githubCommits + left?.workLogs || 0)
-      || String(a.name).localeCompare(String(b.name), "zh-CN");
-  });
-  const centerX = width / 2;
-  const centerY = height / 2;
-  const orbitRadius = Math.min(width * 0.43, height * 0.39);
-  const nodes = sorted.map((project, index) => {
+  const radii = new Map(projectRows.map((project) => {
     const row = activityById.get(String(project.id)) || { githubCommits: 0, workLogs: 0 };
     const score = row.githubCommits + row.workLogs;
-    const angle = index * 2.399963229728653 - Math.PI / 2;
-    const distance = index === 0 ? 0 : 20 + orbitRadius * Math.sqrt(index / Math.max(1, sorted.length - 1));
+    return [String(project.id), 9 + (maxActivity ? Math.sqrt(score / maxActivity) * 18 : 0)];
+  }));
+  const { points, clusters } = projectUniverseCoordinates(projectRows, radii, width, height);
+  const nodes = projectRows.map((project) => {
+    const id = String(project.id);
+    const row = activityById.get(id) || { githubCommits: 0, workLogs: 0 };
+    const score = row.githubCommits + row.workLogs;
     const coverage = coverageById.get(String(project.id));
+    const savedPosition = positions instanceof Map ? positions.get(id) : positions?.[id];
+    const point = savedPosition && Number.isFinite(savedPosition.x) && Number.isFinite(savedPosition.y)
+      ? { x: Math.max(radii.get(id) + 10, Math.min(width - radii.get(id) - 10, savedPosition.x)), y: Math.max(radii.get(id) + 10, Math.min(height - radii.get(id) - 10, savedPosition.y)) }
+      : points.get(id);
     return {
       project,
-      id: String(project.id),
+      id,
       category: inferProjectType(project),
       color: TYPE_COLORS[inferProjectType(project)],
       activity: row,
       score,
       coverage,
-      x: centerX + Math.cos(angle) * distance,
-      y: centerY + Math.sin(angle) * distance * 0.78,
-      radius: 9 + (maxActivity ? Math.sqrt(score / maxActivity) * 20 : 0),
+      x: point.x,
+      y: point.y,
+      radius: radii.get(id),
     };
   });
   const ids = new Set(nodes.map((item) => item.id));
@@ -148,7 +228,7 @@ export function buildProjectUniverse({ projects = [], activity = null, tasks = [
     .map((link) => ({ ...link, from: nodes.find((node) => node.id === link.source), to: nodes.find((node) => node.id === link.target) }));
   const legend = PROJECT_TYPES.filter((type) => nodes.some((node) => node.category === type))
     .map((type) => ({ label: type, color: TYPE_COLORS[type], count: nodes.filter((node) => node.category === type).length }));
-  return { width, height, nodes, edges, legend, linksCount: edges.length };
+  return { width, height, nodes, edges, legend, clusters, linksCount: edges.length, activityAvailable: Boolean(activity) };
 }
 
 function splitRectangles(items, rect) {

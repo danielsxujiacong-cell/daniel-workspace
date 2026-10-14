@@ -55,6 +55,8 @@ const {
   buildOutcomeTimeline,
   buildProjectTreemap,
   buildProjectUniverse,
+  inferProjectType,
+  PROJECT_TYPES,
   weekdayHourMatrix,
 } = await import("./dashboard-v4.js?v=4.0");
 const {
@@ -94,6 +96,8 @@ let cloudInitializationRunning = false;
 let workspaceDataRevision = 0;
 let dashboardWorkLogsRequestId = 0;
 let homeActivityRequestId = 0;
+let universeActivityRequestSequence = 0;
+const universeActivityRequestIds = new Map();
 let codexUsageRequestId = 0;
 let snapshotPreviewRequestId = 0;
 const publicRepositoryVerificationCache = new Map();
@@ -138,6 +142,15 @@ const ui = {
   activityRangePreset: "30d",
   activityCustomStartDate: "",
   activityCustomEndDate: "",
+  universeActivityDays: 30,
+  universeActivities: {},
+  universeCategory: "all",
+  universeQuery: "",
+  universeSelectedProjectId: "",
+  universePositions: {},
+  universeLayoutKey: "",
+  universeCamera: { x: 0, y: 0, scale: 1 },
+  universeCameraTransition: false,
   selectedActivityDate: "",
   selectedFingerprintCell: "",
   selectedMilestoneId: "",
@@ -486,6 +499,7 @@ async function loadHomeActivity({ force = false } = {}) {
       workLogsStatus: model?.coverage.workLogsStatus || "unavailable",
       error: model ? "" : publishedSnapshot ? `当前已发布快照覆盖 ${publishedSnapshot.activity.startDate} 至 ${publishedSnapshot.activity.endDate}。` : dashboardUnavailableMessage(),
     };
+    if (range.preset === "30d" && model) ui.universeActivities[30] = { days: 30, status: "ready", model, range };
     if (ui.selectedActivityDate && (ui.selectedActivityDate < range.startDate || ui.selectedActivityDate > range.endDate)) ui.selectedActivityDate = "";
     render();
     return;
@@ -571,9 +585,107 @@ async function loadHomeActivity({ force = false } = {}) {
     fetchedAt: githubData.fetchedAt || new Date().toISOString(),
     githubData,
   };
+  if (range.preset === "30d") ui.universeActivities[30] = { days: 30, status: "ready", model, range };
   if (ui.selectedActivityDate && (ui.selectedActivityDate < range.startDate || ui.selectedActivityDate > range.endDate)) {
     ui.selectedActivityDate = "";
   }
+  render();
+}
+
+async function loadUniverseActivityRange(days) {
+  const period = Number(days);
+  if (![7, 30, 90].includes(period)) return;
+  ui.universeActivityDays = period;
+  const current = ui.universeActivities[period];
+  const homeRange = ui.homeActivity.range;
+  if (current?.status === "ready" || current?.status === "loading") { render(); return; }
+  if (homeRange?.preset === `${period}d` && ui.homeActivity.model) {
+    ui.universeActivities[period] = { days: period, status: "ready", model: ui.homeActivity.model, range: homeRange };
+    render();
+    return;
+  }
+
+  if (publicSnapshotMode) {
+    const snapshotEndDate = publishedSnapshot?.activity?.endDate;
+    const anchor = snapshotEndDate ? new Date(`${snapshotEndDate}T12:00:00+08:00`) : Date.now();
+    const range = resolveActivityRange(`${period}d`, { now: anchor });
+    if (!publishedSnapshot || range.startDate < publishedSnapshot.activity.startDate || range.endDate > publishedSnapshot.activity.endDate) {
+      ui.universeActivities[period] = {
+        days: period,
+        status: "unavailable",
+        model: null,
+        range,
+        error: `公开快照未覆盖近 ${period} 天；该范围的活跃度无法核实。`,
+      };
+      render();
+      return;
+    }
+    const model = buildSnapshotActivity(publishedSnapshot, range);
+    ui.universeActivities[period] = {
+      days: period,
+      status: model ? "ready" : "unavailable",
+      model,
+      range,
+      error: model ? "" : `公开快照未提供近 ${period} 天的完整活动数据。`,
+    };
+    render();
+    return;
+  }
+
+  if (!workspaceActive || !cloudWorkspaceAvailable()) {
+    ui.universeActivities[period] = { days: period, status: "unavailable", model: null, range: null, error: dashboardUnavailableMessage() };
+    render();
+    return;
+  }
+  const range = resolveActivityRange(`${period}d`);
+  const projects = [...db.projects];
+  const projectRepositories = projects.flatMap((project) => {
+    const repository = parsePublicGitHubRepository(project.github);
+    return repository ? [{ fullName: repository.fullName, projectId: project.id, projectName: project.name }] : [];
+  });
+  const repositories = [...new Set(projectRepositories.map((entry) => entry.fullName))];
+  const projectIds = projects.map((project) => project.id).filter(Boolean);
+  const cacheKey = `${range.startDate}|${range.endDate}|${repositories.map((name) => name.toLowerCase()).sort().join(",")}`;
+  const requestId = ++universeActivityRequestSequence;
+  universeActivityRequestIds.set(period, requestId);
+  ui.universeActivities[period] = { days: period, status: "loading", model: null, range, error: "" };
+  render();
+
+  const cachedGitHub = repositories.length ? loadGitHubActivityCache(workspaceAuth.userId, cacheKey) : null;
+  const githubPromise = repositories.length
+    ? cachedGitHub ? Promise.resolve(cachedGitHub) : fetchGitHubActivity(repositories, workspaceAuth, range)
+    : Promise.resolve({ repositories: [], errors: [] });
+  const workLogsPromise = loadWorkLogActivityForRange(workspaceAuth.client, workspaceAuth.userId, { ...range, projectIds });
+  const [githubResult, workLogsResult] = await Promise.allSettled([githubPromise, workLogsPromise]);
+  if (!workspaceActive || universeActivityRequestIds.get(period) !== requestId) return;
+
+  const githubReady = githubResult.status === "fulfilled";
+  const workLogsReady = workLogsResult.status === "fulfilled";
+  const githubData = githubReady ? githubResult.value : {
+    repositories: [],
+    errors: repositories.map((fullName) => ({ fullName, code: "github_request_failed", message: githubResult.reason?.message || "GitHub 历史暂不可读。" })),
+  };
+  if (githubReady && repositories.length && !cachedGitHub) saveGitHubActivityCache(workspaceAuth.userId, cacheKey, githubData);
+  const workLogData = workLogsReady ? workLogsResult.value : { items: [], complete: false };
+  const model = buildHomeActivity({
+    startDate: range.startDate,
+    endDate: range.endDate,
+    projects,
+    projectRepositories,
+    githubResults: githubData.repositories,
+    githubErrors: githubData.errors,
+    githubStatus: repositories.length ? (githubReady ? "ready" : "error") : "unlinked",
+    workLogs: workLogData.items,
+    workLogsStatus: workLogsReady ? "ready" : "error",
+    workLogsComplete: workLogData.complete,
+  });
+  ui.universeActivities[period] = {
+    days: period,
+    status: "ready",
+    model,
+    range,
+    error: [!githubReady ? "GitHub 历史暂不可读。" : "", !workLogsReady ? "工作记录暂不可读。" : ""].filter(Boolean).join(" "),
+  };
   render();
 }
 
@@ -1900,29 +2012,88 @@ function renderSummaryValue(value) {
   return `<span>${esc(value ?? "")}</span>`;
 }
 
+function universeActivityForView(activity) {
+  const days = ui.universeActivityDays;
+  const cached = ui.universeActivities[days];
+  if (cached) return cached;
+  if (activity.range?.preset === `${days}d` && activity.model) return { days, status: activity.status, model: activity.model, range: activity.range, error: activity.error };
+  return { days, status: "idle", model: null, range: null, error: "" };
+}
+
 function renderProjectUniverse(projects, activity, dataAvailable) {
   if (!dataAvailable) {
     return `<section class="card dashboard-v4-card project-universe-card grid-span-12"><header class="dashboard-chart-heading"><h2>项目星系图</h2></header><div class="dashboard-chart-empty">${esc(dashboardUnavailableMessage())}</div></section>`;
   }
-  const model = buildProjectUniverse({ projects, activity: activity.model, tasks: db.tasks, workLogs: publicSnapshotMode ? db.workLogs : ui.dashboardWorkLogs.items });
+  const compactMap = window.matchMedia("(max-width: 760px)").matches;
+  const layoutKey = compactMap ? "compact" : "wide";
+  if (ui.universeLayoutKey !== layoutKey) {
+    ui.universeLayoutKey = layoutKey;
+    ui.universePositions = {};
+    ui.universeCamera = { x: 0, y: 0, scale: 1 };
+  }
+  const model = buildProjectUniverse({
+    projects,
+    activity: activity.model,
+    tasks: db.tasks,
+    workLogs: publicSnapshotMode ? db.workLogs : ui.dashboardWorkLogs.items,
+    positions: ui.universePositions,
+    width: compactMap ? 720 : 1280,
+    height: compactMap ? 920 : 680,
+  });
   const relatedById = new Map(model.nodes.map((node) => [node.id, new Set([node.id])]));
   for (const edge of model.edges) {
     relatedById.get(edge.source)?.add(edge.target);
     relatedById.get(edge.target)?.add(edge.source);
   }
-  const links = model.edges.map(({ from, to, kind }) => `<line class="project-universe-link" data-from="${esc(from.id)}" data-to="${esc(to.id)}" x1="${from.x.toFixed(1)}" y1="${from.y.toFixed(1)}" x2="${to.x.toFixed(1)}" y2="${to.y.toFixed(1)}"><title>${esc(kind)}</title></line>`).join("");
+  const selectedCategory = ui.universeCategory;
+  const normalizedQuery = ui.universeQuery.trim().toLocaleLowerCase();
+  const match = (project) => !normalizedQuery || String(project.name).toLocaleLowerCase().includes(normalizedQuery);
+  const prominentIds = new Set([
+    ...model.nodes.filter((node) => node.project.isPinned === true).map((node) => node.id),
+    ...model.nodes.filter((node) => node.score > 0).sort((left, right) => right.score - left.score).slice(0, 3).map((node) => node.id),
+  ]);
+  const visibleIds = new Set(model.nodes.filter((node) => selectedCategory === "all" || node.category === selectedCategory).map((node) => node.id));
+  const clusterColumns = Math.max(1, Math.ceil(Math.sqrt(model.clusters.length)));
+  const clusterRows = Math.max(1, Math.ceil(model.clusters.length / clusterColumns));
+  const clusterGlowRadius = Math.min(model.width / clusterColumns, model.height / clusterRows) * 0.45;
+  const clusters = model.clusters.map((cluster) => `<g class="project-universe-cluster ${selectedCategory !== "all" && cluster.category !== selectedCategory ? "is-filtered" : ""}" data-category="${esc(cluster.category)}" style="--type-color:${cluster.color}"><circle cx="${cluster.centerX.toFixed(1)}" cy="${cluster.centerY.toFixed(1)}" r="${clusterGlowRadius.toFixed(1)}"/><text x="${cluster.x.toFixed(1)}" y="${cluster.y.toFixed(1)}">${esc(cluster.category)} <tspan>${cluster.count}</tspan></text></g>`).join("");
+  const links = model.edges.filter(({ source, target }) => visibleIds.has(source) && visibleIds.has(target))
+    .map(({ from, to, source, target, kind }) => `<line class="project-universe-link" data-from="${esc(from.id)}" data-to="${esc(to.id)}" x1="${from.x.toFixed(1)}" y1="${from.y.toFixed(1)}" x2="${to.x.toFixed(1)}" y2="${to.y.toFixed(1)}"><title>${esc(kind)}</title></line>`).join("");
   const nodes = model.nodes.map((node, index) => {
-    const total = node.score;
+    const githubComplete = node.coverage?.githubComplete ?? activity.model?.coverage?.githubComplete;
+    const workLogsComplete = node.coverage?.workLogsComplete ?? activity.model?.coverage?.workLogsComplete;
+    const activityCounts = `GitHub ${githubComplete === true ? node.activity.githubCommits : "未知"} 次 · 工作记录 ${workLogsComplete === true ? node.activity.workLogs : "未知"} 条`;
     const coverageNote = node.coverage ? node.coverage.complete ? "项目来源完整" : "项目来源部分缺失"
       : !activity.model ? "活动数据不可用"
-        : activity.model.coverage?.complete ? "已读取范围内无提交或工作记录" : "活动历史部分缺失";
-    const label = `${node.project.name} · ${node.category} · GitHub ${node.activity.githubCommits} 次 · 工作记录 ${node.activity.workLogs} 条 · ${coverageNote}`;
+        : activity.model.coverage?.complete ? node.score ? "活动来源完整" : "已读取范围内无提交或工作记录" : "活动历史部分缺失";
+    const label = `${node.project.name} · ${node.category} · ${activityCounts} · ${coverageNote}`;
     const neighbours = [...(relatedById.get(node.id) || [])].join(" ");
-    return `<g class="project-universe-node ${node.coverage && !node.coverage.complete ? "partial" : ""}" data-action="view-project" data-id="${esc(node.id)}" data-project-id="${esc(node.id)}" data-related="${esc(neighbours)}" tabindex="0" role="button" aria-label="${esc(label)}" style="--node-index:${index};--node-color:${node.color}"><title>${esc(label)}</title><circle class="project-universe-halo" cx="${node.x.toFixed(1)}" cy="${node.y.toFixed(1)}" r="${(node.radius + 12).toFixed(1)}"/><circle class="project-universe-orbit" cx="${node.x.toFixed(1)}" cy="${node.y.toFixed(1)}" r="${(node.radius + 5).toFixed(1)}"/><circle class="project-universe-star" cx="${node.x.toFixed(1)}" cy="${node.y.toFixed(1)}" r="${node.radius.toFixed(1)}"/><circle class="project-universe-core" cx="${node.x.toFixed(1)}" cy="${node.y.toFixed(1)}" r="2.2"/>${total > 0 && node.radius > 15 ? `<text class="project-universe-label" x="${node.x.toFixed(1)}" y="${(node.y + node.radius + 17).toFixed(1)}" text-anchor="middle">${esc(node.project.name.slice(0, 14))}${node.project.name.length > 14 ? "…" : ""}</text>` : ""}</g>`;
+    const classes = [
+      "project-universe-node",
+      node.coverage && !node.coverage.complete ? "partial" : "",
+      prominentIds.has(node.id) ? "label-prominent" : "",
+      selectedCategory !== "all" && node.category !== selectedCategory ? "is-filtered" : "",
+      normalizedQuery && !match(node.project) ? "is-search-dimmed" : normalizedQuery ? "is-search-match" : "",
+      ui.universeSelectedProjectId === node.id ? "is-selected" : "",
+    ].filter(Boolean).join(" ");
+    const preferredLabel = node.project.name.length > 25 ? `${node.project.name.slice(0, 24)}…` : node.project.name;
+    return `<g class="${classes}" data-action="select-universe-project" data-id="${esc(node.id)}" data-project-id="${esc(node.id)}" data-project-name="${esc(node.project.name)}" data-category="${esc(node.category)}" data-x="${node.x.toFixed(2)}" data-y="${node.y.toFixed(2)}" data-radius="${node.radius.toFixed(1)}" data-related="${esc(neighbours)}" tabindex="0" role="button" aria-label="${esc(label)}" aria-pressed="${ui.universeSelectedProjectId === node.id ? "true" : "false"}" style="--node-index:${index};--node-color:${node.color}"><title>${esc(label)}</title><circle class="project-universe-hit" cx="${node.x.toFixed(1)}" cy="${node.y.toFixed(1)}" r="30"/><circle class="project-universe-halo" cx="${node.x.toFixed(1)}" cy="${node.y.toFixed(1)}" r="${(node.radius + 14).toFixed(1)}"/><circle class="project-universe-orbit" cx="${node.x.toFixed(1)}" cy="${node.y.toFixed(1)}" r="${(node.radius + 5).toFixed(1)}"/><circle class="project-universe-star" cx="${node.x.toFixed(1)}" cy="${node.y.toFixed(1)}" r="${node.radius.toFixed(1)}"/><circle class="project-universe-core" cx="${node.x.toFixed(1)}" cy="${node.y.toFixed(1)}" r="2.2"/><text class="project-universe-label" x="${node.x.toFixed(1)}" y="${(node.y + node.radius + 18).toFixed(1)}" text-anchor="middle">${esc(preferredLabel)}</text></g>`;
   }).join("");
   const legend = model.legend.map((item) => `<span><i style="--type-color:${item.color}"></i>${esc(item.label)} <small>${item.count}</small></span>`).join("");
-  const dataStatus = activity.status === "loading" ? "活动读取中" : activity.model?.coverage?.complete ? "真实活动量 · 30 天" : activity.model ? "部分来源" : "活动数据暂不可用";
-  return `<section class="card dashboard-v4-card project-universe-card grid-span-12"><header class="dashboard-chart-heading"><h2>项目星系图</h2><div class="project-universe-meta"><span>${model.nodes.length} 个项目</span><span>${model.edges.length} 条可核实关联</span></div></header><div class="project-universe-stage"><svg class="project-universe-svg" viewBox="0 0 ${model.width} ${model.height}" role="group" aria-label="可交互项目星系图">${links}${nodes}</svg>${model.edges.length ? "" : `<div class="project-universe-empty-link">尚未发现共享仓库或明确的跨项目仓库引用</div>`}</div><footer class="project-universe-footer"><div class="project-universe-legend">${legend || `<span>暂无项目分类</span>`}</div><span class="project-universe-source">${esc(dataStatus)} · 节点大小按提交与工作记录</span></footer></section>`;
+  const current = projects.find((project) => String(project.id) === ui.universeSelectedProjectId);
+  const stage = typeof current?.stage === "string" && !["", "未填写", "尚未设置阶段"].includes(current.stage.trim()) ? current.stage.trim() : "尚未记录";
+  const next = typeof current?.next === "string" && !["", "未填写"].includes(current.next.trim()) ? current.next.trim() : "尚未记录";
+  const website = current ? deployedWebsiteUrl(current) : "";
+  const repository = current ? parsePublicGitHubRepository(current.github)?.url || "" : "";
+  const detail = current ? `<aside class="project-universe-detail" role="dialog" aria-label="${esc(current.name)} 项目详情"><button class="project-universe-detail-close" data-action="close-universe-project" aria-label="关闭项目详情">×</button><div class="project-universe-detail-kicker">${esc(inferProjectType(current))} · 项目详情</div><h3>${esc(current.name)}</h3>${current.status ? statusPill(current.status) : ""}<div class="project-universe-detail-field"><span>当前阶段</span><strong>${esc(stage)}</strong></div><div class="project-universe-detail-field"><span>下一步</span><strong>${esc(next)}</strong></div><footer><button class="button primary small" data-action="view-project" data-id="${esc(current.id)}">打开项目详情 ${icon("arrow")}</button>${website ? `<a class="button quiet small" href="${esc(website)}" target="_blank" rel="noopener noreferrer">体验网站 ${icon("external")}</a>` : repository ? `<a class="button quiet small" href="${esc(repository)}" target="_blank" rel="noopener noreferrer">GitHub ${icon("external")}</a>` : ""}</footer></aside>` : "";
+  const statusMessage = activity.status === "loading" ? `正在读取近 ${activity.days} 天活动`
+    : activity.status === "unavailable" ? activity.error || "此范围活动数据不可用"
+      : activity.model?.coverage?.complete ? `完整来源 · 近 ${activity.days} 天`
+        : activity.model ? `部分来源 · 近 ${activity.days} 天`
+          : `近 ${activity.days} 天暂无可用数据`;
+  const queryMatch = normalizedQuery ? model.nodes.find((node) => match(node.project) && (selectedCategory === "all" || node.category === selectedCategory)) : null;
+  const filterOptions = model.legend.map((item) => `<option value="${esc(item.label)}" ${selectedCategory === item.label ? "selected" : ""}>${esc(item.label)} · ${item.count}</option>`).join("");
+  return `<section class="card dashboard-v4-card project-universe-card grid-span-12"><header class="dashboard-chart-heading"><div><h2>Project Universe</h2><span class="project-universe-heading-subtitle">项目星系图 · 按类型探索</span></div><div class="project-universe-meta"><span>${model.nodes.length} 个项目</span><span>${model.edges.length} 条可核实关联</span></div></header><div class="project-universe-toolbar"><label class="project-universe-search"><span class="sr-only">搜索项目</span><input id="universe-search" type="search" value="${esc(ui.universeQuery)}" placeholder="搜索项目名称…" autocomplete="off" aria-label="搜索并定位项目"/><button class="button quiet small" data-action="locate-universe-search" ${queryMatch ? "" : "disabled"}>定位</button></label><label class="project-universe-category"><span class="sr-only">项目分类</span><select id="universe-category" aria-label="按分类筛选项目"><option value="all" ${selectedCategory === "all" ? "selected" : ""}>全部类别 · ${model.nodes.length}</option>${filterOptions}</select></label><div class="project-universe-period" role="group" aria-label="项目活跃度统计范围"><span>活跃度</span>${[7, 30, 90].map((days) => `<button type="button" data-action="select-universe-range" data-days="${days}" class="${ui.universeActivityDays === days ? "active" : ""}" aria-pressed="${ui.universeActivityDays === days}">${days} 天</button>`).join("")}</div><div class="project-universe-camera" role="group" aria-label="星图缩放"><button type="button" data-action="zoom-universe" data-direction="in" aria-label="放大星图">＋</button><button type="button" data-action="zoom-universe" data-direction="out" aria-label="缩小星图">−</button><button type="button" data-action="reset-universe-camera" aria-label="重置星图位置">重置</button></div></div><div class="project-universe-stage"><svg class="project-universe-svg" viewBox="0 0 ${model.width} ${model.height}" role="group" aria-label="可拖拽、缩放和筛选的项目星系图"><g class="project-universe-world" transform="translate(${ui.universeCamera.x.toFixed(1)} ${ui.universeCamera.y.toFixed(1)}) scale(${ui.universeCamera.scale.toFixed(3)})">${clusters}${links}${nodes}</g></svg><div class="project-universe-hover-label" aria-hidden="true" hidden></div>${detail}<div class="project-universe-map-hint">拖动星图移动 · 拖拽星球可避让 · 滚轮缩放</div>${activity.error ? `<div class="project-universe-empty-link">${esc(activity.error)}</div>` : ""}</div><footer class="project-universe-footer"><div class="project-universe-legend">${legend || `<span>暂无项目分类</span>`}</div><span class="project-universe-source">${esc(statusMessage)} · 节点大小依据已核实提交与工作记录；缺失区间保持未知</span></footer></section>`;
 }
 
 function renderDevelopmentFingerprint(activity) {
@@ -1999,11 +2170,12 @@ function renderDashboard() {
   const unavailableLabel = publicSnapshotMode ? "快照未发布" : "云端读取中";
   const stats = `<section class="dashboard-overview grid-span-12" aria-label="项目指挥中心"><div class="dashboard-home-title"><div class="eyebrow">DANIEL WORKSPACE · PROJECT CONTROL CENTER</div><h1>项目指挥中心</h1></div><div class="dashboard-stat-row">${dashboardStatCard("项目总数", dataAvailable ? counts.projects : "—", "projects", "all", dataAvailable ? "查看全部项目" : unavailableLabel, !dataAvailable)}${dashboardStatCard("进行中", dataAvailable ? counts.activeProjects : "—", "projects", "active", dataAvailable ? "查看进行中" : unavailableLabel, !dataAvailable)}${dashboardStatCard("已完成", dataAvailable ? completedProjects : "—", "projects", "completed", dataAvailable ? "查看已完成" : unavailableLabel, !dataAvailable)}${dashboardStatCard("待办任务", dataAvailable ? counts.openTasks : "—", "tasks", "todo", dataAvailable ? "查看待办任务" : unavailableLabel, !dataAvailable)}</div></section>`;
   const activity = ui.homeActivity;
+  const universeActivity = universeActivityForView(activity);
   const timelineWorkLogs = publicSnapshotMode ? db.workLogs : ui.dashboardWorkLogs.items;
   const timelineWorkStatus = publicSnapshotMode ? (publishedSnapshot?.workLogs ? "ready" : "idle") : ui.dashboardWorkLogs.status;
   return renderDashboardLayout([
     stats,
-    renderProjectUniverse(projects, activity, dataAvailable),
+    renderProjectUniverse(projects, universeActivity, dataAvailable),
     renderActivityHeatmap(activity, dataAvailable),
     renderDevelopmentFingerprint(activity),
     renderProjectActivityChart(activity, dataAvailable),
@@ -3043,12 +3215,26 @@ async function generateAndPublishVisitorSnapshot() {
 function render() {
   if (!workspaceActive) return;
   if (publicSnapshotMode && ui.page === "local-project") ui.page = "home";
+  const priorUniverseTransform = app.querySelector(".project-universe-world")?.getAttribute("transform") || "translate(0 0) scale(1)";
   const page = ui.page === "home" ? renderDashboard() : ui.page === "projects" ? renderProjects() : ui.page === "project" ? renderProjectDetail() : ui.page === "snapshot-preview" && !publicSnapshotMode ? renderSnapshotPreview() : ui.page === "local-project" ? renderLocalProjectDetail() : ui.page === "tasks" ? renderTasks() : ui.page === "knowledge" ? renderKnowledge() : renderDecisions();
   app.dataset.mode = publicSnapshotMode ? "public" : "private";
   const headerActions = publicSnapshotMode
     ? `<span class="today-label">公开只读快照</span><a class="button quiet small public-login-link" href="?mode=login">登录</a>`
     : `<button class="button primary small snapshot-publish-action" data-action="publish-visitor-snapshot" aria-label="一键发布访客快照" ${["loading", "publishing"].includes(ui.publicSnapshotPreview.status) ? "disabled" : ""}>${["loading", "publishing"].includes(ui.publicSnapshotPreview.status) ? "正在发布…" : `<span class="snapshot-publish-label-desktop">一键发布访客快照</span><span class="snapshot-publish-label-mobile">发布快照</span>`}</button><span class="today-label">${formattedDate()}</span><button class="cloud-sync-indicator ${esc(ui.cloud.status)}" data-action="retry-cloud-sync" title="点击重新检查 Supabase 同步状态" aria-live="polite" ${["loading", "syncing", "migrating"].includes(ui.cloud.status) ? "disabled" : ""}>${esc(cloudStatusLabel())}</button><button class="icon-button theme-toggle" data-action="toggle-theme" title="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式" aria-label="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式">${icon(document.documentElement.dataset.theme === "light" ? "moon" : "sun")}</button><button class="icon-button" data-action="open-assistant" title="打开 AI Assistant" aria-label="打开 AI Assistant">${icon("sparkle")}</button><button class="button quiet small logout-button" data-action="logout">退出登录</button>`;
   app.innerHTML = `${renderNav()}<main class="main-shell"><header class="topbar"><div class="breadcrumbs"><span>Daniel Workspace</span><span class="crumb-sep">/</span><strong>${esc(pageTitle())}</strong></div><div class="search-wrap"><div class="search-box">${icon("search")}<input id="global-search" type="search" value="${esc(ui.query)}" placeholder="搜索项目、资料、决策或任务…" autocomplete="off" aria-label="全局搜索"/><kbd class="search-hint">Ctrl K</kbd></div><div id="search-results"></div></div><div class="topbar-actions">${headerActions}</div></header><div class="content">${publicSnapshotMode ? renderPublicSnapshotNotice() : renderCloudNotice()}${page}</div></main>${renderAssistant()}${renderModal()}<div class="toast-region" id="toast-region" aria-live="polite"></div>`;
+  if (ui.universeCameraTransition && ui.page === "home") {
+    const world = app.querySelector(".project-universe-world");
+    if (world) {
+      world.setAttribute("transform", ui.universeCameraFrom || priorUniverseTransform);
+      world.classList.add("is-camera-moving");
+      requestAnimationFrame(() => {
+        if (!world.isConnected) return;
+        world.setAttribute("transform", universeCameraTransform(ui.universeCamera));
+        requestAnimationFrame(() => world.classList.remove("is-camera-moving"));
+      });
+    }
+    ui.universeCameraTransition = false;
+  }
   animateDashboardKpiNumbers();
   renderSearchResults();
   enforcePublicReadOnlyDom();
@@ -3401,6 +3587,7 @@ async function toggleProjectPinInCloud(projectId) {
 const PUBLIC_READ_ONLY_ACTIONS = new Set([
   "dashboard-stat", "filter-projects", "filter-project-status", "clear-project-status", "filter-tasks",
   "select-home-activity-date", "select-fingerprint-cell", "select-milestone", "toggle-decision", "toggle-more-menu", "view-project", "view-decision", "open-search-result",
+  "select-universe-project", "close-universe-project", "locate-universe-search", "select-universe-range", "zoom-universe", "reset-universe-camera",
 ]);
 
 function enforcePublicReadOnlyDom() {
@@ -3413,7 +3600,7 @@ function enforcePublicReadOnlyDom() {
   }
   app.querySelectorAll("form, [contenteditable='true'], [data-private-only]").forEach((element) => element.remove());
   for (const element of app.querySelectorAll("input, textarea, select")) {
-    if (["global-search", "dashboard-activity-range", "dashboard-activity-start", "dashboard-activity-end"].includes(element.id)) continue;
+    if (["global-search", "dashboard-activity-range", "dashboard-activity-start", "dashboard-activity-end", "universe-search", "universe-category"].includes(element.id)) continue;
     element.remove();
   }
 }
@@ -3421,6 +3608,25 @@ function enforcePublicReadOnlyDom() {
 function handleAction(action, element, sourceEvent) {
   if (publicSnapshotMode && !PUBLIC_READ_ONLY_ACTIONS.has(action)) return;
   const id = element.dataset.id;
+  if (action === "select-universe-project") { focusUniverseProject(id); return; }
+  if (action === "close-universe-project") { ui.universeSelectedProjectId = ""; render(); return; }
+  if (action === "locate-universe-search") { locateUniverseSearch(); return; }
+  if (action === "select-universe-range") { void loadUniverseActivityRange(element.dataset.days); return; }
+  if (action === "zoom-universe") {
+    const svg = app.querySelector(".project-universe-svg");
+    if (!svg) return;
+    const current = ui.universeCamera;
+    const width = Number(svg.viewBox.baseVal.width) || 1280;
+    const height = Number(svg.viewBox.baseVal.height) || 680;
+    const scale = current.scale * (element.dataset.direction === "in" ? 1.22 : 0.82);
+    applyUniverseCamera(svg, {
+      scale,
+      x: width / 2 - (width / 2 - current.x) / current.scale * scale,
+      y: height / 2 - (height / 2 - current.y) / current.scale * scale,
+    }, true);
+    return;
+  }
+  if (action === "reset-universe-camera") { applyUniverseCamera(app.querySelector(".project-universe-svg"), { x: 0, y: 0, scale: 1 }, true); return; }
   if (action === "publish-visitor-snapshot") { void generateAndPublishVisitorSnapshot(); return; }
   if (action === "close-confirm-backdrop" && element !== sourceEvent?.target) return;
   if (action === "refresh-home-activity") { void loadHomeActivity({ force: true }); return; }
@@ -3662,6 +3868,156 @@ function updateUniverseFocus(node) {
   }
 }
 
+let universePointerState = null;
+let universeSuppressClick = false;
+
+function universeCameraTransform(camera = ui.universeCamera) {
+  return `translate(${camera.x.toFixed(1)} ${camera.y.toFixed(1)}) scale(${camera.scale.toFixed(3)})`;
+}
+
+function universeSvgPoint(event, svg) {
+  const point = svg.createSVGPoint();
+  point.x = event.clientX;
+  point.y = event.clientY;
+  return point.matrixTransform(svg.getScreenCTM().inverse());
+}
+
+function universeWorldPoint(event, svg) {
+  const world = svg.querySelector(".project-universe-world");
+  const point = svg.createSVGPoint();
+  point.x = event.clientX;
+  point.y = event.clientY;
+  return point.matrixTransform(world.getScreenCTM().inverse());
+}
+
+function applyUniverseCamera(svg, camera, animate = false) {
+  if (!svg) return;
+  const next = {
+    x: Number.isFinite(camera.x) ? camera.x : 0,
+    y: Number.isFinite(camera.y) ? camera.y : 0,
+    scale: Math.max(0.72, Math.min(2.25, Number(camera.scale) || 1)),
+  };
+  ui.universeCamera = next;
+  const world = svg.querySelector(".project-universe-world");
+  if (!world) return;
+  if (animate) world.classList.add("is-camera-moving");
+  world.setAttribute("transform", universeCameraTransform(next));
+  if (animate) setTimeout(() => world.classList.remove("is-camera-moving"), 460);
+}
+
+function focusUniverseProject(projectId, svg = app.querySelector(".project-universe-svg")) {
+  const node = [...(svg?.querySelectorAll(".project-universe-node") || [])].find((item) => item.dataset.projectId === String(projectId));
+  if (!node || node.classList.contains("is-filtered")) return;
+  const scale = 1.45;
+  const width = Number(svg.viewBox.baseVal.width) || 1280;
+  const height = Number(svg.viewBox.baseVal.height) || 680;
+  const x = Number(node.dataset.x);
+  const y = Number(node.dataset.y);
+  ui.universeCameraFrom = svg.querySelector(".project-universe-world")?.getAttribute("transform") || "translate(0 0) scale(1)";
+  ui.universeCamera = { x: width / 2 - x * scale, y: height / 2 - y * scale, scale };
+  ui.universeSelectedProjectId = String(projectId);
+  ui.universeCameraTransition = true;
+  render();
+}
+
+function locateUniverseSearch() {
+  const query = ui.universeQuery.trim().toLocaleLowerCase();
+  if (!query) return;
+  const node = [...app.querySelectorAll(".project-universe-node")].find((item) => !item.classList.contains("is-filtered")
+    && item.dataset.projectName.toLocaleLowerCase().includes(query));
+  if (!node) { toast("没有找到符合条件的项目"); return; }
+  focusUniverseProject(node.dataset.projectId);
+}
+
+function setUniverseNodePosition(node, x, y) {
+  const svg = node.closest(".project-universe-svg");
+  const world = svg?.querySelector(".project-universe-world");
+  const width = Number(svg?.viewBox.baseVal.width) || 1280;
+  const height = Number(svg?.viewBox.baseVal.height) || 680;
+  const radius = Number(node.dataset.radius) || 9;
+  const nextX = Math.max(radius + 12, Math.min(width - radius - 12, x));
+  const nextY = Math.max(radius + 12, Math.min(height - radius - 12, y));
+  node.dataset.x = nextX.toFixed(2);
+  node.dataset.y = nextY.toFixed(2);
+  for (const circle of node.querySelectorAll("circle")) circle.setAttribute("cx", nextX.toFixed(1)), circle.setAttribute("cy", nextY.toFixed(1));
+  const label = node.querySelector(".project-universe-label");
+  if (label) { label.setAttribute("x", nextX.toFixed(1)); label.setAttribute("y", (nextY + radius + 18).toFixed(1)); }
+  const positions = new Map([...world.querySelectorAll(".project-universe-node")].map((item) => [item.dataset.projectId, { x: Number(item.dataset.x), y: Number(item.dataset.y) }]));
+  for (const edge of world.querySelectorAll(".project-universe-link")) {
+    const from = positions.get(edge.dataset.from);
+    const to = positions.get(edge.dataset.to);
+    if (!from || !to) continue;
+    edge.setAttribute("x1", from.x.toFixed(1)); edge.setAttribute("y1", from.y.toFixed(1));
+    edge.setAttribute("x2", to.x.toFixed(1)); edge.setAttribute("y2", to.y.toFixed(1));
+  }
+}
+
+function pushUniverseNeighbours(draggedNode) {
+  const svg = draggedNode.closest(".project-universe-svg");
+  const nodes = [...(svg?.querySelectorAll(".project-universe-node") || [])];
+  const visible = nodes.filter((node) => !node.classList.contains("is-filtered"));
+  for (let iteration = 0; iteration < 6; iteration += 1) {
+    let resolvedOverlap = true;
+    for (let left = 0; left < visible.length; left += 1) {
+      for (let right = left + 1; right < visible.length; right += 1) {
+        const a = visible[left];
+        const b = visible[right];
+        const ax = Number(a.dataset.x);
+        const ay = Number(a.dataset.y);
+        const bx = Number(b.dataset.x);
+        const by = Number(b.dataset.y);
+        let dx = bx - ax;
+        let dy = by - ay;
+        let distance = Math.hypot(dx, dy);
+        const minimum = (Number(a.dataset.radius) || 9) + (Number(b.dataset.radius) || 9) + 12;
+        if (distance >= minimum) continue;
+        resolvedOverlap = false;
+        if (distance < 0.001) { dx = 1; dy = 0; distance = 1; }
+        const push = minimum - distance;
+        const ux = dx / distance;
+        const uy = dy / distance;
+        const moveA = a === draggedNode ? 0 : b === draggedNode ? push : push / 2;
+        const moveB = b === draggedNode ? 0 : a === draggedNode ? push : push / 2;
+        if (moveA) setUniverseNodePosition(a, ax - ux * moveA, ay - uy * moveA);
+        if (moveB) setUniverseNodePosition(b, bx + ux * moveB, by + uy * moveB);
+      }
+    }
+    if (resolvedOverlap) break;
+  }
+}
+
+function saveUniversePositions(svg) {
+  ui.universePositions = Object.fromEntries([...svg.querySelectorAll(".project-universe-node")]
+    .map((node) => [node.dataset.projectId, { x: Number(node.dataset.x), y: Number(node.dataset.y) }]));
+}
+
+function updateUniverseTooltip(node, event) {
+  const stage = node.closest(".project-universe-stage");
+  const tooltip = stage?.querySelector(".project-universe-hover-label");
+  if (!tooltip) return;
+  const bounds = stage.getBoundingClientRect();
+  const x = event?.clientX ?? bounds.left + bounds.width / 2;
+  const y = event?.clientY ?? bounds.top + 30;
+  tooltip.textContent = node.dataset.projectName;
+  tooltip.style.left = `${Math.max(12, Math.min(bounds.width - 12, x - bounds.left))}px`;
+  tooltip.style.top = `${Math.max(10, y - bounds.top - 14)}px`;
+  tooltip.hidden = false;
+}
+
+function applyUniverseSearch(svg, query) {
+  if (!svg) return;
+  const normalized = query.trim().toLocaleLowerCase();
+  let matches = 0;
+  for (const node of svg.querySelectorAll(".project-universe-node")) {
+    const matched = !normalized || node.dataset.projectName.toLocaleLowerCase().includes(normalized);
+    node.classList.toggle("is-search-dimmed", Boolean(normalized && !matched));
+    node.classList.toggle("is-search-match", Boolean(normalized && matched));
+    if (matched && !node.classList.contains("is-filtered")) matches += 1;
+  }
+  const locate = svg.closest(".project-universe-card")?.querySelector('[data-action="locate-universe-search"]');
+  if (locate) locate.disabled = !normalized || matches === 0;
+}
+
 function clearUniverseFocus(svg) {
   if (!svg) return;
   svg.querySelectorAll(".is-focus, .is-neighbour, .is-dimmed, .is-highlight").forEach((item) => {
@@ -3671,22 +4027,105 @@ function clearUniverseFocus(svg) {
 
 app.addEventListener("pointerover", (event) => {
   const node = event.target.closest?.(".project-universe-node");
-  if (node && !node.contains(event.relatedTarget)) updateUniverseFocus(node);
+  if (node && !node.contains(event.relatedTarget)) { updateUniverseFocus(node); updateUniverseTooltip(node, event); }
 });
+app.addEventListener("pointermove", (event) => {
+  if (universePointerState?.pointerId === event.pointerId) {
+    const state = universePointerState;
+    if (state.node) {
+      const point = universeWorldPoint(event, state.svg);
+      const dx = point.x - state.startPoint.x;
+      const dy = point.y - state.startPoint.y;
+      if (Math.hypot(dx, dy) > 2) state.moved = true;
+      if (state.moved) {
+        setUniverseNodePosition(state.node, state.startNode.x + dx, state.startNode.y + dy);
+        pushUniverseNeighbours(state.node);
+      }
+    } else {
+      const point = universeSvgPoint(event, state.svg);
+      const dx = point.x - state.startPoint.x;
+      const dy = point.y - state.startPoint.y;
+      if (Math.hypot(dx, dy) > 2) state.moved = true;
+      if (state.moved) applyUniverseCamera(state.svg, { ...state.startCamera, x: state.startCamera.x + dx, y: state.startCamera.y + dy });
+    }
+    event.preventDefault();
+    return;
+  }
+  const node = event.target.closest?.(".project-universe-node");
+  if (node) updateUniverseTooltip(node, event);
+});
+app.addEventListener("pointerdown", (event) => {
+  const svg = event.target.closest?.(".project-universe-svg");
+  if (!svg || event.button > 0 || !svg.hasPointerCapture) return;
+  const node = event.target.closest?.(".project-universe-node");
+  const point = node ? universeWorldPoint(event, svg) : universeSvgPoint(event, svg);
+  universePointerState = {
+    pointerId: event.pointerId,
+    svg,
+    node,
+    startPoint: { x: point.x, y: point.y },
+    startNode: node ? { x: Number(node.dataset.x), y: Number(node.dataset.y) } : null,
+    startCamera: { ...ui.universeCamera },
+    moved: false,
+  };
+  svg.setPointerCapture(event.pointerId);
+  event.preventDefault();
+});
+function finishUniversePointer(event) {
+  const state = universePointerState;
+  if (!state || state.pointerId !== event.pointerId) return;
+  universePointerState = null;
+  try { state.svg.releasePointerCapture(event.pointerId); } catch { /* pointer capture may already be released */ }
+  if (state.node && state.moved) saveUniversePositions(state.svg);
+  if (state.node && !state.moved) focusUniverseProject(state.node.dataset.projectId, state.svg);
+  if (state.node) {
+    universeSuppressClick = true;
+    setTimeout(() => { universeSuppressClick = false; }, 0);
+  }
+}
+app.addEventListener("pointerup", finishUniversePointer);
+app.addEventListener("pointercancel", finishUniversePointer);
+app.addEventListener("wheel", (event) => {
+  const svg = event.target.closest?.(".project-universe-svg");
+  if (!svg) return;
+  event.preventDefault();
+  const pointer = universeSvgPoint(event, svg);
+  const current = ui.universeCamera;
+  const scale = Math.max(0.72, Math.min(2.25, current.scale * Math.exp(-event.deltaY * 0.001)));
+  const worldX = (pointer.x - current.x) / current.scale;
+  const worldY = (pointer.y - current.y) / current.scale;
+  applyUniverseCamera(svg, { scale, x: pointer.x - worldX * scale, y: pointer.y - worldY * scale });
+}, { passive: false });
 app.addEventListener("pointerout", (event) => {
   const node = event.target.closest?.(".project-universe-node");
-  if (node && !node.contains(event.relatedTarget)) clearUniverseFocus(node.closest(".project-universe-svg"));
+  if (node && !node.contains(event.relatedTarget)) {
+    clearUniverseFocus(node.closest(".project-universe-svg"));
+    const tooltip = node.closest(".project-universe-stage")?.querySelector(".project-universe-hover-label");
+    if (tooltip) tooltip.hidden = true;
+  }
 });
 app.addEventListener("focusin", (event) => {
   const node = event.target.closest?.(".project-universe-node");
-  if (node) updateUniverseFocus(node);
+  if (node) { updateUniverseFocus(node); updateUniverseTooltip(node); }
 });
 app.addEventListener("focusout", (event) => {
   const node = event.target.closest?.(".project-universe-node");
-  if (node && !node.contains(event.relatedTarget)) clearUniverseFocus(node.closest(".project-universe-svg"));
+  if (node && !node.contains(event.relatedTarget)) {
+    clearUniverseFocus(node.closest(".project-universe-svg"));
+    const tooltip = node.closest(".project-universe-stage")?.querySelector(".project-universe-hover-label");
+    if (tooltip) tooltip.hidden = true;
+  }
+});
+
+app.addEventListener("keydown", (event) => {
+  if (event.target.id === "universe-search" && event.key === "Enter") {
+    event.preventDefault();
+    locateUniverseSearch();
+  }
 });
 
 app.addEventListener("click", (event) => {
+  if (universeSuppressClick) { universeSuppressClick = false; return; }
   const element = event.target.closest("[data-action], [data-page]");
   if (!element) return;
   if (element.dataset.page) {
@@ -3706,6 +4145,16 @@ app.addEventListener("toggle", (event) => {
 
 app.addEventListener("change", (event) => {
   const target = event.target;
+  if (target.id === "universe-category") {
+    ui.universeCategory = target.value === "all" || PROJECT_TYPES.includes(target.value) ? target.value : "all";
+    const selected = db.projects.find((project) => String(project.id) === ui.universeSelectedProjectId);
+    if (selected && ui.universeCategory !== "all" && inferProjectType(selected) !== ui.universeCategory) {
+      ui.universeSelectedProjectId = "";
+      ui.universeCamera = { x: 0, y: 0, scale: 1 };
+    }
+    render();
+    return;
+  }
   if (target.id === "codex-share-token-usage" && !publicSnapshotMode) {
     ui.codexUsage.approvePublic = target.checked === true;
     render();
@@ -3735,7 +4184,7 @@ app.addEventListener("change", (event) => {
 });
 
 app.addEventListener("keydown", (event) => {
-  const target = event.target.closest('[data-action="view-project"], [data-action="view-decision"], [data-action="toggle-decision"], [data-action="select-home-activity-date"], [data-action="filter-project-status"]');
+  const target = event.target.closest('[data-action="view-project"], [data-action="select-universe-project"], [data-action="view-decision"], [data-action="toggle-decision"], [data-action="select-home-activity-date"], [data-action="filter-project-status"]');
   if (target && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); handleAction(target.dataset.action, target); }
   if (event.target.id === "assistant-input" && event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
@@ -3757,7 +4206,12 @@ app.addEventListener("keydown", (event) => {
 });
 
 app.addEventListener("input", (event) => {
-  if (publicSnapshotMode && event.target.id !== "global-search") return;
+  if (publicSnapshotMode && !["global-search", "universe-search"].includes(event.target.id)) return;
+  if (event.target.id === "universe-search") {
+    ui.universeQuery = event.target.value;
+    applyUniverseSearch(app.querySelector(".project-universe-svg"), ui.universeQuery);
+    return;
+  }
   if (event.target.id === "project-next-step-draft" && ui.projectNextStep?.projectId === ui.projectId) {
     const state = ui.projectNextStep;
     state.suggestion = event.target.value.slice(0, 500);
