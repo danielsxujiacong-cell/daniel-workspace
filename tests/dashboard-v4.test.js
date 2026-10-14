@@ -82,7 +82,7 @@ test("universe lays projects into separated category clusters without node overl
       workLogs: index % 3,
     })),
   };
-  for (const [width, height] of [[1280, 680], [720, 920]]) {
+  for (const [width, height] of [[1280, 620], [960, 700], [720, 880]]) {
     const graph = buildProjectUniverse({ projects, activity, width, height });
     assert.equal(graph.nodes.length, 26);
     assert.equal(graph.clusters.length, 5);
@@ -100,9 +100,17 @@ test("universe lays projects into separated category clusters without node overl
     const repeated = buildProjectUniverse({ projects, activity, width, height });
     assert.deepEqual(graph.nodes.map(({ id, x, y }) => [id, x, y]), repeated.nodes.map(({ id, x, y }) => [id, x, y]));
   }
-  const repositioned = buildProjectUniverse({ projects, activity, width: 1280, height: 680, positions: { "0-1": { x: 640, y: 340 } } });
+  const repositioned = buildProjectUniverse({ projects, activity, width: 1280, height: 620, positions: { "0-1": { x: 640, y: 340 } } });
   assert.equal(repositioned.nodes.find((node) => node.id === "0-1").x, 640);
   assert.equal(repositioned.nodes.find((node) => node.id === "0-1").y, 340);
+
+  const filtered = buildProjectUniverse({ projects, activity, width: 1280, height: 620, selectedCategory: "AI 与数据" });
+  const baseline = buildProjectUniverse({ projects, activity, width: 1280, height: 620 });
+  const focused = filtered.nodes.filter((node) => node.category === "AI 与数据");
+  assert.equal(focused.length, 8);
+  const center = focused.reduce((sum, node) => ({ x: sum.x + node.x / focused.length, y: sum.y + node.y / focused.length }), { x: 0, y: 0 });
+  assert.ok(Math.abs(center.x - 640) < 24 && Math.abs(center.y - 322.4) < 24, "filtered constellation recenters in the canvas");
+  assert.notDeepEqual(focused.map(({ id, x, y }) => [id, x, y]), baseline.nodes.filter((node) => node.category === "AI 与数据").map(({ id, x, y }) => [id, x, y]));
 });
 
 test("missing activity remains distinguishable from verified zero activity", () => {

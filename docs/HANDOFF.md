@@ -2,14 +2,23 @@
 
 ## Current state
 
-- **Updated:** 2026-10-13
-- **Stage:** V3.9 Dashboard 2.0 is implemented, verified, committed, pushed to `main`, and deployed.
-- **Dashboard:** the stage chart is removed from the page while saved project stage fields remain untouched. Home now uses four compact KPI cards, dual GitHub/Codex heatmaps, interactive activity trend and status ring, project activity ranking, a GitHub Beijing-hour chart when complete data exists, and the existing focus/AI sections. The chart data model separates GitHub-only heatmap counts from trend/work-log counts; unavailable sources do not become zero. Mobile was visually checked at 390px and desktop at 1440px against the current real guest snapshot; the cards stack without horizontal overflow.
-- **Local Codex usage:** `codex_usage.py` scans only token-count event metadata; it does not decode message bodies or return session IDs. `/api/codex-usage` is a loopback-only GET on Local Companion. The current machine returned a complete local range from 2026-08-19 through 2026-10-13; input, output, and cached-input fields were available, with 30/30 known days for 2026-09-14–2026-10-13. Counts are intentionally omitted from this handoff. The Companion process was restarted to load the new route; its existing logon task remains registered.
-- **Snapshot boundary:** the existing visitor KV snapshot remains the 2026-10-12 22:23 publication. It does not contain the new hourly aggregate, so the visitor hourly chart stays hidden until a future owner publication. Token totals remain absent from the visitor snapshot; the new separate checkbox is required before any manual publication can include up to 90 days. No snapshot was republished and no local Token values were transmitted.
-- **Verification:** `npm test` passes 140/140; `python -m unittest tests.test_codex_usage` passes 3/3; JavaScript syntax checks, Python compilation, and `git diff --check` pass. The real guest page rendered 26 projects, the 30-day GitHub heatmap/trend, status ring, project ranking, and focus cards at 1440px; 390px inspection confirmed single-column flow without visible horizontal overflow. The local Companion API and production assets were verified; production root and V3.9 app, snapshot, and Token modules return HTTP 200. The Worker health endpoint reports configured and healthy.
-- **Delivery:** feature commit `f08aa99` (`feat: upgrade dashboard to V3.9`) is pushed to `main`. Cloudflare Worker version `75392284-d55e-4c55-915f-bea194c6cc44` is deployed. Both `workspace.danielxu.cn` and the GitHub Pages project URL serve the V3.9 entry page. No authenticated private UI session was available for a signed-in visual walkthrough.
-- **Next action:** if the visitor dashboard should show the new hourly chart, the owner can review and manually publish a new snapshot. Token usage remains private unless the owner separately opts in to its snapshot checkbox and publishes it.
+- **Updated:** 2026-10-14
+- **Stage:** V4.0 Project Universe visual flagship V2 is implemented and verified in an isolated headless browser.
+- **Project Universe:** the shared public/private renderer now uses a deep-space chart inside the existing light dashboard. All 26 projects form separated, irregular category constellations with activity-based sizes and pinned-project emphasis. Category disks and relationship lines are absent. Hover reveals project activity and summary; click smoothly focuses a planet and opens project details. Search, category re-layout, mouse drag/wheel, touch drag/pinch, reset view, and a mobile bottom sheet are supported.
+- **Visual acceptance:** isolated headless Edge showed the real 26-project public snapshot at a 1440px desktop viewport. At 390×844, a validator-generated in-memory snapshot fixture confirmed the shared component, same-row toolbar, and no horizontal overflow. The public snapshot Worker timed out intermittently during mobile setup; the fixture was not persisted. No authenticated browser session was available for a signed-in walkthrough.
+- **Interaction acceptance:** desktop hover, detail focus, category recentering, search/locate, wheel zoom, drag, and reset were exercised. Mobile tap opened the bottom sheet; two-finger pinch on the canvas changed camera scale from 1.0 to 1.556. prefers-reduced-motion disables planet breathing and layout transitions.
+- **Verification:** npm test passes 149/149; changed JavaScript syntax checks, git diff --check, and model geometry tests pass. For 26 projects, the model builder measured 10.46ms median and 12.33ms p95 over 80 runs on this host. It uses lightweight SVG/CSS without a WebGL or 3D engine.
+- **Scope and delivery:** authentication, other Dashboard modules, Supabase, GitHub, and snapshot logic were not changed. Only cache-busting import URLs were updated in the gate. The user requested a feature-only commit and push to main; unrelated worktree edits are preserved outside that commit.
+
+## Recent history
+
+### 2026-10-13 · V3.9 Dashboard 2.0
+
+- Dashboard removed the stage chart while preserving saved project stage fields; it added compact KPI cards, dual GitHub/Codex heatmaps, activity trend and status ring, project ranking, and the Beijing-hour chart when complete data exists. The charts distinguish unavailable data from zero.
+- `codex_usage.py` reads token-count event metadata only; the loopback-only `/api/codex-usage` endpoint does not decode message bodies or return session IDs. The current machine had a complete local range from 2026-08-19 through 2026-10-13, with 30/30 known days from 2026-09-14–2026-10-13. Counts were intentionally omitted.
+- The visitor KV snapshot remained the 2026-10-12 22:23 publication. It did not include the hourly aggregate; Token totals remained absent and were not transmitted. No snapshot was republished.
+- V3.9 verification passed 140/140 Node tests and 3/3 `tests.test_codex_usage` tests. The real guest page showed 26 projects and the Dashboard charts at 1440px; 390px inspection had no visible horizontal overflow. Production assets and the healthy Worker were verified.
+- V3.9 commit `f08aa99` was pushed and deployed; Worker version `75392284-d55e-4c55-915f-bea194c6cc44` served the release on both configured static hosts. No authenticated private UI session was available for its signed-in walkthrough.
 
 - **Updated:** 2026-10-12
 - **Stage:** V3.8-C.2 is implemented, deployed, published, and verified on the guest route. Main commits: `cbbce19` (one-click publishing), `a46b6a6` (full local-path redaction), and this handoff update. Pages runs `38259433372` and `38261996642` succeeded; Worker version `e1681a9c-7883-4fc4-ac07-cf5f3a1f2119` is deployed.
@@ -67,4 +76,4 @@
 
 ## Next action
 
-Complete the `main` push and online Pages/Worker deployment, then verify the production sources and public read path. Keep the visitor Token summary out of KV until the owner checks its dedicated approval option and manually publishes it. The current snapshot can receive the new GitHub hourly series on a later ordinary owner publication.
+When an authenticated browser session is available, review the shared Project Universe renderer in the signed-in shell. No authentication or data changes are required for this release.

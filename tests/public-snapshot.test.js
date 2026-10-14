@@ -295,7 +295,7 @@ test("the visitor shell starts the shared app before snapshot fetch settles and 
   const gate = await (await import("node:fs/promises")).readFile(new URL("../src/auth/gate.js", import.meta.url), "utf8");
   const app = await (await import("node:fs/promises")).readFile(new URL("../src/app.js", import.meta.url), "utf8");
   const publicStart = gate.slice(gate.indexOf("async function startPublicDashboard"), gate.indexOf("function startPrivateEntry"));
-  assert.ok(publicStart.indexOf("await import(\"../app.js?v=4.0\")") < publicStart.indexOf("void snapshotPromise.then"));
+  assert.ok(publicStart.indexOf("await import(\"../app.js?v=4.0.1\")") < publicStart.indexOf("void snapshotPromise.then"));
   assert.doesNotMatch(publicStart, /await\s+snapshotPromise/);
   assert.match(publicStart, /void snapshotPromise\.then/);
   assert.match(app, /publicSnapshotMode \? \{\} : await import\("\.\/store\.js\?v=3\.8-l"\)/);

@@ -58,7 +58,7 @@ const {
   inferProjectType,
   PROJECT_TYPES,
   weekdayHourMatrix,
-} = await import("./dashboard-v4.js?v=4.0");
+} = await import("./dashboard-v4.js?v=4.0.1");
 const {
   countPinnedProjects,
   getHomePinnedProjects,
@@ -147,10 +147,11 @@ const ui = {
   universeCategory: "all",
   universeQuery: "",
   universeSelectedProjectId: "",
-  universePositions: {},
   universeLayoutKey: "",
   universeCamera: { x: 0, y: 0, scale: 1 },
   universeCameraTransition: false,
+  universeAnimateLayout: false,
+  universePositionTransitionFrom: null,
   selectedActivityDate: "",
   selectedFingerprintCell: "",
   selectedMilestoneId: "",
@@ -2025,75 +2026,72 @@ function renderProjectUniverse(projects, activity, dataAvailable) {
     return `<section class="card dashboard-v4-card project-universe-card grid-span-12"><header class="dashboard-chart-heading"><h2>项目星系图</h2></header><div class="dashboard-chart-empty">${esc(dashboardUnavailableMessage())}</div></section>`;
   }
   const compactMap = window.matchMedia("(max-width: 760px)").matches;
-  const layoutKey = compactMap ? "compact" : "wide";
+  const portraitMap = window.matchMedia("(max-width: 460px)").matches;
+  const layoutKey = portraitMap ? "portrait" : compactMap ? "compact" : "wide";
   if (ui.universeLayoutKey !== layoutKey) {
     ui.universeLayoutKey = layoutKey;
-    ui.universePositions = {};
     ui.universeCamera = { x: 0, y: 0, scale: 1 };
   }
+  const selectedCategory = PROJECT_TYPES.includes(ui.universeCategory) ? ui.universeCategory : "all";
+  const normalizedQuery = ui.universeQuery.trim().toLocaleLowerCase();
+  const matchesQuery = (project) => !normalizedQuery || String(project.name).toLocaleLowerCase().includes(normalizedQuery);
   const model = buildProjectUniverse({
     projects,
     activity: activity.model,
     tasks: db.tasks,
     workLogs: publicSnapshotMode ? db.workLogs : ui.dashboardWorkLogs.items,
-    positions: ui.universePositions,
-    width: compactMap ? 720 : 1280,
-    height: compactMap ? 920 : 680,
+    width: portraitMap ? 720 : compactMap ? 960 : 1280,
+    height: portraitMap ? 880 : compactMap ? 700 : 620,
+    selectedCategory,
   });
-  const relatedById = new Map(model.nodes.map((node) => [node.id, new Set([node.id])]));
-  for (const edge of model.edges) {
-    relatedById.get(edge.source)?.add(edge.target);
-    relatedById.get(edge.target)?.add(edge.source);
-  }
-  const selectedCategory = ui.universeCategory;
-  const normalizedQuery = ui.universeQuery.trim().toLocaleLowerCase();
-  const match = (project) => !normalizedQuery || String(project.name).toLocaleLowerCase().includes(normalizedQuery);
-  const prominentIds = new Set([
-    ...model.nodes.filter((node) => node.project.isPinned === true).map((node) => node.id),
-    ...model.nodes.filter((node) => node.score > 0).sort((left, right) => right.score - left.score).slice(0, 3).map((node) => node.id),
-  ]);
-  const visibleIds = new Set(model.nodes.filter((node) => selectedCategory === "all" || node.category === selectedCategory).map((node) => node.id));
-  const clusterColumns = Math.max(1, Math.ceil(Math.sqrt(model.clusters.length)));
-  const clusterRows = Math.max(1, Math.ceil(model.clusters.length / clusterColumns));
-  const clusterGlowRadius = Math.min(model.width / clusterColumns, model.height / clusterRows) * 0.45;
-  const clusters = model.clusters.map((cluster) => `<g class="project-universe-cluster ${selectedCategory !== "all" && cluster.category !== selectedCategory ? "is-filtered" : ""}" data-category="${esc(cluster.category)}" style="--type-color:${cluster.color}"><circle cx="${cluster.centerX.toFixed(1)}" cy="${cluster.centerY.toFixed(1)}" r="${clusterGlowRadius.toFixed(1)}"/><text x="${cluster.x.toFixed(1)}" y="${cluster.y.toFixed(1)}">${esc(cluster.category)} <tspan>${cluster.count}</tspan></text></g>`).join("");
-  const links = model.edges.filter(({ source, target }) => visibleIds.has(source) && visibleIds.has(target))
-    .map(({ from, to, source, target, kind }) => `<line class="project-universe-link" data-from="${esc(from.id)}" data-to="${esc(to.id)}" x1="${from.x.toFixed(1)}" y1="${from.y.toFixed(1)}" x2="${to.x.toFixed(1)}" y2="${to.y.toFixed(1)}"><title>${esc(kind)}</title></line>`).join("");
+  const activeNodes = model.nodes.filter((node) => selectedCategory === "all" || node.category === selectedCategory);
+  const pinned = model.nodes.filter((node) => node.flagship).sort((left, right) => right.score - left.score);
+  const prominentIds = new Set((pinned.length ? pinned : model.nodes.filter((node) => node.score > 0).sort((left, right) => right.score - left.score)).slice(0, 3).map((node) => node.id));
+  const clusters = model.clusters.map((cluster) => `<g class="project-universe-cluster ${selectedCategory !== "all" && cluster.category !== selectedCategory ? "is-filtered" : ""}" data-category="${esc(cluster.category)}" style="--type-color:${cluster.color}"><text x="${cluster.x.toFixed(1)}" y="${cluster.y.toFixed(1)}" text-anchor="middle">${esc(cluster.category)}</text></g>`).join("");
   const nodes = model.nodes.map((node, index) => {
     const githubComplete = node.coverage?.githubComplete ?? activity.model?.coverage?.githubComplete;
     const workLogsComplete = node.coverage?.workLogsComplete ?? activity.model?.coverage?.workLogsComplete;
-    const activityCounts = `GitHub ${githubComplete === true ? node.activity.githubCommits : "未知"} 次 · 工作记录 ${workLogsComplete === true ? node.activity.workLogs : "未知"} 条`;
+    const githubActivity = githubComplete === true ? `${node.activity.githubCommits} 次` : "未知";
+    const workLogActivity = workLogsComplete === true ? `${node.activity.workLogs} 条` : "未知";
+    const activityCounts = `GitHub ${githubActivity} · 工作记录 ${workLogActivity}`;
     const coverageNote = node.coverage ? node.coverage.complete ? "项目来源完整" : "项目来源部分缺失"
       : !activity.model ? "活动数据不可用"
         : activity.model.coverage?.complete ? node.score ? "活动来源完整" : "已读取范围内无提交或工作记录" : "活动历史部分缺失";
     const label = `${node.project.name} · ${node.category} · ${activityCounts} · ${coverageNote}`;
-    const neighbours = [...(relatedById.get(node.id) || [])].join(" ");
+    const summary = typeof node.project.description === "string" ? node.project.description.trim().replace(/\s+/g, " ").slice(0, 150) : "";
     const classes = [
       "project-universe-node",
       node.coverage && !node.coverage.complete ? "partial" : "",
+      node.flagship ? "is-flagship" : "",
       prominentIds.has(node.id) ? "label-prominent" : "",
       selectedCategory !== "all" && node.category !== selectedCategory ? "is-filtered" : "",
-      normalizedQuery && !match(node.project) ? "is-search-dimmed" : normalizedQuery ? "is-search-match" : "",
+      normalizedQuery && !matchesQuery(node.project) ? "is-search-dimmed" : normalizedQuery ? "is-search-match" : "",
       ui.universeSelectedProjectId === node.id ? "is-selected" : "",
     ].filter(Boolean).join(" ");
-    const preferredLabel = node.project.name.length > 25 ? `${node.project.name.slice(0, 24)}…` : node.project.name;
-    return `<g class="${classes}" data-action="select-universe-project" data-id="${esc(node.id)}" data-project-id="${esc(node.id)}" data-project-name="${esc(node.project.name)}" data-category="${esc(node.category)}" data-x="${node.x.toFixed(2)}" data-y="${node.y.toFixed(2)}" data-radius="${node.radius.toFixed(1)}" data-related="${esc(neighbours)}" tabindex="0" role="button" aria-label="${esc(label)}" aria-pressed="${ui.universeSelectedProjectId === node.id ? "true" : "false"}" style="--node-index:${index};--node-color:${node.color}"><title>${esc(label)}</title><circle class="project-universe-hit" cx="${node.x.toFixed(1)}" cy="${node.y.toFixed(1)}" r="30"/><circle class="project-universe-halo" cx="${node.x.toFixed(1)}" cy="${node.y.toFixed(1)}" r="${(node.radius + 14).toFixed(1)}"/><circle class="project-universe-orbit" cx="${node.x.toFixed(1)}" cy="${node.y.toFixed(1)}" r="${(node.radius + 5).toFixed(1)}"/><circle class="project-universe-star" cx="${node.x.toFixed(1)}" cy="${node.y.toFixed(1)}" r="${node.radius.toFixed(1)}"/><circle class="project-universe-core" cx="${node.x.toFixed(1)}" cy="${node.y.toFixed(1)}" r="2.2"/><text class="project-universe-label" x="${node.x.toFixed(1)}" y="${(node.y + node.radius + 18).toFixed(1)}" text-anchor="middle">${esc(preferredLabel)}</text></g>`;
+    const preferredLabel = node.project.name.length > 22 ? `${node.project.name.slice(0, 21)}…` : node.project.name;
+    const gradientId = `universe-planet-${PROJECT_TYPES.indexOf(node.category)}`;
+    const previous = ui.universeAnimateLayout ? ui.universePositionTransitionFrom?.[node.id] : null;
+    const animate = previous && !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      && (Math.abs(previous.x - node.x) > 0.5 || Math.abs(previous.y - node.y) > 0.5)
+      ? `<animateTransform attributeName="transform" type="translate" from="${previous.x.toFixed(2)} ${previous.y.toFixed(2)}" to="${node.x.toFixed(2)} ${node.y.toFixed(2)}" dur="480ms" begin="0s" fill="freeze" calcMode="spline" keyTimes="0;1" keySplines="0.2 0.7 0.2 1"/>`
+      : "";
+    return `<g class="${classes}" data-action="select-universe-project" data-id="${esc(node.id)}" data-project-id="${esc(node.id)}" data-project-name="${esc(node.project.name)}" data-category="${esc(node.category)}" data-x="${node.x.toFixed(2)}" data-y="${node.y.toFixed(2)}" data-radius="${node.radius.toFixed(1)}" data-tooltip-summary="${esc(summary)}" data-tooltip-category="${esc(node.category)}" data-tooltip-activity="${esc(activityCounts)}" data-tooltip-coverage="${esc(coverageNote)}" tabindex="0" role="button" aria-label="${esc(label)}" aria-pressed="${ui.universeSelectedProjectId === node.id ? "true" : "false"}" transform="translate(${node.x.toFixed(2)} ${node.y.toFixed(2)})" style="--node-index:${index};--node-color:${node.color}">${animate}<g class="project-universe-planet"><circle class="project-universe-hit" cx="0" cy="0" r="${Math.max(22, node.radius + 9).toFixed(1)}"/><circle class="project-universe-halo" cx="0" cy="0" r="${(node.radius + 9).toFixed(1)}"/><circle class="project-universe-orbit" cx="0" cy="0" r="${(node.radius + 5).toFixed(1)}"/><circle class="project-universe-star" cx="0" cy="0" r="${node.radius.toFixed(1)}" fill="url(#${gradientId})"/><circle class="project-universe-core" cx="0" cy="0" r="${Math.max(1.7, node.radius * 0.11).toFixed(1)}"/>${node.flagship ? `<circle class="project-universe-flagship-ring" cx="0" cy="0" r="${(node.radius + 8).toFixed(1)}"/>` : ""}<text class="project-universe-label" x="0" y="${(node.radius + 20).toFixed(1)}" text-anchor="middle">${esc(preferredLabel)}</text></g></g>`;
   }).join("");
-  const legend = model.legend.map((item) => `<span><i style="--type-color:${item.color}"></i>${esc(item.label)} <small>${item.count}</small></span>`).join("");
+  const legend = model.legend.map((item) => `<span><i style="--type-color:${item.color}"></i>${esc(item.label)}</span>`).join("");
   const current = projects.find((project) => String(project.id) === ui.universeSelectedProjectId);
   const stage = typeof current?.stage === "string" && !["", "未填写", "尚未设置阶段"].includes(current.stage.trim()) ? current.stage.trim() : "尚未记录";
   const next = typeof current?.next === "string" && !["", "未填写"].includes(current.next.trim()) ? current.next.trim() : "尚未记录";
   const website = current ? deployedWebsiteUrl(current) : "";
   const repository = current ? parsePublicGitHubRepository(current.github)?.url || "" : "";
-  const detail = current ? `<aside class="project-universe-detail" role="dialog" aria-label="${esc(current.name)} 项目详情"><button class="project-universe-detail-close" data-action="close-universe-project" aria-label="关闭项目详情">×</button><div class="project-universe-detail-kicker">${esc(inferProjectType(current))} · 项目详情</div><h3>${esc(current.name)}</h3>${current.status ? statusPill(current.status) : ""}<div class="project-universe-detail-field"><span>当前阶段</span><strong>${esc(stage)}</strong></div><div class="project-universe-detail-field"><span>下一步</span><strong>${esc(next)}</strong></div><footer><button class="button primary small" data-action="view-project" data-id="${esc(current.id)}">打开项目详情 ${icon("arrow")}</button>${website ? `<a class="button quiet small" href="${esc(website)}" target="_blank" rel="noopener noreferrer">体验网站 ${icon("external")}</a>` : repository ? `<a class="button quiet small" href="${esc(repository)}" target="_blank" rel="noopener noreferrer">GitHub ${icon("external")}</a>` : ""}</footer></aside>` : "";
-  const statusMessage = activity.status === "loading" ? `正在读取近 ${activity.days} 天活动`
-    : activity.status === "unavailable" ? activity.error || "此范围活动数据不可用"
-      : activity.model?.coverage?.complete ? `完整来源 · 近 ${activity.days} 天`
-        : activity.model ? `部分来源 · 近 ${activity.days} 天`
-          : `近 ${activity.days} 天暂无可用数据`;
-  const queryMatch = normalizedQuery ? model.nodes.find((node) => match(node.project) && (selectedCategory === "all" || node.category === selectedCategory)) : null;
+  const detailDescription = typeof current?.description === "string" ? current.description.trim() : "";
+  const detail = current ? `<aside class="project-universe-detail" role="dialog" aria-label="${esc(current.name)} 项目详情"><button class="project-universe-detail-close" data-action="close-universe-project" aria-label="关闭项目详情">×</button><div class="project-universe-detail-kicker">${esc(inferProjectType(current))} · 项目详情</div><h3>${esc(current.name)}</h3>${current.status ? statusPill(current.status) : ""}${detailDescription ? `<p class="project-universe-detail-summary">${esc(detailDescription)}</p>` : ""}<div class="project-universe-detail-field"><span>当前阶段</span><strong>${esc(stage)}</strong></div><div class="project-universe-detail-field"><span>下一步</span><strong>${esc(next)}</strong></div><footer><button class="button primary small" data-action="view-project" data-id="${esc(current.id)}">打开项目详情 ${icon("arrow")}</button>${website ? `<a class="button quiet small" href="${esc(website)}" target="_blank" rel="noopener noreferrer">体验网站 ${icon("external")}</a>` : repository ? `<a class="button quiet small" href="${esc(repository)}" target="_blank" rel="noopener noreferrer">GitHub ${icon("external")}</a>` : ""}</footer></aside>` : "";
+  const queryMatch = normalizedQuery && activeNodes.some((node) => matchesQuery(node.project));
   const filterOptions = model.legend.map((item) => `<option value="${esc(item.label)}" ${selectedCategory === item.label ? "selected" : ""}>${esc(item.label)} · ${item.count}</option>`).join("");
-  return `<section class="card dashboard-v4-card project-universe-card grid-span-12"><header class="dashboard-chart-heading"><div><h2>Project Universe</h2><span class="project-universe-heading-subtitle">项目星系图 · 按类型探索</span></div><div class="project-universe-meta"><span>${model.nodes.length} 个项目</span><span>${model.edges.length} 条可核实关联</span></div></header><div class="project-universe-toolbar"><label class="project-universe-search"><span class="sr-only">搜索项目</span><input id="universe-search" type="search" value="${esc(ui.universeQuery)}" placeholder="搜索项目名称…" autocomplete="off" aria-label="搜索并定位项目"/><button class="button quiet small" data-action="locate-universe-search" ${queryMatch ? "" : "disabled"}>定位</button></label><label class="project-universe-category"><span class="sr-only">项目分类</span><select id="universe-category" aria-label="按分类筛选项目"><option value="all" ${selectedCategory === "all" ? "selected" : ""}>全部类别 · ${model.nodes.length}</option>${filterOptions}</select></label><div class="project-universe-period" role="group" aria-label="项目活跃度统计范围"><span>活跃度</span>${[7, 30, 90].map((days) => `<button type="button" data-action="select-universe-range" data-days="${days}" class="${ui.universeActivityDays === days ? "active" : ""}" aria-pressed="${ui.universeActivityDays === days}">${days} 天</button>`).join("")}</div><div class="project-universe-camera" role="group" aria-label="星图缩放"><button type="button" data-action="zoom-universe" data-direction="in" aria-label="放大星图">＋</button><button type="button" data-action="zoom-universe" data-direction="out" aria-label="缩小星图">−</button><button type="button" data-action="reset-universe-camera" aria-label="重置星图位置">重置</button></div></div><div class="project-universe-stage"><svg class="project-universe-svg" viewBox="0 0 ${model.width} ${model.height}" role="group" aria-label="可拖拽、缩放和筛选的项目星系图"><g class="project-universe-world" transform="translate(${ui.universeCamera.x.toFixed(1)} ${ui.universeCamera.y.toFixed(1)}) scale(${ui.universeCamera.scale.toFixed(3)})">${clusters}${links}${nodes}</g></svg><div class="project-universe-hover-label" aria-hidden="true" hidden></div>${detail}<div class="project-universe-map-hint">拖动星图移动 · 拖拽星球可避让 · 滚轮缩放</div>${activity.error ? `<div class="project-universe-empty-link">${esc(activity.error)}</div>` : ""}</div><footer class="project-universe-footer"><div class="project-universe-legend">${legend || `<span>暂无项目分类</span>`}</div><span class="project-universe-source">${esc(statusMessage)} · 节点大小依据已核实提交与工作记录；缺失区间保持未知</span></footer></section>`;
+  const gradients = model.legend.map((item) => `<radialGradient id="universe-planet-${PROJECT_TYPES.indexOf(item.label)}" cx="34%" cy="27%" r="78%"><stop offset="0" stop-color="#ffffff" stop-opacity=".96"/><stop offset=".25" stop-color="${item.color}" stop-opacity=".98"/><stop offset="1" stop-color="${item.color}" stop-opacity=".76"/></radialGradient>`).join("");
+  const countLabel = selectedCategory === "all" ? `${model.nodes.length} 项目` : `${activeNodes.length} / ${model.nodes.length} 项目`;
+  const camera = `<div class="project-universe-camera" role="group" aria-label="星图视角"><button type="button" data-action="zoom-universe" data-direction="in" aria-label="放大星图">＋</button><button type="button" data-action="zoom-universe" data-direction="out" aria-label="缩小星图">−</button><button type="button" data-action="reset-universe-camera" aria-label="重置视角" title="重置视角">↺</button></div>`;
+  const stageStatus = activity.error ? `<div class="project-universe-error" role="status">${esc(activity.error)}</div>` : "";
+  return `<section class="card dashboard-v4-card project-universe-card grid-span-12"><header class="dashboard-chart-heading"><div><h2>Project Universe</h2><span class="project-universe-heading-subtitle">项目星系图</span></div><div class="project-universe-meta"><span>${countLabel}</span></div></header><div class="project-universe-stage"><div class="project-universe-toolbar" role="group" aria-label="星图探索"><label class="project-universe-search"><span class="sr-only">搜索项目</span>${icon("search")}<input id="universe-search" type="search" value="${esc(ui.universeQuery)}" placeholder="搜索项目" autocomplete="off" aria-label="搜索项目名称"/><button type="button" class="project-universe-locate" data-action="locate-universe-search" aria-label="定位匹配项目" title="定位匹配项目" ${queryMatch ? "" : "disabled"}>↗</button></label><label class="project-universe-category"><span class="sr-only">项目类别筛选</span><select id="universe-category" aria-label="按类别筛选项目"><option value="all" ${selectedCategory === "all" ? "selected" : ""}>全部类别</option>${filterOptions}</select></label></div><svg class="project-universe-svg" viewBox="0 0 ${model.width} ${model.height}" role="group" aria-label="项目星图。拖动平移，双指或滚轮缩放，选择星球查看项目详情"><defs>${gradients}</defs><g class="project-universe-world" transform="translate(${ui.universeCamera.x.toFixed(1)} ${ui.universeCamera.y.toFixed(1)}) scale(${ui.universeCamera.scale.toFixed(3)})">${clusters}${nodes}</g></svg>${camera}<div class="project-universe-hover-label" aria-hidden="true" hidden><strong data-tooltip-name></strong><span data-tooltip-category></span><span data-tooltip-summary></span><span data-tooltip-activity></span><span data-tooltip-coverage></span></div>${detail}${stageStatus}</div><footer class="project-universe-footer"><div class="project-universe-legend">${legend || `<span>暂无项目分类</span>`}</div><span class="project-universe-source">星球大小映射可核实活动</span></footer></section>`;
 }
 
 function renderDevelopmentFingerprint(activity) {
@@ -3222,6 +3220,8 @@ function render() {
     ? `<span class="today-label">公开只读快照</span><a class="button quiet small public-login-link" href="?mode=login">登录</a>`
     : `<button class="button primary small snapshot-publish-action" data-action="publish-visitor-snapshot" aria-label="一键发布访客快照" ${["loading", "publishing"].includes(ui.publicSnapshotPreview.status) ? "disabled" : ""}>${["loading", "publishing"].includes(ui.publicSnapshotPreview.status) ? "正在发布…" : `<span class="snapshot-publish-label-desktop">一键发布访客快照</span><span class="snapshot-publish-label-mobile">发布快照</span>`}</button><span class="today-label">${formattedDate()}</span><button class="cloud-sync-indicator ${esc(ui.cloud.status)}" data-action="retry-cloud-sync" title="点击重新检查 Supabase 同步状态" aria-live="polite" ${["loading", "syncing", "migrating"].includes(ui.cloud.status) ? "disabled" : ""}>${esc(cloudStatusLabel())}</button><button class="icon-button theme-toggle" data-action="toggle-theme" title="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式" aria-label="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式">${icon(document.documentElement.dataset.theme === "light" ? "moon" : "sun")}</button><button class="icon-button" data-action="open-assistant" title="打开 AI Assistant" aria-label="打开 AI Assistant">${icon("sparkle")}</button><button class="button quiet small logout-button" data-action="logout">退出登录</button>`;
   app.innerHTML = `${renderNav()}<main class="main-shell"><header class="topbar"><div class="breadcrumbs"><span>Daniel Workspace</span><span class="crumb-sep">/</span><strong>${esc(pageTitle())}</strong></div><div class="search-wrap"><div class="search-box">${icon("search")}<input id="global-search" type="search" value="${esc(ui.query)}" placeholder="搜索项目、资料、决策或任务…" autocomplete="off" aria-label="全局搜索"/><kbd class="search-hint">Ctrl K</kbd></div><div id="search-results"></div></div><div class="topbar-actions">${headerActions}</div></header><div class="content">${publicSnapshotMode ? renderPublicSnapshotNotice() : renderCloudNotice()}${page}</div></main>${renderAssistant()}${renderModal()}<div class="toast-region" id="toast-region" aria-live="polite"></div>`;
+  ui.universeAnimateLayout = false;
+  ui.universePositionTransitionFrom = null;
   if (ui.universeCameraTransition && ui.page === "home") {
     const world = app.querySelector(".project-universe-world");
     if (world) {
@@ -3854,22 +3854,15 @@ function handleAction(action, element, sourceEvent) {
 function updateUniverseFocus(node) {
   const svg = node?.closest(".project-universe-svg");
   if (!svg || !node) return;
-  const related = new Set((node.dataset.related || "").split(/\s+/).filter(Boolean));
-  const current = node.dataset.projectId || "";
   for (const item of svg.querySelectorAll(".project-universe-node")) {
     item.classList.toggle("is-focus", item === node);
-    item.classList.toggle("is-neighbour", item !== node && related.has(item.dataset.projectId));
-    item.classList.toggle("is-dimmed", item !== node && !related.has(item.dataset.projectId));
-  }
-  for (const edge of svg.querySelectorAll(".project-universe-link")) {
-    const connected = edge.dataset.from === current || edge.dataset.to === current;
-    edge.classList.toggle("is-highlight", connected);
-    edge.classList.toggle("is-dimmed", !connected);
+    item.classList.toggle("is-dimmed", item !== node);
   }
 }
 
 let universePointerState = null;
 let universeSuppressClick = false;
+const universePointers = new Map();
 
 function universeCameraTransform(camera = ui.universeCamera) {
   return `translate(${camera.x.toFixed(1)} ${camera.y.toFixed(1)}) scale(${camera.scale.toFixed(3)})`;
@@ -3880,14 +3873,6 @@ function universeSvgPoint(event, svg) {
   point.x = event.clientX;
   point.y = event.clientY;
   return point.matrixTransform(svg.getScreenCTM().inverse());
-}
-
-function universeWorldPoint(event, svg) {
-  const world = svg.querySelector(".project-universe-world");
-  const point = svg.createSVGPoint();
-  point.x = event.clientX;
-  point.y = event.clientY;
-  return point.matrixTransform(world.getScreenCTM().inverse());
 }
 
 function applyUniverseCamera(svg, camera, animate = false) {
@@ -3908,13 +3893,15 @@ function applyUniverseCamera(svg, camera, animate = false) {
 function focusUniverseProject(projectId, svg = app.querySelector(".project-universe-svg")) {
   const node = [...(svg?.querySelectorAll(".project-universe-node") || [])].find((item) => item.dataset.projectId === String(projectId));
   if (!node || node.classList.contains("is-filtered")) return;
-  const scale = 1.45;
+  const compact = window.matchMedia("(max-width: 760px)").matches;
+  const scale = compact ? 1.32 : 1.48;
   const width = Number(svg.viewBox.baseVal.width) || 1280;
   const height = Number(svg.viewBox.baseVal.height) || 680;
   const x = Number(node.dataset.x);
   const y = Number(node.dataset.y);
+  const focusY = compact ? height * 0.34 : height * 0.5;
   ui.universeCameraFrom = svg.querySelector(".project-universe-world")?.getAttribute("transform") || "translate(0 0) scale(1)";
-  ui.universeCamera = { x: width / 2 - x * scale, y: height / 2 - y * scale, scale };
+  ui.universeCamera = { x: width / 2 - x * scale, y: focusY - y * scale, scale };
   ui.universeSelectedProjectId = String(projectId);
   ui.universeCameraTransition = true;
   render();
@@ -3929,79 +3916,23 @@ function locateUniverseSearch() {
   focusUniverseProject(node.dataset.projectId);
 }
 
-function setUniverseNodePosition(node, x, y) {
-  const svg = node.closest(".project-universe-svg");
-  const world = svg?.querySelector(".project-universe-world");
-  const width = Number(svg?.viewBox.baseVal.width) || 1280;
-  const height = Number(svg?.viewBox.baseVal.height) || 680;
-  const radius = Number(node.dataset.radius) || 9;
-  const nextX = Math.max(radius + 12, Math.min(width - radius - 12, x));
-  const nextY = Math.max(radius + 12, Math.min(height - radius - 12, y));
-  node.dataset.x = nextX.toFixed(2);
-  node.dataset.y = nextY.toFixed(2);
-  for (const circle of node.querySelectorAll("circle")) circle.setAttribute("cx", nextX.toFixed(1)), circle.setAttribute("cy", nextY.toFixed(1));
-  const label = node.querySelector(".project-universe-label");
-  if (label) { label.setAttribute("x", nextX.toFixed(1)); label.setAttribute("y", (nextY + radius + 18).toFixed(1)); }
-  const positions = new Map([...world.querySelectorAll(".project-universe-node")].map((item) => [item.dataset.projectId, { x: Number(item.dataset.x), y: Number(item.dataset.y) }]));
-  for (const edge of world.querySelectorAll(".project-universe-link")) {
-    const from = positions.get(edge.dataset.from);
-    const to = positions.get(edge.dataset.to);
-    if (!from || !to) continue;
-    edge.setAttribute("x1", from.x.toFixed(1)); edge.setAttribute("y1", from.y.toFixed(1));
-    edge.setAttribute("x2", to.x.toFixed(1)); edge.setAttribute("y2", to.y.toFixed(1));
-  }
-}
-
-function pushUniverseNeighbours(draggedNode) {
-  const svg = draggedNode.closest(".project-universe-svg");
-  const nodes = [...(svg?.querySelectorAll(".project-universe-node") || [])];
-  const visible = nodes.filter((node) => !node.classList.contains("is-filtered"));
-  for (let iteration = 0; iteration < 6; iteration += 1) {
-    let resolvedOverlap = true;
-    for (let left = 0; left < visible.length; left += 1) {
-      for (let right = left + 1; right < visible.length; right += 1) {
-        const a = visible[left];
-        const b = visible[right];
-        const ax = Number(a.dataset.x);
-        const ay = Number(a.dataset.y);
-        const bx = Number(b.dataset.x);
-        const by = Number(b.dataset.y);
-        let dx = bx - ax;
-        let dy = by - ay;
-        let distance = Math.hypot(dx, dy);
-        const minimum = (Number(a.dataset.radius) || 9) + (Number(b.dataset.radius) || 9) + 12;
-        if (distance >= minimum) continue;
-        resolvedOverlap = false;
-        if (distance < 0.001) { dx = 1; dy = 0; distance = 1; }
-        const push = minimum - distance;
-        const ux = dx / distance;
-        const uy = dy / distance;
-        const moveA = a === draggedNode ? 0 : b === draggedNode ? push : push / 2;
-        const moveB = b === draggedNode ? 0 : a === draggedNode ? push : push / 2;
-        if (moveA) setUniverseNodePosition(a, ax - ux * moveA, ay - uy * moveA);
-        if (moveB) setUniverseNodePosition(b, bx + ux * moveB, by + uy * moveB);
-      }
-    }
-    if (resolvedOverlap) break;
-  }
-}
-
-function saveUniversePositions(svg) {
-  ui.universePositions = Object.fromEntries([...svg.querySelectorAll(".project-universe-node")]
-    .map((node) => [node.dataset.projectId, { x: Number(node.dataset.x), y: Number(node.dataset.y) }]));
-}
-
 function updateUniverseTooltip(node, event) {
   const stage = node.closest(".project-universe-stage");
   const tooltip = stage?.querySelector(".project-universe-hover-label");
   if (!tooltip) return;
   const bounds = stage.getBoundingClientRect();
-  const x = event?.clientX ?? bounds.left + bounds.width / 2;
-  const y = event?.clientY ?? bounds.top + 30;
-  tooltip.textContent = node.dataset.projectName;
-  tooltip.style.left = `${Math.max(12, Math.min(bounds.width - 12, x - bounds.left))}px`;
-  tooltip.style.top = `${Math.max(10, y - bounds.top - 14)}px`;
+  const x = (event?.clientX ?? bounds.left + bounds.width / 2) - bounds.left;
+  const y = (event?.clientY ?? bounds.top + 30) - bounds.top;
+  tooltip.querySelector("[data-tooltip-name]").textContent = node.dataset.projectName;
+  tooltip.querySelector("[data-tooltip-category]").textContent = node.dataset.tooltipCategory || "";
+  tooltip.querySelector("[data-tooltip-summary]").textContent = node.dataset.tooltipSummary || "";
+  tooltip.querySelector("[data-tooltip-activity]").textContent = node.dataset.tooltipActivity || "";
+  tooltip.querySelector("[data-tooltip-coverage]").textContent = node.dataset.tooltipCoverage || "";
   tooltip.hidden = false;
+  const tooltipWidth = tooltip.offsetWidth || 260;
+  const tooltipHeight = tooltip.offsetHeight || 112;
+  tooltip.style.left = `${Math.max(12, Math.min(bounds.width - tooltipWidth - 12, x + 18))}px`;
+  tooltip.style.top = `${Math.max(12, Math.min(bounds.height - tooltipHeight - 12, y + 18))}px`;
 }
 
 function applyUniverseSearch(svg, query) {
@@ -4018,6 +3949,11 @@ function applyUniverseSearch(svg, query) {
   if (locate) locate.disabled = !normalized || matches === 0;
 }
 
+function captureUniversePositions() {
+  return Object.fromEntries([...app.querySelectorAll(".project-universe-node")]
+    .map((node) => [node.dataset.projectId, { x: Number(node.dataset.x), y: Number(node.dataset.y) }]));
+}
+
 function clearUniverseFocus(svg) {
   if (!svg) return;
   svg.querySelectorAll(".is-focus, .is-neighbour, .is-dimmed, .is-highlight").forEach((item) => {
@@ -4030,54 +3966,72 @@ app.addEventListener("pointerover", (event) => {
   if (node && !node.contains(event.relatedTarget)) { updateUniverseFocus(node); updateUniverseTooltip(node, event); }
 });
 app.addEventListener("pointermove", (event) => {
-  if (universePointerState?.pointerId === event.pointerId) {
-    const state = universePointerState;
-    if (state.node) {
-      const point = universeWorldPoint(event, state.svg);
-      const dx = point.x - state.startPoint.x;
-      const dy = point.y - state.startPoint.y;
-      if (Math.hypot(dx, dy) > 2) state.moved = true;
-      if (state.moved) {
-        setUniverseNodePosition(state.node, state.startNode.x + dx, state.startNode.y + dy);
-        pushUniverseNeighbours(state.node);
+  const pointer = universePointers.get(event.pointerId);
+  const state = universePointerState;
+  if (pointer && state?.svg === pointer.svg) {
+    pointer.point = universeSvgPoint(event, pointer.svg);
+    if (state.kind === "pinch") {
+      const [first, second] = state.pointerIds.map((id) => universePointers.get(id)).filter(Boolean);
+      if (first && second) {
+        const center = { x: (first.point.x + second.point.x) / 2, y: (first.point.y + second.point.y) / 2 };
+        const distance = Math.max(1, Math.hypot(second.point.x - first.point.x, second.point.y - first.point.y));
+        const scale = Math.max(0.72, Math.min(2.25, state.startCamera.scale * distance / state.startDistance));
+        applyUniverseCamera(state.svg, { scale, x: center.x - state.worldAnchor.x * scale, y: center.y - state.worldAnchor.y * scale });
       }
-    } else {
-      const point = universeSvgPoint(event, state.svg);
-      const dx = point.x - state.startPoint.x;
-      const dy = point.y - state.startPoint.y;
-      if (Math.hypot(dx, dy) > 2) state.moved = true;
-      if (state.moved) applyUniverseCamera(state.svg, { ...state.startCamera, x: state.startCamera.x + dx, y: state.startCamera.y + dy });
+      event.preventDefault();
+      return;
     }
-    event.preventDefault();
-    return;
+    if (state.kind === "single" && state.pointerId === event.pointerId) {
+      const dx = pointer.point.x - state.startPoint.x;
+      const dy = pointer.point.y - state.startPoint.y;
+      if (Math.hypot(dx, dy) > 3) state.moved = true;
+      if (state.moved) applyUniverseCamera(state.svg, { ...state.startCamera, x: state.startCamera.x + dx, y: state.startCamera.y + dy });
+      event.preventDefault();
+      return;
+    }
   }
   const node = event.target.closest?.(".project-universe-node");
   if (node) updateUniverseTooltip(node, event);
 });
 app.addEventListener("pointerdown", (event) => {
   const svg = event.target.closest?.(".project-universe-svg");
-  if (!svg || event.button > 0 || !svg.hasPointerCapture) return;
+  if (!svg || (event.button > 0 && event.pointerType !== "touch") || !svg.hasPointerCapture) return;
   const node = event.target.closest?.(".project-universe-node");
-  const point = node ? universeWorldPoint(event, svg) : universeSvgPoint(event, svg);
-  universePointerState = {
-    pointerId: event.pointerId,
-    svg,
-    node,
-    startPoint: { x: point.x, y: point.y },
-    startNode: node ? { x: Number(node.dataset.x), y: Number(node.dataset.y) } : null,
-    startCamera: { ...ui.universeCamera },
-    moved: false,
-  };
+  const point = universeSvgPoint(event, svg);
+  universePointers.set(event.pointerId, { svg, node, point });
   svg.setPointerCapture(event.pointerId);
+  const otherPointers = [...universePointers.entries()].filter(([id, item]) => id !== event.pointerId && item.svg === svg);
+  if (event.pointerType === "touch" && otherPointers.length) {
+    const [otherId, other] = otherPointers[0];
+    const center = { x: (other.point.x + point.x) / 2, y: (other.point.y + point.y) / 2 };
+    universePointerState = {
+      kind: "pinch", svg, pointerIds: [otherId, event.pointerId],
+      startDistance: Math.max(1, Math.hypot(point.x - other.point.x, point.y - other.point.y)),
+      startCamera: { ...ui.universeCamera },
+      worldAnchor: { x: (center.x - ui.universeCamera.x) / ui.universeCamera.scale, y: (center.y - ui.universeCamera.y) / ui.universeCamera.scale },
+    };
+  } else {
+    universePointerState = { kind: "single", pointerId: event.pointerId, svg, node, startPoint: point, startCamera: { ...ui.universeCamera }, moved: false };
+  }
   event.preventDefault();
 });
 function finishUniversePointer(event) {
   const state = universePointerState;
-  if (!state || state.pointerId !== event.pointerId) return;
+  const pointer = universePointers.get(event.pointerId);
+  if (!pointer) return;
+  universePointers.delete(event.pointerId);
+  try { pointer.svg.releasePointerCapture(event.pointerId); } catch { /* pointer capture may already be released */ }
+  if (state?.kind === "pinch" && state.svg === pointer.svg) {
+    const remaining = [...universePointers.entries()].find(([, item]) => item.svg === state.svg);
+    universePointerState = remaining ? {
+      kind: "single", pointerId: remaining[0], svg: state.svg, node: null,
+      startPoint: remaining[1].point, startCamera: { ...ui.universeCamera }, moved: true,
+    } : null;
+    return;
+  }
+  if (state?.kind !== "single" || state.pointerId !== event.pointerId) return;
   universePointerState = null;
-  try { state.svg.releasePointerCapture(event.pointerId); } catch { /* pointer capture may already be released */ }
-  if (state.node && state.moved) saveUniversePositions(state.svg);
-  if (state.node && !state.moved) focusUniverseProject(state.node.dataset.projectId, state.svg);
+  if (state.node && !state.moved && event.type === "pointerup") focusUniverseProject(state.node.dataset.projectId, state.svg);
   if (state.node) {
     universeSuppressClick = true;
     setTimeout(() => { universeSuppressClick = false; }, 0);
@@ -4096,7 +4050,27 @@ app.addEventListener("wheel", (event) => {
   const worldY = (pointer.y - current.y) / current.scale;
   applyUniverseCamera(svg, { scale, x: pointer.x - worldX * scale, y: pointer.y - worldY * scale });
 }, { passive: false });
+let universeParallaxFrame = 0;
+app.addEventListener("pointermove", (event) => {
+  if (event.pointerType !== "mouse" || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const stage = event.target.closest?.(".project-universe-stage");
+  if (!stage) return;
+  const bounds = stage.getBoundingClientRect();
+  const x = ((event.clientX - bounds.left) / Math.max(1, bounds.width) - 0.5) * 9;
+  const y = ((event.clientY - bounds.top) / Math.max(1, bounds.height) - 0.5) * 7;
+  if (universeParallaxFrame) cancelAnimationFrame(universeParallaxFrame);
+  universeParallaxFrame = requestAnimationFrame(() => {
+    stage.style.setProperty("--parallax-x", `${x.toFixed(1)}px`);
+    stage.style.setProperty("--parallax-y", `${y.toFixed(1)}px`);
+    universeParallaxFrame = 0;
+  });
+});
 app.addEventListener("pointerout", (event) => {
+  const stage = event.target.closest?.(".project-universe-stage");
+  if (stage && !stage.contains(event.relatedTarget)) {
+    stage.style.setProperty("--parallax-x", "0px");
+    stage.style.setProperty("--parallax-y", "0px");
+  }
   const node = event.target.closest?.(".project-universe-node");
   if (node && !node.contains(event.relatedTarget)) {
     clearUniverseFocus(node.closest(".project-universe-svg"));
@@ -4146,12 +4120,12 @@ app.addEventListener("toggle", (event) => {
 app.addEventListener("change", (event) => {
   const target = event.target;
   if (target.id === "universe-category") {
+    ui.universePositionTransitionFrom = captureUniversePositions();
+    ui.universeAnimateLayout = Object.keys(ui.universePositionTransitionFrom).length > 0;
     ui.universeCategory = target.value === "all" || PROJECT_TYPES.includes(target.value) ? target.value : "all";
-    const selected = db.projects.find((project) => String(project.id) === ui.universeSelectedProjectId);
-    if (selected && ui.universeCategory !== "all" && inferProjectType(selected) !== ui.universeCategory) {
-      ui.universeSelectedProjectId = "";
-      ui.universeCamera = { x: 0, y: 0, scale: 1 };
-    }
+    ui.universeSelectedProjectId = "";
+    ui.universeCamera = { x: 0, y: 0, scale: 1 };
+    ui.universeCameraTransition = false;
     render();
     return;
   }
