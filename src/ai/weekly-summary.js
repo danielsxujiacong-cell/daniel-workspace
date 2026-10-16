@@ -1,3 +1,4 @@
+import { parseStructuredJSON } from "./structured-json.js";
 const text = (value, limit = 280) => typeof value === "string" ? value.trim().slice(0, limit) : "";
 const SECTIONS = ["completed", "progress", "issues", "nextWeek"];
 const isGenericNextStep = (value) => /^(?:创建(?:一个)?(?:任务|待办)|继续推进|进一步优化|持续优化|继续开发|继续完善)/i.test(value || "");
@@ -92,12 +93,7 @@ function matchesBlockedStatus(basis, project, context) {
 
 export function parseWeeklySummaryResponse(content, context) {
   if (typeof content !== "string") throw new Error("GLM 未返回每周总结内容。");
-  const stripped = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  const start = stripped.indexOf("{");
-  const end = stripped.lastIndexOf("}");
-  let parsed;
-  try { parsed = JSON.parse(stripped.slice(start, end + 1)); }
-  catch { throw new Error("GLM 返回格式无法识别，请重试。"); }
+  const parsed = parseStructuredJSON(content);
   const projects = new Set(context.references.projects.map((project) => project.name));
   const summary = { range: context.range };
   for (const key of SECTIONS) {
@@ -118,6 +114,7 @@ export function parseWeeklySummaryResponse(content, context) {
       return { project, text: detail, basis };
     }).filter(Boolean);
   }
+  if (SECTIONS.some(key => parsed[key].length) && !SECTIONS.some(key => summary[key].length)) throw Error("GLM 总结未通过来源核验，请重试。");
   return summary;
 }
 

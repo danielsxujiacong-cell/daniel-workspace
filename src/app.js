@@ -15,7 +15,7 @@ const {
   buildSnapshotActivity,
   hydratePublicSnapshot,
   publishPublicSnapshot,
-} = await import("./public-snapshot.js?v=4.5");
+} = await import("./public-snapshot.js?v=4.5.2");
 let hydratedPublicData = publicSnapshotMode ? hydratePublicSnapshot(publishedSnapshot) : null;
 
 const {
@@ -34,10 +34,10 @@ const {
   saveLocalScanCache,
 } = publicSnapshotMode ? {} : await import("./store.js?v=3.8-l");
 const { buildAssistantContext } = publicSnapshotMode ? {} : await import("./ai/context.js");
-const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = publicSnapshotMode ? {} : await import("./ai/service.js?v=3.4.2");
+const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = publicSnapshotMode ? await import("./ai/public-service.js?v=4.5.2") : await import("./ai/service.js?v=4.5.2");
 const { buildProjectNextStepContext, buildProjectNextStepPrompt, parseProjectNextStepResponse, verifiedProjectGitHubCommit } = publicSnapshotMode ? {} : await import("./ai/project-next-step.js?v=3.3.2");
-const { buildDailyBriefContext, buildDailyBriefPrompt, getRecentWorkLogRange, parseDailyBriefResponse } = publicSnapshotMode ? {} : await import("./ai/daily-brief.js?v=3.6");
-const { buildWeeklySummaryContext, buildWeeklySummaryPrompt, getWeeklySummaryRange, parseWeeklySummaryResponse, shanghaiDateKey, weeklySummaryMarkdown } = publicSnapshotMode ? {} : await import("./ai/weekly-summary.js?v=3.6");
+const { buildDailyBriefContext, buildDailyBriefPrompt, getRecentWorkLogRange, parseDailyBriefResponse } = publicSnapshotMode ? {} : await import("./ai/daily-brief.js?v=4.5.2");
+const { buildWeeklySummaryContext, buildWeeklySummaryPrompt, getWeeklySummaryRange, parseWeeklySummaryResponse, shanghaiDateKey, weeklySummaryMarkdown } = publicSnapshotMode ? {} : await import("./ai/weekly-summary.js?v=4.5.2");
 const { fetchPrivateGitHubSnapshots, listPrivateGitHubRepositories } = publicSnapshotMode ? {} : await import("./github/private-api.js?v=3.5-b.4");
 const { localScanEndpointFor, localCodexUsageEndpointFor, shouldRenderDashboardGitHubActivity } = publicSnapshotMode ? { localScanEndpointFor: () => null, localCodexUsageEndpointFor: () => null, shouldRenderDashboardGitHubActivity: () => false } : await import("./local-companion.js?v=3.9");
 const { codexUsageForRange, fetchCodexUsage, loadCodexUsageCache, mergeCodexUsageCache, publicTokenUsage, saveCodexUsageCache, formatTokenCount } = publicSnapshotMode ? {} : await import("./codex-usage.js?v=3.9");
@@ -2598,11 +2598,10 @@ function contextLabel() {
 }
 
 function renderAssistant() {
-  if (publicSnapshotMode) return "";
   if (!ui.assistantOpen) return `<button class="assistant-launcher" data-action="open-assistant" aria-label="打开 AI 助手"><span class="assistant-orb">${icon("sparkle")}</span><span>问问 AI</span></button>`;
   const prompts = ["project", "local-project"].includes(ui.page) ? ["这个项目现在有什么问题？", "这个项目最近有什么变化？", "帮我总结下一步"] : ui.page === "decisions" ? ["帮我整理这个决定", "我最近做了什么决定？"] : ui.page === "tasks" ? ["我下一步应该做什么？", "哪个任务优先？"] : ui.page === "knowledge" ? ["最近收集了哪些资料？", "总结一下当前收件箱"] : ["我下一步应该做什么？", "最近有哪些进展？"];
   const status = getAIStatus();
-  const transportNote = status.mode === "real" ? "API Key 仅由 Cloudflare Worker Secret 管理。" : status.hint;
+  const transportNote = status.mode === "real" ? "对话由服务端处理；请勿输入私人资料。" : status.hint;
   return `<section class="assistant-panel" aria-label="AI Assistant"><header class="assistant-head"><span class="assistant-orb">${icon("sparkle")}</span><div class="assistant-head-copy"><div class="assistant-head-title">Workspace Assistant <span class="tag ai-mode ${status.mode}">${esc(status.label)}</span></div><div class="ai-mode-hint">${esc(status.hint)}</div><div class="assistant-context">${esc(contextLabel())} · 当前页面数据上下文</div></div><button class="icon-button" data-action="clear-chat" title="清空对话" aria-label="清空对话">${icon("reset")}</button><button class="icon-button" data-action="close-assistant" aria-label="关闭助手">${icon("close")}</button></header>
     <div class="assistant-messages" id="assistant-messages" aria-live="polite">${ui.chat.map((message) => `<div class="chat-message ${message.role === "user" ? "user" : ""} ${message.pending ? "pending" : ""} ${message.isError ? "error" : ""}">${esc(message.text)}${message.isError ? `<button class="chat-retry" data-action="retry-chat" data-id="${esc(message.requestId)}">重试</button>` : ""}</div>`).join("")}</div>
     <div class="assistant-suggestions">${prompts.map((prompt) => `<button class="suggestion-chip" data-action="send-prompt" data-prompt="${esc(prompt)}" ${ui.chatBusy ? "disabled" : ""}>${esc(prompt)}</button>`).join("")}</div>
@@ -2920,6 +2919,12 @@ async function sendChat(message) {
   ui.assistantOpen = true;
   try {
     render();
+    if (publicSnapshotMode) {
+      const result = await chatWithAI({message:clean,history:ui.chat.filter(item=>!item.pending&&!item.isError).slice(0,-1).slice(-6).map(item=>({role:item.role,content:item.text}))});
+      pendingMessage.text = result.message.content;
+      pendingMessage.provider = result.provider;
+      return;
+    }
     const companionContextAvailable = ui.localProjectsStatus === "ready"
       || (ui.localProjectsStatus === "loading" && Boolean(ui.localProjects));
     const assistantLocalProjects = companionContextAvailable ? ui.localProjects?.items || [] : [];
@@ -3223,6 +3228,7 @@ async function toggleProjectPinInCloud(projectId) {
 }
 
 const PUBLIC_READ_ONLY_ACTIONS = new Set([
+  "open-assistant", "close-assistant", "clear-chat", "send-prompt", "retry-chat",
   "dashboard-stat", "filter-projects", "filter-project-status", "clear-project-status", "filter-tasks",
   "select-home-activity-date", "select-fingerprint-cell", "select-milestone", "toggle-decision", "toggle-more-menu", "view-project", "view-decision", "open-search-result",
   "select-universe-project", "close-universe-project", "locate-universe-search", "select-universe-range", "zoom-universe", "reset-universe-camera",
@@ -3236,9 +3242,9 @@ function enforcePublicReadOnlyDom() {
   for (const element of app.querySelectorAll("[data-page]")) {
     if (!["home", "projects", "tasks", "knowledge", "decisions"].includes(element.dataset.page)) element.remove();
   }
-  app.querySelectorAll("form, [contenteditable='true'], [data-private-only]").forEach((element) => element.remove());
+  app.querySelectorAll("form:not(#assistant-form), [contenteditable='true'], [data-private-only]").forEach((element) => element.remove());
   for (const element of app.querySelectorAll("input, textarea, select")) {
-    if (["global-search", "dashboard-activity-range", "dashboard-activity-start", "dashboard-activity-end", "universe-search", "universe-category"].includes(element.id)) continue;
+    if (["assistant-input", "global-search", "dashboard-activity-range", "dashboard-activity-start", "dashboard-activity-end", "universe-search", "universe-category"].includes(element.id)) continue;
     element.remove();
   }
 }
@@ -3751,7 +3757,7 @@ app.addEventListener("keydown", (event) => {
 });
 
 app.addEventListener("input", (event) => {
-  if (publicSnapshotMode && !["global-search", "universe-search"].includes(event.target.id)) return;
+  if (publicSnapshotMode && !["assistant-input", "global-search", "universe-search"].includes(event.target.id)) return;
   if (event.target.id === "universe-search") {
     ui.universeQuery = event.target.value;
     applyUniverseSearch(app.querySelector(".project-universe-svg"), ui.universeQuery);
@@ -3794,7 +3800,7 @@ app.addEventListener("focusout", (event) => {
 
 app.addEventListener("submit", (event) => {
   event.preventDefault();
-  if (publicSnapshotMode) return;
+  if (publicSnapshotMode && event.target.id !== "assistant-form") return;
   if(event.target.id==="delivery-edit-form") {
     const form=event.target,values=new FormData(form),existing=[...currentDeliveries(),...PENDING_DELIVERIES].find(e=>e.id===form.dataset.deliveryId);
     const name=String(values.get("projectName")||"");if((!name&&!existing)||(name&&!db.projects.some(p=>p.name===name)))return;

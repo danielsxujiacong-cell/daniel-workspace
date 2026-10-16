@@ -1,5 +1,9 @@
 # Project context
 
+## V4.5.2 deployment boundary
+
+Public delivery now uses same-origin EdgeOne KV with two checked-in static fallback slots. No live upstream dependency is necessary to browse. EdgeOne Functions call BigModel directly; private AI authenticates the existing owner via `/auth/v1/user`, public AI derives context exclusively from server-published data. No business tables or source project materials change. `WORKSPACE_PUBLIC` KV binding is mandatory for anonymous quota enforcement and publication writes; fail closed until the approved free namespace can be created after provider review. The existing EdgeOne service region excludes mainland nodes; mainland mobile testing remains external acceptance. No paid plan or alternative resources are authorized.
+
 ## Goal
 
 Build a usable personal workspace that brings projects, notes, decisions, tasks, and work logs into one place. The default read-only Project Control Dashboard consumes only a fixed, automatically sanitized snapshot manually published by the authenticated owner to a dedicated Cloudflare KV namespace. After Supabase authenticates the allowlisted account, the same UI switches to the live private workspace; Supabase rows, RLS, synchronization, and local Git/filesystem state remain private.

@@ -5,15 +5,15 @@ function timeoutSignal(milliseconds) {
   return { signal: controller.signal, cleanup: () => clearTimeout(timer) };
 }
 
-export async function httpProviderChat(request, endpoint, { timeoutMs } = {}) {
-  const requestTimeout = timeoutMs ?? (request.currentPage === "home-daily-brief" ? 60_000 : 50_000);
+export async function httpProviderChat(request, endpoint, { timeoutMs, authorization } = {}) {
+  const requestTimeout = timeoutMs ?? (["home-daily-brief", "home-weekly-summary", "project-next-step"].includes(request.currentPage) ? 100_000 : 50_000);
   const { signal, cleanup } = timeoutSignal(requestTimeout);
   let response;
   try {
     response = await fetch(endpoint, {
       method: "POST",
       mode: "cors",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: { "Content-Type": "application/json", Accept: "application/json", ...(authorization ? { Authorization: authorization } : {}) },
       credentials: "omit",
       cache: "no-store",
       referrerPolicy: "no-referrer",

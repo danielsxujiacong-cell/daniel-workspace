@@ -1,5 +1,11 @@
 # Changelog
 
+## V4.5.2 — 2026-10-16
+
+- Move visitor snapshot reads to same-origin persistence with latest/previous static release fallback; preserve V4.4 Dashboard presentation and source data.
+- Add direct EdgeOne-to-GLM private/public endpoints, owner authentication, server-selected public context and fail-closed anonymous quota guards. Public activation awaits free KV provider approval.
+- Use JSON output and larger budgets for brief/week/next-step; reject truncation or invalid schema after one retry and preserve source verification.
+
 ## 2026-10-14 · Project Universe 2.0 视觉旗舰版
 
 - 以深空画布和自然星团重做 26 个项目的星图，移除分类圆盘与未核实关联线；项目星球按可核实活动定尺寸，旗舰项目加强识别。

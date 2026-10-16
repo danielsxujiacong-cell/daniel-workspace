@@ -56,9 +56,7 @@ test("weekly summary parser accepts grounded sections and rejects status-only co
     completed: [{ project: "Workspace", text: "全部工作完成", basis: "进行中" }],
     progress: [], issues: [], nextWeek: [{ project: "Workspace", text: "新建任务跟踪", basis: "进行中" }],
   });
-  const rejected = parseWeeklySummaryResponse(ungrounded, context);
-  assert.deepEqual(rejected.completed, []);
-  assert.deepEqual(rejected.nextWeek, []);
+  assert.throws(() => parseWeeklySummaryResponse(ungrounded, context), /来源核验/);
 });
 
 test("weekly summary can be copied as Markdown with evidence and empty sections", () => {

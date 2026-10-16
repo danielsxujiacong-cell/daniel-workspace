@@ -28,13 +28,14 @@ test("brief Worker uses bounded output and retries one GLM response-body timeout
     upstreamBody = JSON.parse(init.body);
     assert.ok(init.signal instanceof AbortSignal);
     if (attempts === 1) return { ok: true, json: async () => { throw new DOMException("timed out", "TimeoutError"); } };
-    return { ok: true, json: async () => ({ model: env.AI_MODEL, choices: [{ message: { content: "{}" } }] }) };
+    return { ok: true, json: async () => ({ model: env.AI_MODEL, choices: [{ message: { content: '{"completed":[],"recommendations":[],"watch":[]}' } }] }) };
   };
 
   const response = await worker.fetch(request(), env);
   assert.equal(response.status, 200);
   assert.equal(attempts, 2);
-  assert.equal(upstreamBody.max_tokens, 900);
+  assert.equal(upstreamBody.max_tokens, 6000);
+  assert.deepEqual(upstreamBody.response_format, { type: 'json_object' });
 });
 
 test("other Worker requests retain the existing output budget", async (t) => {

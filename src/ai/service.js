@@ -1,6 +1,6 @@
 import { mockProviderChat } from "./providers/mock-provider.js";
-import { httpProviderChat } from "./providers/http-provider.js?v=3.4.2";
-import { getAIConfig } from "./config.js";
+import { httpProviderChat } from "./providers/http-provider.js?v=4.5.2";
+import { getAIConfig } from "./config.js?v=4.5.2";
 
 let apiUnavailable = false;
 let lastModel = "glm-4-flash-250414";
@@ -11,7 +11,8 @@ function configuredChatEndpoint() {
     const endpoint = new URL(config.chatEndpoint);
     const localWorker = endpoint.protocol === "http:" && endpoint.hostname === "127.0.0.1" && endpoint.port === "8787";
     const cloudflareWorker = endpoint.protocol === "https:" && endpoint.hostname.endsWith(".workers.dev");
-    if (config.provider !== "real" || endpoint.pathname !== "/api/chat" || (!localWorker && !cloudflareWorker)) return null;
+    const sameSite = endpoint.origin === "https://workspace.danielxu.cn";
+    if (config.provider !== "real" || endpoint.pathname !== "/api/chat" || (!localWorker && !cloudflareWorker && !sameSite)) return null;
     return config;
   } catch {
     return null;
@@ -58,7 +59,10 @@ export async function chat(input) {
   if (!config) return mockProviderChat(request);
 
   try {
-    const response = await httpProviderChat(request, config.chatEndpoint);
+    const auth = globalThis.DANIEL_WORKSPACE_AUTH;
+    const session = auth?.client?.auth ? await auth.client.auth.getSession() : null;
+    const token = session?.data?.session?.access_token;
+    const response = await httpProviderChat(request, config.chatEndpoint, { authorization: token ? `Bearer ${token}` : undefined });
     apiUnavailable = false;
     lastModel = response.model || config.model || lastModel;
     return response;

@@ -1,5 +1,5 @@
 const MODEL = "glm-4-flash-250414";
-const WORKER_CHAT_ENDPOINT = "https://daniel-workspace-api.ai-investment-dashboard.workers.dev/api/chat";
+const WORKER_CHAT_ENDPOINT = "https://workspace.danielxu.cn/api/chat";
 
 export function getAIConfig() {
   const runtimeConfig = globalThis.DANIEL_AI_CONFIG;

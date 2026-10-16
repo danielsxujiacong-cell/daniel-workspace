@@ -1,5 +1,13 @@
 # Daniel Workspace
 
+## V4.5.2 中国大陆读取与 AI 修复
+
+- 公开读取走同域 `/api/public/snapshot`（EdgeOne KV），失败回退 `assets/public/latest.json`、`previous.json`，访客无需连接 Workers、GitHub 或 Supabase。首次静态迁移两个槽位是同一已成功发布基线，后续导出才轮换上一版。`node scripts/export-public-snapshot.mjs` 在发布阶段导入已审核快照；失败不改现有文件，成功后正常 commit/push。
+- EdgeOne Functions 的 `/api/chat` 验证现有所有者会话后处理私人上下文；`/api/public/chat` 只读取服务端公开快照，忽略客户端上下文。`AI_API_KEY` 仅在生产环境服务端配置。使用固定智谱地址和模型，不转发到 Workers。
+- 匿名 AI 要求 `WORKSPACE_PUBLIC` KV 绑定；缺失或故障时关闭调用。保护目标为每 IP 3 次/分钟、15 次/北京时间日，全站 100 次/日，最多 1000 字问题、6 条短历史，固定输出预算。KV 最终一致，因此日计数是保守保护而非强一致计费上限；不保存对话正文。严苛硬额度需要额外的原子计数服务，当前未开通。
+- 当前 EdgeOne 仍为“全球可用区（不含中国大陆）”。KV 免费用途申请审批中；真实大陆手机直连和匿名真实 AI 尚待验收，不能据此宣称大陆稳定访问已通过。
+- 今日简报/周报/下一步使用 JSON 模式和更充分输出预算，截断或缺字段最多重试一次；来源核验继续保留。完整实测状态见 `docs/HANDOFF.md`。
+
 Daniel Workspace V3.9 使用统一的 Dashboard 2.0 和两种数据模式。私人 Dashboard 显示真实 Supabase 项目数据、GitHub 活动和本机 Codex Token 汇总；访客只读取所有者手动发布到独立 Cloudflare KV 的安全快照。访客模式不读取私人表、浏览器工作区缓存、本机文件或私有仓库。
 
 ## Status

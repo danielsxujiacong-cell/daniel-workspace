@@ -1,5 +1,13 @@
 # Handoff
 
+## V4.5.2 mainland access and AI repair — in progress
+
+The user confirmed implementation in this D: checkout (the requested G: path is absent). Clean main safely synchronized first. EdgeOne project `daniel-workspace` is GitHub-main auto deployed, Other preset, root ./, no build step; production region is global excluding mainland China. User configured production AI_API_KEY without sharing it. Free KV creation was explicitly authorized, but the account requires an application: submitted a sub-1MB, low-QPS public snapshot/quota use case; console shows approval pending. No namespace exists yet. Next after approval: create `daniel-workspace-public`, bind as `WORKSPACE_PUBLIC`, redeploy and test anonymous real GLM and authenticated publication retention.
+
+Implementation: same-origin persistent snapshot API with checked-in latest/previous static fallback, anonymous safe-context AI endpoint with fail-closed KV quotas, authenticated same-origin private AI reusing existing owner verification, JSON-mode brief/week/next-step output, bounded retry on truncation/invalid schema, safe complete-object parsing and rejection of all-invalid weekly output. Static migration baseline has 26 projects, ten deliveries, published 2026-10-16T07:27:33.365Z; both slots initially represent that one real known release. Subsequent exporter rotations retain actual previous versions. New owner publications use EdgeOne only; original Worker snapshot is not modified.
+
+Local isolated headless Edge at 1440/390 verified 26 project nodes/cards and ten deliveries, zero private forms, no JS errors/overflow or external Workers/Supabase/GitHub requests with those hosts blocked. Public chat transport was exercised with an explicitly synthetic response; this is not real-AI evidence. Mainland carrier/no-VPN test is unavailable. Live deployment and private AI results will be appended after verification.
+
 ## Current state
 
 - **Updated:** 2026-10-14

@@ -1,5 +1,4 @@
 import { validateStaticSnapshot } from "./static-snapshot.js?v=4.5";
-const WORKER_BASE = "https://daniel-workspace-api.ai-investment-dashboard.workers.dev";
 export const PUBLIC_SNAPSHOT_VERSION = 1;
 export const PUBLIC_SNAPSHOT_ACTIVITY_DAYS = 366;
 
@@ -639,19 +638,24 @@ function shiftDate(date, days) {
 }
 
 export async function fetchPublishedSnapshot({ fetchImpl = fetch } = {}) {
-  const response = await fetchImpl(`${WORKER_BASE}/api/public/snapshot`, {
+  let lastError;
+  for (const path of ["../api/public/snapshot", "../assets/public/latest.json", "../assets/public/previous.json"]) {
+   try {
+  const response = await fetchImpl(new URL(path, import.meta.url).href, {
     method: "GET",
     credentials: "omit",
     cache: "no-cache",
     referrerPolicy: "no-referrer",
-    signal: AbortSignal.timeout(5_000),
+    signal: AbortSignal.timeout(8_000),
     headers: { Accept: "application/json" },
   });
-  if (response.status === 404) return null;
   if (!response.ok) throw new Error(`访客快照读取失败（HTTP ${response.status}）。`);
   const snapshot = await response.json();
   if (!validatePublicSnapshot(snapshot)) throw new Error("访客快照格式校验失败。");
   return snapshot;
+   } catch (error) { lastError = error; }
+  }
+  throw new Error("公开资料暂时无法读取，请刷新重试；已发布版本仍保存在站点。", { cause: lastError });
 }
 
 async function withTimeout(promise, timeoutMs, message) {
@@ -671,7 +675,7 @@ export async function publishPublicSnapshot(snapshot, workspaceAuth, { fetchImpl
   const sessionResult = await withTimeout(workspaceAuth.client.auth.getSession(), 8_000, "验证登录会话超时，请重试。");
   const accessToken = sessionResult?.data?.session?.access_token;
   if (sessionResult?.error || !accessToken) throw new Error("登录会话已失效，请重新登录后再发布。");
-  const response = await fetchImpl(`${WORKER_BASE}/api/public/snapshot`, {
+  const response = await fetchImpl(new URL("../api/public/snapshot", import.meta.url).href, {
     method: "POST",
     credentials: "omit",
     referrerPolicy: "no-referrer",

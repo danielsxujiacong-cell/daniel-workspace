@@ -1,4 +1,5 @@
 import { parsePublicGitHubRepository } from "../github/public-api.js";
+import { parseStructuredJSON } from "./structured-json.js";
 
 const text = (value, limit = 240) => typeof value === "string" ? value.trim().slice(0, limit) : "";
 const isGenericNextStep = (value) => /^(?:创建(?:一个)?(?:任务|待办)|继续推进|进一步优化|持续优化|继续开发|继续完善|create (?:a )?task|keep progressing|further optimize)/i.test(text(value, 300));
@@ -125,12 +126,7 @@ export function buildDailyBriefPrompt() {
 
 export function parseDailyBriefResponse(content, projects, context = buildDailyBriefContext(projects)) {
   if (typeof content !== "string") throw new Error("GLM 未返回简报内容。");
-  const stripped = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  const start = stripped.indexOf("{");
-  const end = stripped.lastIndexOf("}");
-  let parsed;
-  try { parsed = JSON.parse(stripped.slice(start, end + 1)); }
-  catch { throw new Error("GLM 返回格式无法识别，请重试。"); }
+  const parsed = parseStructuredJSON(content);
   const allowed = new Set(projects.map((project) => project.name));
   const section = (key, limit) => {
     if (!Array.isArray(parsed?.[key])) throw new Error("GLM 返回的简报缺少必要部分，请重试。");
