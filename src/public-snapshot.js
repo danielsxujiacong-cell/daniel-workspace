@@ -690,11 +690,11 @@ export async function publishPublicSnapshot(snapshot, workspaceAuth, { fetchImpl
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw Object.assign(new Error(`${payload?.error?.message || '访客快照发布失败'} [${payload?.error?.code || 'server_error'} · HTTP ${response.status} · ${Date.now()-started}ms]`),{diagnostics:payload.diagnostics||[]});
   if(payload.ok!==true||!/^v48-[a-f0-9]{32}$/.test(payload.version||'')||payload.counts?.projects!==snapshot.projects.length)throw Error('服务器发布确认格式无效；请重试确认当前版本。');
-  phase='confirm';
+  const requestMs=Date.now()-started, confirmationStart=Date.now();phase='confirm';
   const confirmation=await fetchImpl(new URL(`../api/public/snapshot?version=${payload.version}`,import.meta.url).href,{cache:'no-store',credentials:'omit',signal:controller.signal,headers:{Accept:'application/json'}});
   const saved=await confirmation.json();
   if(!confirmation.ok||!validatePublicSnapshot(saved)||saved.snapshotVersion!==payload.version||saved.publishedAt!==payload.publishedAt||saved.projects.length!==payload.counts.projects||saved.knowledge.length!==payload.counts.knowledge||saved.decisions.length!==payload.counts.decisions)throw Error(`公开回读确认失败（HTTP ${confirmation.status}）；服务器可能已保存，请重试确认。`);
-  payload.diagnostics=[{stage:'browser_session',httpStatus:null,ms:started-sessionStart,outcome:'ok'},...(payload.diagnostics||[]),{stage:'browser_public_confirmation',httpStatus:confirmation.status,ms:Date.now()-started,outcome:'ok'}];
+  payload.diagnostics=[{stage:'browser_session',httpStatus:null,ms:started-sessionStart,outcome:'ok'},{stage:'browser_publish_request',httpStatus:response.status,ms:requestMs,outcome:'ok'},...(payload.diagnostics||[]),{stage:'browser_public_confirmation',httpStatus:confirmation.status,ms:Date.now()-confirmationStart,outcome:'ok'}];
   return payload;
   }catch(error){
    if(controller.signal.aborted)throw Error(`${phase==='confirm'?'公开版本回读确认':'EdgeOne 发布请求'}超过 25 秒（HTTP ${response?.status||'未收到'}）；发布结果待确认，请重试。`);
