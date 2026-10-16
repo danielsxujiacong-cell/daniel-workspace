@@ -1,2 +1,3 @@
 import { chatRoute } from '../../server/edge-workspace.js';
-export default context => chatRoute(context,false);
+export function onRequest(context) { return chatRoute(context,false); }
+export default onRequest;
