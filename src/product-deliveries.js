@@ -1,15 +1,25 @@
 import { shanghaiDateKey, shiftDateKey } from "./home-activity.js";
 const audit = "https://workspace.danielxu.cn/docs/DELIVERY_EVIDENCE.md";
+const archivedMini = {id:"mini",date:"2026-09-29",projectName:"《两室一弹》微信小程序",workspaceName:"两室一弹微信小程序",title:"微信小程序正式上线",detail:"正式上线日期由所有者于 2026-10-16 明确确认为 2026-09-29。仅从首页交付时间轴移除，原项目和日期确认记录保留。",status:"正式上线",demo:""};
+export const ARCHIVED_HOME_DELIVERIES = Object.freeze([Object.freeze(archivedMini)]);
 const records = [
- {id:"mini",date:"2026-09-29",projectName:"《两室一弹》微信小程序",workspaceName:"两室一弹微信小程序",title:"微信小程序正式上线",detail:"正式上线日期由所有者明确确认为 2026 年 9 月 29 日。多人建房、加入、随机发牌与私密身份查看已实现；同日文档记录了 1.1.3 开发版编译上传。上线日期的依据是所有者确认，不以开发版上传推断正式发布。",demo:""},
- {id:"knowledge",date:"2026-10-11",projectName:"企业 AI 知识库助手",workspaceName:"",title:"飞书制度问答与采购申请入口完成实测",detail:"用户确认飞书私聊收到制度回答，并能打开采购申请表。Dify 已配置采购、人事、运营检索路由；部分审批链回答和运营分类准确性仍需改进，不宣称全部问答验收通过。",demo:"https://hub.danielxu.cn/flowops/knowledge"},
- {id:"hub",date:"2026-10-12",projectName:"Daniel Project Hub",workspaceName:"Daniel Project Hub",title:"三项企业 AI 产品独立体验页上线",detail:"知识库助手、采购流程与运营日报拆为独立体验入口。生产构建、桌面与手机检查通过，部署记录确认首页、三条体验路由及公开数据均返回 200。",demo:"https://hub.danielxu.cn/"},
- {id:"flowops",date:"2026-10-12",projectName:"FlowOps AI 企业流程展示",workspaceName:"Daniel Project Hub",title:"采购历史案例与三种流程回放上线",detail:"展示脱敏采购历史案例，以及批准、拒绝、重复事件三种明确标注为模拟的回放。已核对生产页面与资源部署；网页不触发真实审批，示例金额不作为真实业务金额。",demo:"https://hub.danielxu.cn/flowops"},
- {id:"investment",date:"2026-10-12",projectName:"AI Investment Dashboard",workspaceName:"AI Investment Dashboard",title:"真实行情搜索与市场发现首页上线",detail:"市场搜索、精选股票实时行情、一个月趋势与现有 AI Brief 入口完成部署核验。已验证实时报价、搜索与 20 个历史点；旧版 Brief 仍有跨账号及前日报告标签验收待完成。",demo:"https://invest.danielxu.cn/"},
- {id:"daily",date:"2026-10-12",projectName:"AI 企业运营日报自动化",workspaceName:"",title:"日报生成、历史归档与网页发布跑通",detail:"n8n 两次真实执行完成 GLM 分析，同日更新一条报告历史；网页读取已发布结果，计划任务同步验证成功。公开内容含明确标记的测试与虚构项目；飞书群推送尚未获授权、未发送。",demo:"https://hub.danielxu.cn/daily-brief"},
- {id:"workspace",date:"2026-10-12",projectName:"Daniel Workspace",workspaceName:"Daniel Workspace",title:"26 个项目工作台提供隔离的公开只读视图",detail:"所有者手动发布的脱敏快照已上线，覆盖 26 个项目；核对了公开读取、项目详情与私人数据隔离。这是可运行产品能力交付，不是本轮 Dashboard 版本更新。",demo:"https://workspace.danielxu.cn/"},
- {id:"portfolio",date:"2026-10-16",projectName:"个人作品集",workspaceName:"Daniel website",title:"五段式求职作品集正式发布",detail:"真实产品预览取代旧模拟界面，完成截图压缩、本地动画资源和减少动态效果适配；发布提交及 GitHub Pages 部署任务已核对成功。",demo:"https://danielsxujiacong-cell.github.io/personal-portfolio/"},
+ {id:"content-prototype",date:"2026-09-19",projectName:"AI 内容情报原型",workspaceName:"AI 内容情报系统",title:"热点采集、评分与报告原型代码完成",status:"原型完成",detail:"9 月 19 日源码归档包含采集、热度排序、中文解释与 Markdown 报告管线；无密钥时为规则摘要，尚不能证明完整 AI 筛选改写链路实测跑通。",demo:""},
+ {id:"portfolio-mvp",date:"2026-09-26",projectName:"Apple 风个人作品集",workspaceName:"Daniel website",title:"滚动叙事 MVP 恢复并发布",status:"正式上线",detail:"恢复后的 GSAP 滚动页面经桌面、手机断点与回退检查，Pages 返回 200；Spline 地址仍是占位，不能称为完整 Spline 模型交付。",demo:"https://danielsxujiacong-cell.github.io/personal-portfolio/"},
+ {id:"investment",date:"2026-09-27",projectName:"AI Investment Dashboard",workspaceName:"AI Investment Dashboard",title:"真实美股行情 MVP 上线",status:"正式上线",detail:"实时 Finnhub 代理与客户端已部署，五个报价接口和公开 Watchlist、NVDA 页面验收通过；9 月 26 日仅有初始界面与部署配置。",demo:"https://invest.danielxu.cn/"},
+ {id:"pomodoro",date:"2026-09-28",projectName:"Pomodoro Garden",workspaceName:"番茄 · 专注空间",title:"核心专注状态云同步 MVP 发布",status:"正式上线",detail:"远端发布交接确认统计、周期、植物和设置云同步，以及刷新、重新登录和新 origin 恢复验收；不把隔离浏览器验证扩写为双真机实测。",demo:"https://danielsxujiacong-cell.github.io/pomodoro-focus/"},
+ {id:"hub",date:"2026-10-09",projectName:"Daniel Project Hub",workspaceName:"Daniel Project Hub",title:"作品导航与筛选原型完成",status:"原型完成",detail:"V1.1-A 构建与桌面、手机筛选验收已记录；当日检查的是所链接网站，不足以证明 Hub 自身已上线，后续 10 月 11 日有公网发布核验。",demo:"https://hub.danielxu.cn/"},
+ {id:"knowledge",date:"2026-10-10",projectName:"企业 AI 知识库",workspaceName:"",title:"飞书私聊制度检索问答测试通过",status:"测试通过",detail:"0.2.0 记录真实飞书私聊经 Dify 检索并返回回答及来源；模型配置目标为 GLM，后续审批链回答仍有准确性缺口。",demo:"https://hub.danielxu.cn/flowops/knowledge"},
+ {id:"procurement-test",date:"2026-10-11",projectName:"n8n 采购自动化",workspaceName:"n8n AI Automation Lab",title:"AI 分析写回、读回与防重测试通过",status:"测试通过",detail:"候选流程测试记录确认四个 AI 字段写回、读回及重复执行跳过；候选未发布，正式新版仍待真实新工单端到端复验。",demo:"https://hub.danielxu.cn/flowops"},
+ {id:"flowops",date:"2026-10-12",projectName:"FlowOps AI",workspaceName:"Daniel Project Hub",title:"知识库与采购流程体验入口整合上线",status:"正式上线",detail:"独立知识库、历史采购案例与明确标注为模拟的流程回放已部署，页面和公开资源返回 200；网页不触发真实审批。",demo:"https://hub.danielxu.cn/flowops"},
+ {id:"daily",date:"2026-10-12",projectName:"AI 运营日报",workspaceName:"",title:"日报生成、归档与网页展示测试通过",status:"测试通过",detail:"两次 n8n 实际执行成功生成 GLM 报告，同日更新历史并完成网页发布；公开内容含标记的测试与虚构项目，飞书群推送未发送。",demo:"https://hub.danielxu.cn/daily-brief"},
+ {id:"portfolio",date:"2026-10-16",projectName:"个人作品集",workspaceName:"Daniel website",title:"五段式求职作品集正式发布",status:"正式上线",detail:"真实产品预览替换旧模拟界面，截图压缩及减少动态效果适配完成；发布提交与 Pages 成功部署记录已核对。",demo:"https://danielsxujiacong-cell.github.io/personal-portfolio/"},
 ];
+export const PENDING_DELIVERIES = Object.freeze([
+ {id:"candidate-content",date:"2026-09-19",projectName:"AI 内容生产自动化",workspaceName:"AI 内容情报系统",title:"完整 AI 筛选、改写与报告链路跑通",detail:"已有原型代码，但没有找到完整 AI 链路运行验收记录。",status:"待审核"},
+ {id:"candidate-spline",date:"2026-09-20",projectName:"Apple 3D 个人作品集",workspaceName:"Daniel website",title:"GSAP + Spline 完整 MVP 完成",detail:"09/20 日期缺少来源；09/26 恢复版本的 Spline 地址仍为占位。",status:"待审核"},
+ {id:"candidate-pomodoro-devices",date:"2026-09-28",projectName:"Pomodoro Garden",workspaceName:"番茄 · 专注空间",title:"手机和电脑双真机云同步实测通过",detail:"已核实云同步与新 origin 恢复，但缺少明确的双真机实测记录。",status:"待审核"},
+ {id:"candidate-approval",date:"2026-10-09",projectName:"审批自动化 MVP",workspaceName:"n8n AI Automation Lab",title:"申请、审批、记录、通知与防重闭环验证",detail:"未找到支持 10/09 全链路验收的记录；10/11 候选 AI 写回测试不能替代该日期与范围。",status:"待审核"},
+].map(r=>Object.freeze({...r,evidence:`${audit}#pending`,demo:""})));
 // Explicit release artifact. Owner-local edits never mutate or enter this snapshot.
 export const PUBLISHED_DELIVERIES = Object.freeze({publishedAt:"2026-10-16",items:Object.freeze(records.map(r=>Object.freeze({...r,evidence:`${audit}#${r.id}`})))});
 export const deliveryStorageKey = userId => `daniel-workspace-deliveries-v1:${userId}`;
@@ -20,6 +30,7 @@ export function validDelivery(value) {
  for(const key of ["projectName","workspaceName","title","detail"]) clean[key]=typeof value[key]==="string"?value[key].trim().slice(0,key==="detail"?900:100):"";
  if(!clean.projectName||!clean.title||!clean.detail)return null;
  for(const key of ["demo","evidence"]) {try{const u=new URL(value[key]);clean[key]=["https:","http:"].includes(u.protocol)&&!u.username&&!u.password?u.href:"";}catch{clean[key]="";}}
+ clean.status=["原型完成","测试通过","正式上线","待审核","人工确认"].includes(value.status)?value.status:(value.ownerConfirmed?"人工确认":"");
  clean.ownerConfirmed=value.ownerConfirmed===true;
  return clean;
 }
@@ -35,6 +46,22 @@ export function saveDeliveryEdit(storage,userId,edits,value) {
 export function deliveryView({publicMode=false,edits=[],now=Date.now(),projects=[]}={}) {
  const end=publicMode?PUBLISHED_DELIVERIES.publishedAt:shanghaiDateKey(now),start=shiftDateKey(end,-29);
  const map=new Map(PUBLISHED_DELIVERIES.items.map(r=>[r.id,{...r}]));
- if(!publicMode)for(const value of edits){const r=validDelivery(value);if(r?.ownerConfirmed)map.set(r.id,r);}
- return [...map.values()].filter(r=>r.date>=start&&r.date<=end).sort((a,b)=>a.date.localeCompare(b.date)||a.id.localeCompare(b.id)).slice(-8).map(r=>({...r,projectId:projects.find(p=>p.name===r.workspaceName)?.id||""}));
+ if(!publicMode)for(const value of edits){const r=validDelivery(value);if(r?.ownerConfirmed&&r.status!=="待审核")map.set(r.id,r);}
+ return [...map.values()].filter(r=>r.id!=="mini"&&r.date>=start&&r.date<=end).sort((a,b)=>a.date.localeCompare(b.date)||a.id.localeCompare(b.id)).slice(-10).map(r=>({...r,projectId:projects.find(p=>p.name===r.workspaceName)?.id||""}));
+}
+
+export function deliveryWindow(publicMode=false,now=Date.now()) {
+ const endDate=publicMode?PUBLISHED_DELIVERIES.publishedAt:shanghaiDateKey(now);
+ return {startDate:shiftDateKey(endDate,-29),endDate};
+}
+export function layoutDeliveryDays(events,{startDate,endDate},dayWidth=70) {
+ const days=Math.round((Date.parse(endDate)-Date.parse(startDate))/86400000),padding=70,width=padding*2+days*dayWidth;
+ const groups=[];for(const e of events){let group=groups.find(g=>g.date===e.date);if(!group){group={date:e.date,items:[]};groups.push(group);}group.items.push(e);}
+ const laneEnds=[],laneHeights=[];
+ for(const group of groups){const day=Math.round((Date.parse(group.date)-Date.parse(startDate))/86400000);group.x=padding+day*dayWidth;group.left=group.x-64;
+  let lane=0;while(laneEnds[lane]!==undefined&&laneEnds[lane]+12>group.left)lane++;
+  group.lane=lane;laneEnds[lane]=group.left+128;laneHeights[lane]=Math.max(laneHeights[lane]||0,30+group.items.length*68);
+ }
+ for(const group of groups)group.top=48+laneHeights.slice(0,group.lane).reduce((sum,h)=>sum+h+14,0);
+ return {width,height:48+laneHeights.reduce((sum,h)=>sum+h+14,0),groups,ticks:[0,7,14,21,days].map(day=>({date:shiftDateKey(startDate,day),x:padding+day*dayWidth}))};
 }

@@ -404,3 +404,11 @@ pm test` 通过 11/11，`git diff --check` 通过。数据库检查、备份和�
 - 产品交付时间轴采用八个经核验的跨项目节点，按日期排列、同日不推断先后；小程序正式上线日按所有者确认记为 2026-09-29。
 - 增加独立固定公开成果快照与脱敏核验摘录；私人本机确认项不进入 Supabase 或访客发布载荷。
 - 手机横向时间轴保留点击前滚动位置，详情、演示与证据按需展开。158 项测试通过；七个在线体验网址均返回 200。
+
+
+## V4.4 · 2026-10-16
+
+- Compact vertical Top 5 with aligned names, normalized split-source bars and counts.
+- Ten verified cross-project deliveries on a proportional 30-day axis; same-day stacking, concise status/details, and owner-only review candidates.
+- Remove the mini-program from Home milestones only; preserve its historical evidence and project records.
+- Verified 160 tests and isolated desktop/390px preview; no auth, sync or business-data changes.

@@ -1,5 +1,5 @@
-const { universeLabels, topActivity, syncLabel } = await import("./dashboard-final.js?v=4.3");
-const { PUBLISHED_DELIVERIES, deliveryView, readDeliveryEdits, saveDeliveryEdit } = await import("./product-deliveries.js?v=4.3");
+const { universeLabels, topActivity, syncLabel } = await import("./dashboard-final.js?v=4.4");
+const { PUBLISHED_DELIVERIES, PENDING_DELIVERIES, deliveryView, deliveryWindow, layoutDeliveryDays, readDeliveryEdits, saveDeliveryEdit } = await import("./product-deliveries.js?v=4.4");
 const publicSnapshotMode = globalThis.DANIEL_WORKSPACE_MODE === "public";
 let publishedSnapshot = publicSnapshotMode ? globalThis.DANIEL_WORKSPACE_PUBLIC_SNAPSHOT || null : null;
 if (!publicSnapshotMode && globalThis.DANIEL_WORKSPACE_AUTHENTICATED !== true) {
@@ -58,7 +58,7 @@ const {
   buildProjectUniverse,
   inferProjectType,
   PROJECT_TYPES,
-} = await import("./dashboard-v4.js?v=4.3");
+} = await import("./dashboard-v4.js?v=4.4");
 const {
   countPinnedProjects,
   getHomePinnedProjects,
@@ -2086,14 +2086,17 @@ function currentDeliveries(projects = db.projects) {
 }
 function renderDeliveryEditor(events,projects) {
   if(publicSnapshotMode || !ui.deliveryEditingId)return "";
-  const item=events.find(e=>e.id===ui.deliveryEditingId);
-  return `<form id="delivery-edit-form" class="delivery-edit-form" data-delivery-id="${esc(item?.id||"")}"><label>项目<select name="projectName" ${item?"":"required"}><option value="" ${!item?.workspaceName?"selected":""}>${item?"独立交付":"选择项目"}</option>${projects.map(p=>`<option value="${esc(p.name)}" ${p.name===item?.workspaceName?"selected":""}>${esc(p.name)}</option>`).join("")}</select></label><label>实际交付日期<input name="date" type="date" required value="${esc(item?.date||shanghaiDateKey())}" max="${shanghaiDateKey()}"></label><label class="delivery-wide">一句话成果<input name="title" required maxlength="100" value="${esc(item?.title||"")}"></label><label class="delivery-wide">交付详情<textarea name="detail" required maxlength="900" rows="3">${esc(item?.detail||"")}</textarea></label><label class="delivery-wide">证据链接（可选）<input name="evidence" type="url" value="${esc(item?.evidence||"")}" placeholder="https://"></label><p class="delivery-wide">确认后仅保存到当前账号的这台设备，不会改变访客已发布成果。</p><div class="delivery-wide"><button class="button primary small" type="submit">确认保存</button><button class="button quiet small" type="button" data-action="cancel-delivery-edit">取消</button></div></form>`;
+  const item=[...events,...PENDING_DELIVERIES].find(e=>e.id===ui.deliveryEditingId);
+  return `<form id="delivery-edit-form" class="delivery-edit-form" data-delivery-id="${esc(item?.id||"")}"><label>项目<select name="projectName" ${item?"":"required"}><option value="" ${!item?.workspaceName?"selected":""}>${item?"独立交付":"选择项目"}</option>${projects.map(p=>`<option value="${esc(p.name)}" ${p.name===item?.workspaceName?"selected":""}>${esc(p.name)}</option>`).join("")}</select></label><label>实际交付日期<input name="date" type="date" required value="${esc(item?.date||shanghaiDateKey())}" max="${shanghaiDateKey()}"></label><label>成果状态<select name="status" required><option value="">选择已核实的状态</option>${["原型完成","测试通过","正式上线"].map(status=>`<option ${item?.status===status?"selected":""}>${status}</option>`).join("")}</select></label><label class="delivery-wide">一句话成果<input name="title" required maxlength="100" value="${esc(item?.title||"")}"></label><label class="delivery-wide">交付详情<textarea name="detail" required maxlength="900" rows="3">${esc(item?.detail||"")}</textarea></label><label class="delivery-wide">证据链接（可选）<input name="evidence" type="url" value="${esc(item?.evidence||"")}" placeholder="https://"></label><p class="delivery-wide">确认后仅保存到当前账号的这台设备，不会改变访客已发布成果。</p><div class="delivery-wide"><button class="button primary small" type="submit">确认保存</button><button class="button quiet small" type="button" data-action="cancel-delivery-edit">取消</button></div></form>`;
 }
 function renderOutcomeTimeline(projects) {
   const events=currentDeliveries(projects),selected=events.find(e=>e.id===ui.selectedMilestoneId);
-  const nodes=events.map((e,i)=>`<button class="outcome-event ${e.id===selected?.id?"selected":""}" data-action="select-milestone" data-milestone-id="${esc(e.id)}" aria-expanded="${e.id===selected?.id}" style="--event-index:${i}"><span class="outcome-event-dot work"></span><time datetime="${e.date}">${e.date.slice(5).replace("-","/")}</time><small>${esc(e.projectName)}</small><strong>${esc(e.title)}</strong></button>`).join("");
-  const detail=selected?`<div class="outcome-selected"><div><h3>${esc(selected.projectName)} · ${esc(selected.title)}</h3><p>${esc(selected.detail)}</p><div class="outcome-evidence">${selected.demo?`<a href="${esc(selected.demo)}" target="_blank" rel="noopener noreferrer">在线体验 ${icon("external")}</a>`:""}${selected.evidence?`<a href="${esc(selected.evidence)}" target="_blank" rel="noopener noreferrer">${selected.ownerConfirmed?"确认依据":"交付证据"} ${icon("external")}</a>`:""}${selected.ownerConfirmed?`<span>本机人工确认</span>`:""}</div></div><div class="delivery-detail-actions">${selected.projectId?`<button class="button quiet small" data-action="view-project" data-id="${esc(selected.projectId)}">查看项目 ${icon("arrow")}</button>`:""}${publicSnapshotMode?"":`<button class="button quiet small" data-action="edit-delivery" data-id="${esc(selected.id)}">调整成果</button>`}</div></div>`:"";
-  return `<section class="card dashboard-v4-card outcome-timeline-card grid-span-12"><header class="dashboard-chart-heading"><h2>过去 30 天 · 产品交付</h2>${publicSnapshotMode?`<time class="muted delivery-snapshot-date" datetime="${PUBLISHED_DELIVERIES.publishedAt}">成果快照 · ${PUBLISHED_DELIVERIES.publishedAt.slice(5).replace("-","/")}</time>`:`<button class="button quiet small" data-action="edit-delivery" data-id="new">补充交付</button>`}</header>${events.length?`<div class="outcome-timeline-scroll" tabindex="0" aria-label="产品交付时间轴，左右滑动浏览"><div class="outcome-timeline-track">${nodes}</div></div>`:`<p class="muted">过去 30 天暂无已确认交付</p>`}${detail}${renderDeliveryEditor(events,projects)}</section>`;
+  const rangeWindow=deliveryWindow(publicSnapshotMode),layout=layoutDeliveryDays(events,rangeWindow);
+  const nodes=layout.groups.map(group=>`<div class="delivery-day" style="left:${group.left}px;top:${group.top}px;--day-top:${group.top}px" data-date="${group.date}" data-day-x="${group.x}"><span class="delivery-day-stem" aria-hidden="true"></span><span class="delivery-day-dot" aria-hidden="true"></span><time datetime="${group.date}">${group.date.slice(5).replace("-","/")}</time>${group.items.map(e=>`<button class="outcome-event ${e.id===selected?.id?"selected":""}" data-action="select-milestone" data-milestone-id="${esc(e.id)}" aria-expanded="${e.id===selected?.id}"><time class="sr-only">${e.date}</time><small>${esc(e.projectName)}</small><strong>${esc(e.title)}</strong></button>`).join("")}</div>`).join("");
+  const ticks=layout.ticks.map(t=>`<time class="delivery-axis-tick" style="left:${t.x}px" datetime="${t.date}">${t.date.slice(5).replace("-","/")}</time>`).join("");
+  const candidates=publicSnapshotMode?"":`<details class="delivery-candidates"><summary>待审核候选</summary>${PENDING_DELIVERIES.filter(p=>!events.some(e=>e.id===p.id)).map(p=>`<div><span>${p.date.slice(5)} · ${esc(p.projectName)} · 待审核</span><p>${esc(p.detail)}</p><button class="button quiet small" data-action="edit-delivery" data-id="${p.id}">核对并调整</button></div>`).join("")}</details>`;
+  const detail=selected?`<div class="outcome-selected"><div><h3>${esc(selected.projectName)} · ${esc(selected.title)}</h3><span class="delivery-stage">${esc(selected.status||"人工确认")}</span><p>${esc(selected.detail)}</p><div class="outcome-evidence">${selected.demo?`<a href="${esc(selected.demo)}" target="_blank" rel="noopener noreferrer">当前体验 ${icon("external")}</a>`:""}${selected.evidence?`<a href="${esc(selected.evidence)}" target="_blank" rel="noopener noreferrer">${selected.ownerConfirmed?"确认依据":"交付证据"} ${icon("external")}</a>`:""}${selected.ownerConfirmed?`<span>本机人工确认</span>`:""}</div></div><div class="delivery-detail-actions">${selected.projectId?`<button class="button quiet small" data-action="view-project" data-id="${esc(selected.projectId)}">查看项目 ${icon("arrow")}</button>`:""}${publicSnapshotMode?"":`<button class="button quiet small" data-action="edit-delivery" data-id="${esc(selected.id)}">调整成果</button>`}</div></div>`:"";
+  return `<section class="card dashboard-v4-card outcome-timeline-card grid-span-12"><header class="dashboard-chart-heading"><h2>过去 30 天 · 产品交付</h2>${publicSnapshotMode?`<time class="muted delivery-snapshot-date" datetime="${PUBLISHED_DELIVERIES.publishedAt}">成果快照 · ${PUBLISHED_DELIVERIES.publishedAt.slice(5).replace("-","/")}</time>`:`<button class="button quiet small" data-action="edit-delivery" data-id="new">补充交付</button>`}</header>${events.length?`<div class="outcome-timeline-scroll" tabindex="0" aria-label="产品交付时间轴，左右滑动浏览"><div class="outcome-timeline-track delivery-proportional-track" style="width:${layout.width}px;height:${layout.height}px">${ticks}${nodes}</div></div>`:`<p class="muted">过去 30 天暂无已确认交付</p>`}${detail}${candidates}${renderDeliveryEditor(events,projects)}</section>`;
 }
 
 function renderDashboard() {
@@ -4084,12 +4087,12 @@ app.addEventListener("submit", (event) => {
   event.preventDefault();
   if (publicSnapshotMode) return;
   if(event.target.id==="delivery-edit-form") {
-    const form=event.target,values=new FormData(form),existing=currentDeliveries().find(e=>e.id===form.dataset.deliveryId);
+    const form=event.target,values=new FormData(form),existing=[...currentDeliveries(),...PENDING_DELIVERIES].find(e=>e.id===form.dataset.deliveryId);
     const name=String(values.get("projectName")||"");if((!name&&!existing)||(name&&!db.projects.some(p=>p.name===name)))return;
     const date=String(values.get("date")||"");
     if(date>shanghaiDateKey() || date<shiftDateKey(shanghaiDateKey(),-29)){toast("请填写过去 30 天内的实际交付日期");return;}
     try {
-      privateDeliveryEdits=saveDeliveryEdit(localStorage,workspaceAuth.userId,privateDeliveryEdits||[],{...existing,id:existing?.id||`delivery-${crypto.randomUUID()}`,date,projectName:existing?.projectName||name,workspaceName:name,title:String(values.get("title")||""),detail:String(values.get("detail")||""),evidence:String(values.get("evidence")||""),demo:existing?.demo||""});
+      privateDeliveryEdits=saveDeliveryEdit(localStorage,workspaceAuth.userId,privateDeliveryEdits||[],{...existing,id:existing?.id||`delivery-${crypto.randomUUID()}`,date,projectName:existing?.projectName||name,workspaceName:name,status:String(values.get("status")||""),title:String(values.get("title")||""),detail:String(values.get("detail")||""),evidence:String(values.get("evidence")||""),demo:existing?.demo||""});
       ui.deliveryEditingId="";render();toast("已在此设备确认，访客成果保持不变");
     }catch{toast("未能保存，请检查日期、内容及浏览器存储");}
     return;

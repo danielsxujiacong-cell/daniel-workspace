@@ -243,3 +243,8 @@ Home 使用 GitHub 开发活动与 Project Universe 等宽等高双卡片，手�
 ## V4.3 Final Delivery Edition
 
 移除装饰时钟并收紧 Top 5。产品交付时间轴展示八项经过证据核对的跨项目成果；小程序 2026-09-29 正式上线日期由所有者明确确认。日期、范围与未完成边界见 [交付核验记录](docs/DELIVERY_EVIDENCE.md)。访客成果是随本次代码发布的独立固定展示快照，不改动原有 Worker KV 业务快照。私人模式支持当前账号本机补充与调整确认项，既不写 Supabase，也不自动更新访客成果；需再次审阅并发布代码才能更新公开成果清单。
+
+
+### V4.4 · Dashboard Final Polish
+
+Home activity ranking uses compact aligned vertical rows, retaining Commit/work-log counts. Product deliveries use a date-proportional September 17–October 16 timeline with ten evidence-reviewed milestones; stages and unresolved private candidates remain explicit. See docs/DELIVERY_EVIDENCE.md. Private corrections do not publish themselves.
