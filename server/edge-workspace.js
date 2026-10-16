@@ -1,5 +1,7 @@
 import { postChat, authenticateWorkspace } from '../cloudflare/worker.js';
 import { sanitizeStaticSnapshot, validateStaticSnapshot } from '../src/static-snapshot.js';
+import latestRelease from '../assets/public/latest.json' with { type: 'json' };
+import previousRelease from '../assets/public/previous.json' with { type: 'json' };
 
 const ORIGIN = 'https://workspace.danielxu.cn';
 const SUPABASE = { SUPABASE_URL: 'https://vjqsorzsilxblufpdxxc.supabase.co', SUPABASE_ANON_KEY: 'sb_publishable_SzoEakfquA7EbxILyhFnpg_lOhq20fg', WORKSPACE_USER_ID: '9dd41e63-bdbd-405c-8243-ebe7de99fcf9' };
@@ -27,17 +29,12 @@ async function bodyOf(request, limit) {
   for (const chunk of chunks) { bytes.set(chunk,offset); offset += chunk.byteLength; }
   return JSON.parse(new TextDecoder().decode(bytes));
 }
-async function storedSnapshot(env, fetchImpl = fetch) {
+async function storedSnapshot(env) {
   const kv = binding(env);
   for (const key of ['snapshot:latest', 'snapshot:previous']) {
     try { const s = JSON.parse(await kv?.get(key)); if (validateStaticSnapshot(s)) return s; } catch {}
   }
-  for (const file of ['latest.json', 'previous.json']) {
-    try {
-      const r = await fetchImpl(`${ORIGIN}/assets/public/${file}`, { signal: AbortSignal.timeout(8000) });
-      if (r.ok) { const s = await r.json(); if (validateStaticSnapshot(s)) return s; }
-    } catch {}
-  }
+  for (const s of [latestRelease,previousRelease]) if (validateStaticSnapshot(s)) return s;
   throw Error('snapshot_unavailable');
 }
 export async function snapshotRoute({request, env = {}}) {
