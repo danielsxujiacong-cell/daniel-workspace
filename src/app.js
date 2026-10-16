@@ -2790,9 +2790,7 @@ function renderCloudNotice() {
 }
 
 function renderPublicSnapshotNotice() {
-  if (publishedSnapshot) return `<section class="public-snapshot-banner" role="status"><strong>公开只读快照</strong><span>展示所有者手动发布的脱敏数据 · ${publishedSnapshot.publishedAt ? `更新于 ${esc(formattedTimestamp(publishedSnapshot.publishedAt))}` : "发布日期未提供"}</span></section>`;
-  const message = globalThis.DANIEL_WORKSPACE_PUBLIC_SNAPSHOT_ERROR || "尚未发布访客快照。私人工作台数据不会自动公开。";
-  return `<section class="public-snapshot-banner pending" role="status"><strong>访客快照尚未发布</strong><span>${esc(message)} 所有者手动发布前不会显示私人工作台资料。</span></section>`;
+  return "";
 }
 
 function renderSnapshotPreview() {

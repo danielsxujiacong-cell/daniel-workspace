@@ -1,5 +1,10 @@
 # Changelog
 
+## Public snapshot quick update — 2026-10-16
+
+- Hide the public snapshot status banner, rename the portfolio delivery milestone, and add the two requested tasks to the static latest snapshot fallback.
+- The active EdgeOne API snapshot remains unchanged until the owner publishes these task rows from the private workspace.
+
 ## V4.7 — 2026-10-16
 
 - Match all 26 existing projects to repository evidence, enrich private project details, and add 28 sourced historical work logs without replacing valuable manual fields.

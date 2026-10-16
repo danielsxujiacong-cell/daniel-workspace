@@ -12,7 +12,7 @@ const records = [
  {id:"procurement-test",date:"2026-10-11",projectName:"n8n 采购自动化",workspaceName:"n8n AI Automation Lab",title:"AI 分析写回、读回与防重测试通过",status:"测试通过",detail:"候选流程测试记录确认四个 AI 字段写回、读回及重复执行跳过；候选未发布，正式新版仍待真实新工单端到端复验。",demo:"https://hub.danielxu.cn/flowops"},
  {id:"flowops",date:"2026-10-12",projectName:"FlowOps AI",workspaceName:"Daniel Project Hub",title:"知识库与采购流程体验入口整合上线",status:"正式上线",detail:"独立知识库、历史采购案例与明确标注为模拟的流程回放已部署，页面和公开资源返回 200；网页不触发真实审批。",demo:"https://hub.danielxu.cn/flowops"},
  {id:"daily",date:"2026-10-12",projectName:"AI 运营日报",workspaceName:"",title:"日报生成、归档与网页展示测试通过",status:"测试通过",detail:"两次 n8n 实际执行成功生成 GLM 报告，同日更新历史并完成网页发布；公开内容含标记的测试与虚构项目，飞书群推送未发送。",demo:"https://hub.danielxu.cn/daily-brief"},
- {id:"portfolio",date:"2026-10-16",projectName:"个人作品集",workspaceName:"Daniel website",title:"五段式求职作品集正式发布",status:"正式上线",detail:"真实产品预览替换旧模拟界面，截图压缩及减少动态效果适配完成；发布提交与 Pages 成功部署记录已核对。",demo:"https://danielsxujiacong-cell.github.io/personal-portfolio/"},
+ {id:"portfolio",date:"2026-10-16",projectName:"个人作品集",workspaceName:"Daniel website",title:"个人主页作品集网站正式发布",status:"正式上线",detail:"真实产品预览替换旧模拟界面，截图压缩及减少动态效果适配完成；发布提交与 Pages 成功部署记录已核对。",demo:"https://danielsxujiacong-cell.github.io/personal-portfolio/"},
 ];
 export const PENDING_DELIVERIES = Object.freeze([
  {id:"candidate-content",date:"2026-09-19",projectName:"AI 内容生产自动化",workspaceName:"AI 内容情报系统",title:"完整 AI 筛选、改写与报告链路跑通",detail:"已有原型代码，但没有找到完整 AI 链路运行验收记录。",status:"待审核"},

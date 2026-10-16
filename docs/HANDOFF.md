@@ -28,6 +28,10 @@ Verification: 29 focused tests passed (auth/guest isolation, private assistant, 
 
 # Handoff
 
+## Public snapshot quick update — 2026-10-16
+
+Pushed the banner removal, portfolio delivery title correction, and two requested task rows in `assets/public/latest.json`. EdgeOne serves the active immutable Supabase snapshot before static fallbacks, so the Tasks rows still require the owner to publish from the authenticated private workspace. Do not bypass the owner publication flow or switch the public pointer directly.
+
 ## V4.5.3 verified delivery · 2026-10-16
 
 - Source `a296d10` deployed the no-KV public AI path; `6e25c1c` closes the old Worker chat bypass. All changes are committed/pushed to main; subsequent documentation commits do not change runtime behavior. Dashboard CSS/layout and original project materials were not changed.
