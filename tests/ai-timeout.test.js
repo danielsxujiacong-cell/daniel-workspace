@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import worker from "../cloudflare/worker.js";
+import { postChat } from "../cloudflare/worker.js";
 import { httpProviderChat } from "../src/ai/providers/http-provider.js";
 
 const env = {
@@ -31,7 +31,7 @@ test("brief Worker uses bounded output and retries one GLM response-body timeout
     return { ok: true, json: async () => ({ model: env.AI_MODEL, choices: [{ message: { content: '{"completed":[],"recommendations":[],"watch":[]}' } }] }) };
   };
 
-  const response = await worker.fetch(request(), env);
+  const response = await postChat(request(), env);
   assert.equal(response.status, 200);
   assert.equal(attempts, 2);
   assert.equal(upstreamBody.max_tokens, 6000);
@@ -46,7 +46,7 @@ test("other Worker requests retain the existing output budget", async (t) => {
     upstreamBody = JSON.parse(init.body);
     return { ok: true, json: async () => ({ model: env.AI_MODEL, choices: [{ message: { content: "ok" } }] }) };
   };
-  const response = await worker.fetch(request("assistant"), env);
+  const response = await postChat(request("assistant"), env);
   assert.equal(response.status, 200);
   assert.equal(upstreamBody.max_tokens, 1_200);
 });
@@ -59,7 +59,7 @@ test("brief Worker returns a specific timeout after only one safe retry", async 
     attempts += 1;
     return { ok: true, json: async () => { throw new DOMException("timed out", "TimeoutError"); } };
   };
-  const response = await worker.fetch(request(), env);
+  const response = await postChat(request(), env);
   const body = await response.json();
   assert.equal(attempts, 2);
   assert.equal(response.status, 504);

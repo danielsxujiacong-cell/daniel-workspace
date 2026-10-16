@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {fetchPublishedSnapshot} from '../src/public-snapshot.js';
 import {chatRoute, snapshotRoute} from '../server/edge-workspace.js';
-import {postChat,authenticateWorkspace} from '../cloudflare/worker.js';
+import worker,{postChat,authenticateWorkspace} from '../cloudflare/worker.js';
 import {parseStructuredJSON} from '../src/ai/structured-json.js';
 const snapshot=JSON.parse(await readFile(new URL('../assets/public/latest.json',import.meta.url),'utf8'));
 const origin='https://workspace.danielxu.cn';
@@ -79,4 +79,13 @@ test('atomic quota failure prevents any GLM request',async t=>{
  globalThis.fetch=async url=>{calls++;assert.ok(url.endsWith('/rpc/workspace_reserve_public_ai_quota'));return new Response('',{status:503});};
  const response=await chatRoute({request:req('/api/public/chat',{message:'hi'}),clientIp:'192.0.2.56',env:{AI_API_KEY:'fake'}},true,{quotaBackend:'postgres'});
  assert.equal(response.status,503);assert.equal(calls,1);
+});
+test('legacy Worker cannot bypass anonymous limits and still permits the validated owner',async t=>{
+ const original=globalThis.fetch;t.after(()=>globalThis.fetch=original);let calls=0;
+ const env={AI_API_KEY:'fake',AI_MODEL:'glm-4-flash-250414',AI_BASE_URL:'https://glm.test/v4',ALLOWED_ORIGINS:origin,SUPABASE_URL:'https://auth.test',SUPABASE_ANON_KEY:'test-public-key',WORKSPACE_USER_ID:'owner'};
+ globalThis.fetch=async url=>{calls++;return url==='https://auth.test/auth/v1/user'?Response.json({id:'owner'}):Response.json({choices:[{message:{content:'owner response'},finish_reason:'stop'}]});};
+ const payload={message:'hi',currentPage:'home',relevantContext:{}};
+ assert.equal((await worker.fetch(req('/api/chat',payload),env)).status,401);assert.equal(calls,0);
+ const owner=req('/api/chat',payload);owner.headers.set('Authorization','Bearer synthetic-owner-token');
+ assert.equal((await worker.fetch(owner,env)).status,200);assert.equal(calls,2);
 });

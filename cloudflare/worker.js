@@ -1231,7 +1231,10 @@ export default {
     if (request.method === "GET" && url.pathname === "/health") {
       return jsonResponse(request, env, { ok: true, provider: "智谱 BigModel", model: env.AI_MODEL || "glm-4-flash-250414", configured: Boolean(env.AI_API_KEY) });
     }
-    if (request.method === "POST" && url.pathname === "/api/chat") return postChat(request, env);
+    if (request.method === "POST" && url.pathname === "/api/chat") {
+      if (!await authenticateWorkspace(request,env)) return errorResponse(request,env,401,"unauthorized","请登录后使用私人 AI。");
+      return postChat(request, env);
+    }
     return jsonResponse(request, env, { error: { code: "not_found", message: "Not found." } }, 404);
   },
 };
