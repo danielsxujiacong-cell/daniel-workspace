@@ -2,18 +2,18 @@
 
 ## V4.5.3 中国大陆读取与 AI 修复
 
-- 公开读取走同域 `/api/public/snapshot`（EdgeOne KV），失败回退 `assets/public/latest.json`、`previous.json`，访客无需连接 Workers、GitHub 或 Supabase。首次静态迁移两个槽位是同一已成功发布基线，后续导出才轮换上一版。`node scripts/export-public-snapshot.mjs` 在发布阶段导入已审核快照；失败不改现有文件，成功后正常 commit/push。
+- 公开读取走同域 `/api/public/snapshot`（函数内打包静态基线，可选 KV），失败回退 `assets/public/latest.json`、`previous.json`，访客无需连接 Workers、GitHub 或 Supabase。首次静态迁移两个槽位是同一已成功发布基线，后续导出才轮换上一版。`node scripts/export-public-snapshot.mjs` 在发布阶段导入已审核快照；失败不改现有文件，成功后正常 commit/push。
 - EdgeOne Node Functions 的 `/api/chat` 验证现有所有者会话后处理私人上下文；`/api/public/chat` 只读取服务端公开快照，忽略客户端上下文。`AI_API_KEY` 仅在生产环境服务端配置。使用固定智谱地址和模型，不转发到 Workers。Edge Runtime 的真实 GLM 请求未成功；Node Runtime 已通过私人今日简报与周报实测。
 - 匿名 AI 不依赖 KV：用户已授权在现有 Supabase 新增隔离计数表和原子预约 RPC。每 IP 3 次/分钟、15 次/北京时间日，全站 100 次/日，最多 1000 字问题、6 条短历史，固定模型与输出预算。计数服务故障即停止调用；只保存每日 HMAC 标识与计数，不保存原始 IP/对话。访客不能直接读写计数表，RPC 只能递增计数，不访问私人业务表。
 - 当前 EdgeOne 仍为“全球可用区（不含中国大陆）”。KV 免费用途申请审批中，不影响已有快照浏览或新的匿名 AI 链路。KV 一键发布写入暂不可用，新静态发布需运行导出脚本、commit/push；现有 26 项目继续可读。真实大陆手机直连与匿名真实 AI 验收状态见 HANDOFF，不能据部署成功宣称大陆实测已通过。
 - 今日简报/周报/下一步使用 JSON 模式和更充分输出预算，截断或缺字段最多重试一次；来源核验继续保留。完整实测状态见 `docs/HANDOFF.md`。
 
-Daniel Workspace V3.9 使用统一的 Dashboard 2.0 和两种数据模式。私人 Dashboard 显示真实 Supabase 项目数据、GitHub 活动和本机 Codex Token 汇总；访客只读取所有者手动发布到独立 Cloudflare KV 的安全快照。访客模式不读取私人表、浏览器工作区缓存、本机文件或私有仓库。
+Daniel Workspace V4.5.3 保留 V4.4 Dashboard 展示。私人模式使用既有账号数据；访客读取同域已发布安全快照，并可通过同域 Node Functions 与真实 GLM 对话。访客不读取私人表、浏览器工作区缓存、本机文件或私有仓库。
 
 ## Status
 
-- **Stage:** V3.9 Dashboard 2.0 adds real-data heatmaps, rankings, hourly activity, and private local Token summaries. Verification and handoff are recorded in [HANDOFF](docs/HANDOFF.md).
-- **Last updated:** 2026-10-13
+- **Stage:** V4.5.3 same-origin snapshot delivery and real private/visitor AI verified. Mainland no-VPN mobile acceptance remains pending; see [HANDOFF](docs/HANDOFF.md).
+- **Last updated:** 2026-10-16
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
 ## Quick start
@@ -24,7 +24,7 @@ Daniel Workspace V3.9 使用统一的 Dashboard 2.0 和两种数据模式。私�
 python local_companion.py
 ```
 
-在浏览器打开 [http://127.0.0.1:4174](http://127.0.0.1:4174) 即可浏览公开只读工作台；根网址先显示完整界面，不因已保存的 Supabase 会话自动进入私人模式。快照未发布时页面会明确说明尚无公开项目数据，不显示 Mock 统计。登录后在私人工作台点击「一键发布访客快照」，应用自动汇总所有安全字段并直接写入独立 KV；发布只冻结已加载的安全展示字段和图表计数，不再逐仓库预检查或重新生成 AI；缺失活动标记为不完整，写入失败保留旧快照。已发布快照通过 Worker 的公开 GET 读取，访客搜索、导航、项目详情和图表筛选均为只读。`?mode=guest` 是公开模式别名，`?mode=login` 是唯一私人入口；退出后回到公开根网址。FlowOps 网站明确标为虚构业务的模拟演示；TK-1001 流程模拟仅通过显式 `?mode=demo` 打开。登录后按 `Ctrl+K` 或 `⌘K` 聚焦全局搜索；Companion 仅在私人登录模式尝试从本机 `127.0.0.1:4174` 读取扫描。
+在浏览器打开 [http://127.0.0.1:4174](http://127.0.0.1:4174) 即可浏览公开只读工作台；根网址先显示完整界面，不因已保存的 Supabase 会话自动进入私人模式。快照未发布时页面会明确说明尚无公开项目数据，不显示 Mock 统计。登录后在私人工作台点击「一键发布访客快照」，应用冻结已加载的安全字段；在线 KV 写入待服务审核，当前正式更新使用上方静态导出与 Git 部署流程；发布只冻结已加载的安全展示字段和图表计数，不再逐仓库预检查或重新生成 AI；缺失活动标记为不完整，写入失败保留旧快照。已发布快照通过同域 API 或静态 JSON 读取，访客搜索、导航、项目详情和图表筛选均为只读。`?mode=guest` 是公开模式别名，`?mode=login` 是唯一私人入口；退出后回到公开根网址。FlowOps 网站明确标为虚构业务的模拟演示；TK-1001 流程模拟仅通过显式 `?mode=demo` 打开。登录后按 `Ctrl+K` 或 `⌘K` 聚焦全局搜索；Companion 仅在私人登录模式尝试从本机 `127.0.0.1:4174` 读取扫描。
 
 手动控制 Companion：前台运行 `python local_companion.py` 时按 `Ctrl+C` 停止；开机任务启动的后台实例可在 PowerShell 执行 `Stop-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion"` 停止。取消后续登录自动启动，执行 `Unregister-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion" -Confirm:$false`。重新登录 Windows 会再次启动仍注册的任务。
 
