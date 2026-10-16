@@ -127,6 +127,8 @@ export async function chatRoute(context, publicMode = false, {quotaBackend='kv'}
         publishedAt:snapshot.publishedAt,
         projects:Object.fromEntries(snapshot.projects.map((p,i)=>[`project${i+1}`,{name:p.name,description:p.description.slice(0,160),status:p.status,stage:p.stage,next:p.next.slice(0,80),features:p.publicDetails?.features?.slice(0,2).map(s=>s.slice(0,80)),outcomes:p.publicDetails?.outcomes?.slice(0,2).map(s=>s.slice(0,80))}])),
         deliveries:snapshot.deliveries.map(d=>({date:d.date,projectName:d.projectName,title:d.title})),
+        knowledge:snapshot.knowledge.map(k=>({title:k.title,summary:k.summary,content:k.content})),
+        decisions:snapshot.decisions.map(d=>({question:d.question,goal:d.goal,final:d.final,reason:d.reason})),
       };
       // Keep all 26 names available despite generic provider array caps.
       payload = { message:body.message,currentPage:'public-projects',relevantContext:publicContext,history:Array.isArray(body.history)?body.history.slice(-6).map(h=>({role:h.role,content:typeof h.content==='string'?h.content.slice(0,600):''})):[] };

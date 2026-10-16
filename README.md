@@ -26,7 +26,7 @@ Daniel Workspace V4.5.3 保留 V4.4 Dashboard 展示。私人模式使用既有�
 
 ## Status
 
-- **Stage:** V4.7 private project enrichment completed: 26 profiles and 28 sourced historical logs; signed-in detail checks passed. Public snapshot remains unchanged. See [HANDOFF](docs/HANDOFF.md).
+- **Stage:** V4.8 real owner-click publication confirmed: 26 complete projects, 3 reviewed Knowledge and 2 user-authored Decisions. Version `v48-966d31cc21c270ed6eb7ee0b1879ac2a`, 2026-10-16 18:50 Asia/Shanghai. See [HANDOFF](docs/HANDOFF.md).
 - **Last updated:** 2026-10-16
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
