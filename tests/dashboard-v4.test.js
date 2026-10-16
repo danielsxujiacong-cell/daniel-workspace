@@ -152,3 +152,21 @@ test("outcome timeline uses real work logs and curated deployed releases in the 
   assert.equal(timeline.some((item) => item.title === "太早了"), false);
   assert.equal(outcome.id.includes("private-row-id"), false);
 });
+
+
+test("compact universe preserves flagship hierarchy and leaves room for touch targets", () => {
+  const names = ["Daniel Workspace", "AI Investment Dashboard", "Daniel Project Hub", "Daniel website", "n8n AI Automation Lab"];
+  const projects = Array.from({length:26}, (_,i)=>({id:`p${i}`,name:names[i] || `Project ${i}`}));
+  for (const width of [390,500]) {
+    const graph = buildProjectUniverse({projects,width,height:360});
+    assert.equal(graph.nodes.length,26);
+    assert.equal(graph.nodes.filter(n=>n.flagship).length,5);
+    assert.ok(Math.min(...graph.nodes.filter(n=>n.flagship).map(n=>n.radius)) > Math.max(...graph.nodes.filter(n=>!n.flagship).map(n=>n.radius)));
+    for (let i=0;i<26;i++) for (let j=i+1;j<26;j++) {
+      const a=graph.nodes[i],b=graph.nodes[j];
+      assert.ok(Math.hypot(a.x-b.x,a.y-b.y) > a.radius+b.radius+8);
+    }
+    const occupied = Math.max(...graph.nodes.map(n=>n.x+n.radius))-Math.min(...graph.nodes.map(n=>n.x-n.radius));
+    assert.ok(occupied/width > .64 && occupied/width < .8);
+  }
+});

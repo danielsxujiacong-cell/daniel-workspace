@@ -1783,3 +1783,40 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 @media(prefers-reduced-motion:reduce) { .project-universe-stage::before, .project-universe-halo, .project-universe-star { animation: none !important; } }
 
 .project-universe-hover-label[hidden] { display: none; }
+
+/* V4.1 Final Layout: equal feature cards, compact scene composed in its own coordinates. */
+.dashboard-feature-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: stretch; min-width: 0; }
+.dashboard-feature-pair > .dashboard-github-card, .dashboard-feature-pair > .project-universe-card { grid-column: auto; min-width: 0; height: 440px; padding: 16px; border-radius: 18px; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; }
+.dashboard-feature-pair .dashboard-chart-heading { flex: 0 0 auto; min-height: 38px; margin: 0; }
+.dashboard-feature-pair .dashboard-chart-heading h2 { font-size: 14px; }
+.dashboard-github-card > .dashboard-heatmap-panel { flex: 1; min-height: 0; overflow: auto; border: 0; padding: 14px 0 0; background: transparent; align-content: center; }
+.dashboard-github-card > .dashboard-heatmap-panel > header { display: none; }
+.dashboard-github-card .dashboard-heatmap-grid { grid-template-columns: repeat(7, minmax(24px, 1fr)); grid-auto-rows: 32px; gap: 10px 6px; }
+.dashboard-github-card .dashboard-heatmap-cell { height: 32px; }
+.dashboard-github-card .dashboard-activity-status { flex: 0 0 auto; }
+.dashboard-github-card .dashboard-activity-controls { flex-wrap: wrap; min-width: 0; }
+.dashboard-feature-pair .project-universe-stage { flex: 1; height: auto; min-height: 0; border-radius: 13px; }
+.dashboard-feature-pair .project-universe-svg { touch-action: pan-y pinch-zoom; cursor: default; }
+.dashboard-feature-pair .project-universe-planet { transform-box: view-box; transform-origin: 0 0; }
+.dashboard-feature-pair .project-universe-label { font-size: 10px; letter-spacing: 0; }
+.dashboard-feature-pair .project-universe-node:not(.label-prominent):not(:hover):not(:focus-visible) .project-universe-label { opacity: 0; }
+.dashboard-feature-pair .project-universe-halo { filter: blur(4px); }
+.dashboard-feature-pair .project-universe-toolbar { top: 10px; left: 10px; }
+.dashboard-feature-pair .project-universe-search { width: 140px; min-height: 28px; }
+.dashboard-feature-pair .project-universe-hover-label { width: max-content; max-width: calc(100% - 24px); padding: 12px 15px; gap: 4px; }
+.dashboard-feature-pair .project-universe-hover-label strong { font-size: 12px; }
+@media(max-width:900px) {
+ .dashboard-feature-pair { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+ .dashboard-feature-pair > .dashboard-github-card, .dashboard-feature-pair > .project-universe-card { height: 420px; }
+}
+@media(max-width:460px) {
+ .dashboard-feature-pair > .dashboard-github-card, .dashboard-feature-pair > .project-universe-card { padding: 13px; }
+ .dashboard-feature-pair .dashboard-chart-heading { flex-direction: row; align-items: center; }
+ .dashboard-feature-pair .project-universe-label { font-size: 9px; }
+}
+
+.dashboard-github-card .dashboard-chart-heading h2 { white-space: nowrap; }
+.dashboard-github-card .dashboard-activity-controls { width: auto; flex: 0 1 auto; }
+.dashboard-github-card .dashboard-heatmap-legend .unknown-key { flex-basis: auto; margin-left: auto; }
+.dashboard-feature-pair .project-universe-node:hover .project-universe-planet { transform: translate(var(--magnet-x, 0px), var(--magnet-y, 0px)) scale(1.12); }
+@media(prefers-reduced-motion:reduce) { .dashboard-feature-pair .project-universe-node:hover .project-universe-planet { transform: none; } }

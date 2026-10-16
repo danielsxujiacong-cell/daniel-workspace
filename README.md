@@ -231,3 +231,7 @@ node .\node_modules\wrangler\bin\wrangler.js secret put AI_API_KEY --config .\cl
 ## V4.0 Project Universe · 单一宇宙场
 
 Home 星系图取消分类分区，所有真实项目聚拢于蓝紫星云。五个重点项目显示名称与更亮光核，其余名称按需显示；搜索、缩放、玻璃项目浮层与减少动态效果继续可用。仅调整星系模块。
+
+## V4.1 Final Layout
+
+Home 使用 GitHub 开发活动与 Project Universe 等宽等高双卡片，手机端纵向排列。首页不再显示 Codex Token 面板，底层用量采集保留。星球对应真实项目，悬停显示名称与状态，点击直接进入当前模式下的项目详情。

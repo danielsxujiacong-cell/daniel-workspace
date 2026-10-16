@@ -132,8 +132,8 @@ function projectUniverseCoordinates(projects, radii, width, height, selectedCate
     const hash = [...stableProjectId(project)].reduce((v, c) => (v * 31 + c.codePointAt(0)) >>> 0, 7);
     const angle = index * goldenAngle + (hash % 100) / 220;
     const distance = Math.pow((index + 0.65) / Math.max(1, ordered.length), 0.8);
-    const point = { x: width * .49 + Math.cos(angle) * distance * width * .32,
-      y: height * .52 + Math.sin(angle) * distance * height * .34 };
+    const point = { x: width * .49 + Math.cos(angle) * distance * width * .40,
+      y: height * .52 + Math.sin(angle) * distance * height * .39 };
     if (isUniverseFlagship(project) && index < 5) {
       const anchors = [[-.10,-.09],[.10,-.15],[.04,.10],[-.17,.15],[.19,.20]];
       point.x = width * (.49 + anchors[index][0]);
@@ -152,7 +152,7 @@ function projectUniverseCoordinates(projects, radii, width, height, selectedCate
         let dx = b.x - a.x;
         let dy = b.y - a.y;
         let distance = Math.hypot(dx, dy);
-        const minimum = radii.get(String(leftProject.id)) + radii.get(String(rightProject.id)) + 14;
+        const minimum = Math.max(27, radii.get(String(leftProject.id)) + radii.get(String(rightProject.id)) + 16);
         if (distance >= minimum) continue;
         if (distance < 0.001) {
           const angle = (left + 1) * goldenAngle;
@@ -194,7 +194,7 @@ export function buildProjectUniverse({ projects = [], activity = null, tasks = [
   const radii = new Map(projectRows.map((project) => {
     const row = activityById.get(String(project.id)) || { githubCommits: 0, workLogs: 0 };
     const score = row.githubCommits + row.workLogs;
-    return [String(project.id), (isUniverseFlagship(project) ? 12 : 3.5) + (maxActivity ? Math.sqrt(score / maxActivity) * (isUniverseFlagship(project) ? 5 : 4) : 0)];
+    return [String(project.id), (isUniverseFlagship(project) ? 9 : 3) + (maxActivity ? Math.sqrt(score / maxActivity) * (isUniverseFlagship(project) ? 3 : 2) : 0)];
   }));
   const { points, clusters } = projectUniverseCoordinates(projectRows, radii, width, height, selectedCategory);
   const nodes = projectRows.map((project) => {
