@@ -18,12 +18,6 @@ export function universeLabels(nodes, width, height) {
   return placed;
 }
 
-export function localRhythm(now = new Date()) {
-  const hour = now.getHours()+now.getMinutes()/60;
-  return {time:`${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`,
-    angle:hour*15, bars:Array.from({length:24},(_,i)=>({angle:i*15,opacity:.18+.72*(1+Math.cos((i-hour)/24*Math.PI*2))/2}))};
-}
-
 export function topActivity(rows=[]) {
   return rows.filter(r=>Number.isSafeInteger(r.githubCommits)&&r.githubCommits>=0&&Number.isSafeInteger(r.workLogs)&&r.workLogs>=0)
     .filter(r=>r.githubCommits+r.workLogs>0).slice().sort((a,b)=>(b.githubCommits+b.workLogs)-(a.githubCommits+a.workLogs)||String(a.projectName).localeCompare(String(b.projectName))).slice(0,5);

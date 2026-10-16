@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { universeLabels, localRhythm, topActivity, syncLabel } from "../src/dashboard-final.js";
+import { universeLabels, topActivity, syncLabel } from "../src/dashboard-final.js";
 import { buildProjectUniverse, buildOutcomeTimeline } from "../src/dashboard-v4.js";
 
 test("five flagship labels fit compact scenes without colliding with labels or planets",()=>{
@@ -13,11 +13,6 @@ test("five flagship labels fit compact scenes without colliding with labels or p
    for(const n of m.nodes){const x=Math.max(a.x,Math.min(n.x,a.x+a.width)),y=Math.max(a.y,Math.min(n.y,a.y+a.height));assert.ok(Math.hypot(n.x-x,n.y-y)>=n.radius+5);}
   }
  }
-});
-test("rhythm uses local clock only, changes at hour rollover, and has 24 bounded rays",()=>{
- const a=localRhythm(new Date(2026,9,16,23,59)),b=localRhythm(new Date(2026,9,17,0,0));
- assert.equal(a.time,"23:59");assert.equal(b.time,"00:00");assert.equal(b.angle,0);assert.equal(a.bars.length,24);
- assert.ok(a.bars.every(b=>b.opacity>=.18&&b.opacity<=.9&&b.angle>=0&&b.angle<360));assert.notDeepEqual(a.bars,b.bars);
 });
 test("Top 5 sorts real counts without filling gaps or counting invalid values",()=>{
  const rows=Array.from({length:8},(_,i)=>({projectId:String(i),projectName:`P${i}`,githubCommits:i,workLogs:1}));

@@ -1,10 +1,12 @@
-const { universeLabels, localRhythm, topActivity, syncLabel } = await import("./dashboard-final.js?v=4.2");
+const { universeLabels, topActivity, syncLabel } = await import("./dashboard-final.js?v=4.3");
+const { PUBLISHED_DELIVERIES, deliveryView, readDeliveryEdits, saveDeliveryEdit } = await import("./product-deliveries.js?v=4.3");
 const publicSnapshotMode = globalThis.DANIEL_WORKSPACE_MODE === "public";
 let publishedSnapshot = publicSnapshotMode ? globalThis.DANIEL_WORKSPACE_PUBLIC_SNAPSHOT || null : null;
 if (!publicSnapshotMode && globalThis.DANIEL_WORKSPACE_AUTHENTICATED !== true) {
   throw new Error("Workspace requires a validated Supabase session.");
 }
 
+let privateDeliveryEdits = null;
 let workspaceAuth = globalThis.DANIEL_WORKSPACE_AUTH;
 if (!publicSnapshotMode && (!workspaceAuth?.client || !workspaceAuth.userId)) throw new Error("Workspace cloud sync requires a validated user session.");
 
@@ -53,11 +55,10 @@ const { buildCloudDashboardModel, buildLocalDashboardModel, buildRecentProjectUp
 const { buildHomeActivity, resolveActivityRange, shiftDateKey } = await import("./home-activity.js?v=4.0");
 const { renderDashboardLayout } = await import("./dashboard-layout.js?v=3.8-a");
 const {
-  buildOutcomeTimeline,
   buildProjectUniverse,
   inferProjectType,
   PROJECT_TYPES,
-} = await import("./dashboard-v4.js?v=4.2");
+} = await import("./dashboard-v4.js?v=4.3");
 const {
   countPinnedProjects,
   getHomePinnedProjects,
@@ -154,6 +155,7 @@ const ui = {
   selectedActivityDate: "",
   selectedFingerprintCell: "",
   selectedMilestoneId: "",
+  deliveryEditingId: "",
   homeActivity: { key: "", status: "idle", model: null, range: null, githubStatus: "idle", workLogsStatus: "idle", error: "" },
   codexUsage: { status: "idle", model: null, payload: null, requestKey: "", lastFetchedAt: "", error: "", approvePublic: false },
   projectWorkLogs: { projectId: null, status: "idle", items: [], error: "", editingId: "", saving: false, formOpen: false },
@@ -861,6 +863,8 @@ window.addEventListener("offline", () => {
 export function clearPrivateWorkspace() {
   if (!workspaceActive) return;
   workspaceActive = false;
+  privateDeliveryEdits = null;
+  ui.deliveryEditingId = "";
   dashboardWorkLogsRequestId += 1;
   homeActivityRequestId += 1;
   codexUsageRequestId += 1;
@@ -2076,30 +2080,21 @@ function renderProjectUniverse(projects, activity, dataAvailable) {
   return `<section class="card dashboard-v4-card project-universe-card"><header class="dashboard-chart-heading"><div><h2>Project Universe</h2><span class="project-universe-heading-subtitle">项目星系图</span></div><div class="project-universe-meta"><span>${countLabel}</span></div></header><div class="project-universe-stage"><div class="project-universe-toolbar" role="group" aria-label="星图探索"><label class="project-universe-search"><span class="sr-only">搜索项目</span>${icon("search")}<input id="universe-search" type="search" value="${esc(ui.universeQuery)}" placeholder="搜索项目" autocomplete="off" aria-label="搜索项目名称"/><button type="button" class="project-universe-locate" data-action="locate-universe-search" aria-label="定位匹配项目" title="定位匹配项目" ${normalizedQuery ? "" : "disabled"}>↗</button></label></div><svg class="project-universe-svg" viewBox="0 0 ${model.width} ${model.height}" role="group" aria-label="项目星图。选择星球打开项目详情"><defs>${gradients}</defs><g class="project-universe-world" transform="translate(${ui.universeCamera.x.toFixed(1)} ${ui.universeCamera.y.toFixed(1)}) scale(${ui.universeCamera.scale.toFixed(3)})"><g class="universe-stardust" fill="#bfd5ff" aria-hidden="true">${dust}</g>${nodes}</g></svg><div class="project-universe-hover-label" aria-hidden="true" hidden><strong data-tooltip-name></strong><span data-tooltip-category></span><span data-tooltip-summary></span><span data-tooltip-activity></span><span data-tooltip-coverage></span></div></div></section>`;
 }
 
-function renderOutcomeTimeline(projects, workLogs, workLogStatus, truncated = false) {
-  const events = buildOutcomeTimeline({ projects, workLogs }).slice(-6);
-  const selected = events.find(item=>item.id===ui.selectedMilestoneId);
-  const eventButtons = events.map((item,index)=>`<button class="outcome-event ${item.id===selected?.id?"selected":""}" data-action="select-milestone" data-milestone-id="${esc(item.id)}" aria-expanded="${item.id===selected?.id}" style="--event-index:${index}"><span class="outcome-event-dot ${item.kind==="成果"?"work":"release"}"></span><time>${esc(item.date.slice(5).replace("-","/"))}</time><small>${esc(item.projectName||"Daniel Workspace")}</small><strong>${esc(item.title)}</strong></button>`).join("");
-  const links = (selected?.evidenceLinks||[]).filter(link=>safeExternal(link));
-  const detail = selected ? `<div class="outcome-selected"><div><h3>${esc(selected.title)}</h3><p>${esc(selected.detail)}</p>${links.length?`<div class="outcome-evidence">${links.map((link,i)=>`<a href="${esc(safeExternal(link))}" target="_blank" rel="noopener noreferrer">证据 ${i+1} ${icon("external")}</a>`).join("")}</div>`:""}</div>${selected.projectId?`<button class="button quiet small" data-action="view-project" data-id="${esc(selected.projectId)}">查看项目 ${icon("arrow")}</button>`:""}</div>` : "";
-  const warning = workLogStatus==="error"?`<span>工作记录读取失败</span>${publicSnapshotMode?"":`<button class="button quiet small" data-action="refresh-dashboard-worklogs">重试</button>`}`:truncated?"<span>部分记录</span>":"";
-  return `<section class="card dashboard-v4-card outcome-timeline-card grid-span-12"><header class="dashboard-chart-heading"><h2>30 天成果时间线</h2><div class="outcome-timeline-meta">${warning}</div></header>${events.length?`<div class="outcome-timeline-scroll"><div class="outcome-timeline-track">${eventButtons}</div></div>`:`<div class="dashboard-chart-empty">${workLogStatus==="loading"?"读取中…":"近 30 天暂无已记录成果"}</div>`}${detail}</section>`;
+function currentDeliveries(projects = db.projects) {
+  if(!publicSnapshotMode && privateDeliveryEdits===null) {try{privateDeliveryEdits=readDeliveryEdits(localStorage,workspaceAuth.userId);}catch{privateDeliveryEdits=[];}}
+  return deliveryView({publicMode:publicSnapshotMode,edits:publicSnapshotMode?[]:privateDeliveryEdits,projects});
 }
-
-function rhythmContent() {
-  const clock=localRhythm();
-  return `<svg viewBox="0 0 260 220" role="img" aria-label="本地时间 ${clock.time}，24 小时节奏视觉"><defs><radialGradient id="rhythm-glow"><stop stop-color="#9695ee" stop-opacity=".12"/><stop offset="1" stop-color="#9695ee" stop-opacity="0"/></radialGradient></defs><circle cx="130" cy="110" r="102" fill="url(#rhythm-glow)"/><circle cx="130" cy="110" r="65" fill="none" stroke="#9695cc" stroke-opacity=".14"/>${clock.bars.map(b=>`<line x1="130" y1="25" x2="130" y2="40" transform="rotate(${b.angle} 130 110)" stroke="#8176cd" stroke-width="3" stroke-linecap="round" opacity="${b.opacity.toFixed(3)}"/>`).join("")}<circle cx="130" cy="25" r="4" fill="#8c82d9" transform="rotate(${clock.angle} 130 110)"/><text x="130" y="114" text-anchor="middle" class="rhythm-time">${clock.time}</text><text x="130" y="137" text-anchor="middle" class="rhythm-caption">本地时间</text></svg>`;
+function renderDeliveryEditor(events,projects) {
+  if(publicSnapshotMode || !ui.deliveryEditingId)return "";
+  const item=events.find(e=>e.id===ui.deliveryEditingId);
+  return `<form id="delivery-edit-form" class="delivery-edit-form" data-delivery-id="${esc(item?.id||"")}"><label>项目<select name="projectName" ${item?"":"required"}><option value="" ${!item?.workspaceName?"selected":""}>${item?"独立交付":"选择项目"}</option>${projects.map(p=>`<option value="${esc(p.name)}" ${p.name===item?.workspaceName?"selected":""}>${esc(p.name)}</option>`).join("")}</select></label><label>实际交付日期<input name="date" type="date" required value="${esc(item?.date||shanghaiDateKey())}" max="${shanghaiDateKey()}"></label><label class="delivery-wide">一句话成果<input name="title" required maxlength="100" value="${esc(item?.title||"")}"></label><label class="delivery-wide">交付详情<textarea name="detail" required maxlength="900" rows="3">${esc(item?.detail||"")}</textarea></label><label class="delivery-wide">证据链接（可选）<input name="evidence" type="url" value="${esc(item?.evidence||"")}" placeholder="https://"></label><p class="delivery-wide">确认后仅保存到当前账号的这台设备，不会改变访客已发布成果。</p><div class="delivery-wide"><button class="button primary small" type="submit">确认保存</button><button class="button quiet small" type="button" data-action="cancel-delivery-edit">取消</button></div></form>`;
 }
-function renderRhythmClock() {
-  return `<section class="card dashboard-v4-card dashboard-rhythm-card"><header class="dashboard-chart-heading"><h2>24 小时节奏视觉</h2></header><div class="rhythm-visual">${rhythmContent()}</div></section>`;
+function renderOutcomeTimeline(projects) {
+  const events=currentDeliveries(projects),selected=events.find(e=>e.id===ui.selectedMilestoneId);
+  const nodes=events.map((e,i)=>`<button class="outcome-event ${e.id===selected?.id?"selected":""}" data-action="select-milestone" data-milestone-id="${esc(e.id)}" aria-expanded="${e.id===selected?.id}" style="--event-index:${i}"><span class="outcome-event-dot work"></span><time datetime="${e.date}">${e.date.slice(5).replace("-","/")}</time><small>${esc(e.projectName)}</small><strong>${esc(e.title)}</strong></button>`).join("");
+  const detail=selected?`<div class="outcome-selected"><div><h3>${esc(selected.projectName)} · ${esc(selected.title)}</h3><p>${esc(selected.detail)}</p><div class="outcome-evidence">${selected.demo?`<a href="${esc(selected.demo)}" target="_blank" rel="noopener noreferrer">在线体验 ${icon("external")}</a>`:""}${selected.evidence?`<a href="${esc(selected.evidence)}" target="_blank" rel="noopener noreferrer">${selected.ownerConfirmed?"确认依据":"交付证据"} ${icon("external")}</a>`:""}${selected.ownerConfirmed?`<span>本机人工确认</span>`:""}</div></div><div class="delivery-detail-actions">${selected.projectId?`<button class="button quiet small" data-action="view-project" data-id="${esc(selected.projectId)}">查看项目 ${icon("arrow")}</button>`:""}${publicSnapshotMode?"":`<button class="button quiet small" data-action="edit-delivery" data-id="${esc(selected.id)}">调整成果</button>`}</div></div>`:"";
+  return `<section class="card dashboard-v4-card outcome-timeline-card grid-span-12"><header class="dashboard-chart-heading"><h2>过去 30 天 · 产品交付</h2>${publicSnapshotMode?`<time class="muted delivery-snapshot-date" datetime="${PUBLISHED_DELIVERIES.publishedAt}">成果快照 · ${PUBLISHED_DELIVERIES.publishedAt.slice(5).replace("-","/")}</time>`:`<button class="button quiet small" data-action="edit-delivery" data-id="new">补充交付</button>`}</header>${events.length?`<div class="outcome-timeline-scroll" tabindex="0" aria-label="产品交付时间轴，左右滑动浏览"><div class="outcome-timeline-track">${nodes}</div></div>`:`<p class="muted">过去 30 天暂无已确认交付</p>`}${detail}${renderDeliveryEditor(events,projects)}</section>`;
 }
-function updateRhythmClock() {
-  if(!workspaceActive || document.hidden) return;
-  const clock=app.querySelector(".rhythm-visual");
-  if(clock) clock.innerHTML=rhythmContent();
-}
-setInterval(updateRhythmClock,60000);
-document.addEventListener("visibilitychange",updateRhythmClock);
 
 function renderDashboard() {
   const cloudModel = cloudDashboardModel();
@@ -2113,13 +2108,11 @@ function renderDashboard() {
   const stats = `<section class="dashboard-overview grid-span-12" aria-label="项目指挥中心"><div class="dashboard-home-title"><div class="eyebrow">DANIEL WORKSPACE · PROJECT CONTROL CENTER</div><h1>项目指挥中心</h1></div><div class="dashboard-stat-row">${dashboardStatCard("项目总数", dataAvailable ? counts.projects : "—", "projects", "all", dataAvailable ? "查看全部项目" : unavailableLabel, !dataAvailable)}${dashboardStatCard("进行中", dataAvailable ? counts.activeProjects : "—", "projects", "active", dataAvailable ? "查看进行中" : unavailableLabel, !dataAvailable)}${dashboardStatCard("已完成", dataAvailable ? completedProjects : "—", "projects", "completed", dataAvailable ? "查看已完成" : unavailableLabel, !dataAvailable)}${dashboardStatCard("待办任务", dataAvailable ? counts.openTasks : "—", "tasks", "todo", dataAvailable ? "查看待办任务" : unavailableLabel, !dataAvailable)}</div></section>`;
   const activity = ui.homeActivity;
   const universeActivity = universeActivityForView(activity);
-  const timelineWorkLogs = publicSnapshotMode ? db.workLogs : ui.dashboardWorkLogs.items;
-  const timelineWorkStatus = publicSnapshotMode ? (publishedSnapshot?.workLogs ? "ready" : "idle") : ui.dashboardWorkLogs.status;
   return renderDashboardLayout([
     stats,
     `<div class="dashboard-feature-pair grid-span-12">${renderActivityHeatmap(activity, dataAvailable)}${renderProjectUniverse(projects, universeActivity, dataAvailable)}</div>`,
-    `<div class="dashboard-final-pair grid-span-12">${renderProjectActivityChart(activity, dataAvailable)}${renderRhythmClock()}</div>`,
-    renderOutcomeTimeline(projects, timelineWorkLogs, timelineWorkStatus, ui.dashboardWorkLogs.truncated),
+    `<div class="dashboard-delivery-ranking grid-span-12">${renderProjectActivityChart(activity, dataAvailable)}</div>`,
+    renderOutcomeTimeline(projects),
     renderDashboardFocusProjects(projects, dataAvailable),
     renderDashboardAISummary(today, suggestion),
   ]);
@@ -3143,6 +3136,7 @@ async function generateAndPublishVisitorSnapshot() {
 function render() {
   if (!workspaceActive) return;
   if (publicSnapshotMode && ui.page === "local-project") ui.page = "home";
+  const priorDeliveryScroll = app.querySelector(".outcome-timeline-scroll")?.scrollLeft || 0;
   const priorUniverseTransform = app.querySelector(".project-universe-world")?.getAttribute("transform") || "translate(0 0) scale(1)";
   const page = ui.page === "home" ? renderDashboard() : ui.page === "projects" ? renderProjects() : ui.page === "project" ? renderProjectDetail() : ui.page === "snapshot-preview" && !publicSnapshotMode ? renderSnapshotPreview() : ui.page === "local-project" ? renderLocalProjectDetail() : ui.page === "tasks" ? renderTasks() : ui.page === "knowledge" ? renderKnowledge() : renderDecisions();
   app.dataset.mode = publicSnapshotMode ? "public" : "private";
@@ -3150,6 +3144,8 @@ function render() {
     ? `<span class="today-label">公开只读快照</span><a class="button quiet small public-login-link" href="?mode=login">登录</a>`
     : `<button class="button primary small snapshot-publish-action" data-action="publish-visitor-snapshot" aria-label="一键发布访客快照" ${["loading", "publishing"].includes(ui.publicSnapshotPreview.status) ? "disabled" : ""}>${["loading", "publishing"].includes(ui.publicSnapshotPreview.status) ? "正在发布…" : `<span class="snapshot-publish-label-desktop">一键发布访客快照</span><span class="snapshot-publish-label-mobile">发布快照</span>`}</button><span class="today-label">${formattedDate()}</span><button class="cloud-sync-indicator ${esc(ui.cloud.status)}" data-action="retry-cloud-sync" title="点击重新检查 Supabase 同步状态" aria-live="polite" ${["loading", "syncing", "migrating"].includes(ui.cloud.status) ? "disabled" : ""}>${esc(cloudStatusLabel())}</button><button class="icon-button theme-toggle" data-action="toggle-theme" title="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式" aria-label="切换到${document.documentElement.dataset.theme === "light" ? "深色" : "浅色"}模式">${icon(document.documentElement.dataset.theme === "light" ? "moon" : "sun")}</button><button class="icon-button" data-action="open-assistant" title="打开 AI Assistant" aria-label="打开 AI Assistant">${icon("sparkle")}</button><button class="button quiet small logout-button" data-action="logout">退出登录</button>`;
   app.innerHTML = `${renderNav()}<main class="main-shell"><header class="topbar"><div class="breadcrumbs"><span>Daniel Workspace</span><span class="crumb-sep">/</span><strong>${esc(pageTitle())}</strong></div><div class="search-wrap"><div class="search-box">${icon("search")}<input id="global-search" type="search" value="${esc(ui.query)}" placeholder="搜索项目、资料、决策或任务…" autocomplete="off" aria-label="全局搜索"/><kbd class="search-hint">Ctrl K</kbd></div><div id="search-results"></div></div><div class="topbar-actions">${headerActions}</div></header><div class="content">${publicSnapshotMode ? renderPublicSnapshotNotice() : renderCloudNotice()}${page}</div></main>${renderAssistant()}${renderModal()}<div class="toast-region" id="toast-region" aria-live="polite"></div>`;
+  const deliveryScroll = app.querySelector(".outcome-timeline-scroll");
+  if (deliveryScroll) deliveryScroll.scrollLeft = priorDeliveryScroll;
   ui.universeAnimateLayout = false;
   ui.universePositionTransitionFrom = null;
   if (ui.universeCameraTransition && ui.page === "home") {
@@ -3571,6 +3567,8 @@ function handleAction(action, element, sourceEvent) {
     render();
     return;
   }
+  if(action==="edit-delivery" && !publicSnapshotMode){ui.deliveryEditingId=id||"new";render();return;}
+  if(action==="cancel-delivery-edit" && !publicSnapshotMode){ui.deliveryEditingId="";render();return;}
   if (action === "select-milestone") {
     ui.selectedMilestoneId = ui.selectedMilestoneId === element.dataset.milestoneId ? "" : element.dataset.milestoneId || "";
     render();
@@ -4085,6 +4083,17 @@ app.addEventListener("focusout", (event) => {
 app.addEventListener("submit", (event) => {
   event.preventDefault();
   if (publicSnapshotMode) return;
+  if(event.target.id==="delivery-edit-form") {
+    const form=event.target,values=new FormData(form),existing=currentDeliveries().find(e=>e.id===form.dataset.deliveryId);
+    const name=String(values.get("projectName")||"");if((!name&&!existing)||(name&&!db.projects.some(p=>p.name===name)))return;
+    const date=String(values.get("date")||"");
+    if(date>shanghaiDateKey() || date<shiftDateKey(shanghaiDateKey(),-29)){toast("请填写过去 30 天内的实际交付日期");return;}
+    try {
+      privateDeliveryEdits=saveDeliveryEdit(localStorage,workspaceAuth.userId,privateDeliveryEdits||[],{...existing,id:existing?.id||`delivery-${crypto.randomUUID()}`,date,projectName:existing?.projectName||name,workspaceName:name,title:String(values.get("title")||""),detail:String(values.get("detail")||""),evidence:String(values.get("evidence")||""),demo:existing?.demo||""});
+      ui.deliveryEditingId="";render();toast("已在此设备确认，访客成果保持不变");
+    }catch{toast("未能保存，请检查日期、内容及浏览器存储");}
+    return;
+  }
   if (event.target.id === "project-work-log-form") {
     void submitProjectWorkLog(event.target);
   } else if (event.target.id === "record-form") {
