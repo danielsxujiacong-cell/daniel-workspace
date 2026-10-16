@@ -36,16 +36,16 @@ test("project detail IDs come from actual current-mode records, never fixed priv
  assert.equal(deliveryView({publicMode:true,now:new Date("2027-01-01")}).length,10);
 });
 
-test("axis covers all thirty days with exact date spacing and non-overlapping day groups",()=>{
- const range=deliveryWindow(true,now);assert.deepEqual(range,{startDate:"2026-09-17",endDate:"2026-10-16"});
- const rows=deliveryView({publicMode:true,now}),layout=layoutDeliveryDays(rows,range);
- assert.equal(layout.ticks[0].date,range.startDate);assert.equal(layout.ticks.at(-1).date,range.endDate);
- const x=date=>layout.groups.find(g=>g.date===date).x;
- assert.equal((x("2026-09-26")-x("2026-09-19"))/(x("2026-09-27")-x("2026-09-26")),7);
- assert.equal(layout.groups.find(g=>g.date==="2026-10-12").items.length,2);
- for(const a of layout.groups)for(const b of layout.groups.filter(b=>b!==a&&b.lane===a.lane))assert.ok(a.left+128<=b.left||b.left+128<=a.left);
- assert.ok(layout.groups.every(g=>g.left>=0&&g.left+128<=layout.width));
+test("compact axis sorts dates and keeps same-day milestones independent",()=>{
+ const rows=deliveryView({publicMode:true,now}),layout=layoutDeliveryDays([...rows].reverse());
+ assert.deepEqual(layout.groups.flatMap(g=>g.items),rows);
+ assert.equal(layout.groups.length,rows.length);
+ assert.ok(layout.groups.every(g=>g.items.length===1&&g.date===g.items[0].date));
+ const sameDay=layout.groups.filter(g=>g.date==="2026-10-12");
+ assert.equal(sameDay.length,2);
+ assert.equal(layout.groups.indexOf(sameDay[1])-layout.groups.indexOf(sameDay[0]),1);
 });
+
 test("pending candidates and archived mini record cannot auto-promote into visitor deliveries",()=>{
  const mini={...ARCHIVED_HOME_DELIVERIES[0],ownerConfirmed:true};
  assert.ok(!deliveryView({now,edits:[mini,...PENDING_DELIVERIES.map(p=>({...p,ownerConfirmed:true}))]}).some(r=>r.id==="mini"||r.id.startsWith("candidate-")));

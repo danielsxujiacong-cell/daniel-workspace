@@ -54,14 +54,7 @@ export function deliveryWindow(publicMode=false,now=Date.now()) {
  const endDate=publicMode?PUBLISHED_DELIVERIES.publishedAt:shanghaiDateKey(now);
  return {startDate:shiftDateKey(endDate,-29),endDate};
 }
-export function layoutDeliveryDays(events,{startDate,endDate},dayWidth=70) {
- const days=Math.round((Date.parse(endDate)-Date.parse(startDate))/86400000),padding=70,width=padding*2+days*dayWidth;
- const groups=[];for(const e of events){let group=groups.find(g=>g.date===e.date);if(!group){group={date:e.date,items:[]};groups.push(group);}group.items.push(e);}
- const laneEnds=[],laneHeights=[];
- for(const group of groups){const day=Math.round((Date.parse(group.date)-Date.parse(startDate))/86400000);group.x=padding+day*dayWidth;group.left=group.x-64;
-  let lane=0;while(laneEnds[lane]!==undefined&&laneEnds[lane]+12>group.left)lane++;
-  group.lane=lane;laneEnds[lane]=group.left+128;laneHeights[lane]=Math.max(laneHeights[lane]||0,30+group.items.length*68);
- }
- for(const group of groups)group.top=48+laneHeights.slice(0,group.lane).reduce((sum,h)=>sum+h+14,0);
- return {width,height:48+laneHeights.reduce((sum,h)=>sum+h+14,0),groups,ticks:[0,7,14,21,days].map(day=>({date:shiftDateKey(startDate,day),x:padding+day*dayWidth}))};
+export function layoutDeliveryDays(events) {
+ const sorted=[...events].sort((a,b)=>a.date.localeCompare(b.date)||a.id.localeCompare(b.id));
+ return {groups:sorted.map(e=>({date:e.date,items:[e]}))};
 }

@@ -412,3 +412,7 @@ pm test` 通过 11/11，`git diff --check` 通过。数据库检查、备份和�
 - Ten verified cross-project deliveries on a proportional 30-day axis; same-day stacking, concise status/details, and owner-only review candidates.
 - Remove the mini-program from Home milestones only; preserve its historical evidence and project records.
 - Verified 160 tests and isolated desktop/390px preview; no auth, sync or business-data changes.
+
+## 2026-10-16 · V4.4.1
+
+- 产品交付改为等距连续横向轴，同日成果独立相邻，日期与成果内容不变；桌面约 5–6 项、手机约 1–2 项横向滚动。保留详情、链接及审核机制。

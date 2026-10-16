@@ -104,3 +104,7 @@ Guest product deliveries are an immutable static release artifact dated 2026-10-
 ## V4.4 handoff · 2026-10-16
 
 Only Home ranking and delivery presentation changed. Evidence and unresolved date/scope claims are recorded in DELIVERY_EVIDENCE.md. Ten fixed public milestones cover 2026-09-17–2026-10-16; private edits/candidates remain user-local and never auto-publish. Mini-program remains in projects and the historical evidence archive. Top 5 retains credible source counts; sparse snapshots do not gain invented rows. 160 tests passed; desktop and 390px isolated previews checked, including five-row layout fixture. Real authenticated owner UI was not logged into; isolation/edit mapping covered by unit tests. No additional feature work is pending.
+
+## V4.4.1 · 2026-10-16
+
+Delivery presentation only: date-sorted, independent same-day nodes on one continuous uniformly spaced horizontal line. Existing data, detail/demo links, private edits and review unchanged. Headless Edge local checks at 1440/390px: 245/235px collapsed height, 5.52/1.78 visible nodes, ten detail clicks each, equal gaps/aligned dots, no text clipping or document overflow. Focused delivery tests 6/6; syntax/diff checks passed. Authenticated owner UI not logged into.

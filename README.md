@@ -247,4 +247,4 @@ Home 使用 GitHub 开发活动与 Project Universe 等宽等高双卡片，手�
 
 ### V4.4 · Dashboard Final Polish
 
-Home activity ranking uses compact aligned vertical rows, retaining Commit/work-log counts. Product deliveries use a date-proportional September 17–October 16 timeline with ten evidence-reviewed milestones; stages and unresolved private candidates remain explicit. See docs/DELIVERY_EVIDENCE.md. Private corrections do not publish themselves.
+Home activity ranking uses compact aligned vertical rows, retaining Commit/work-log counts. Product deliveries use a compact, evenly spaced horizontal September 17–October 16 timeline with ten evidence-reviewed milestones; stages and unresolved private candidates remain explicit. See docs/DELIVERY_EVIDENCE.md. Private corrections do not publish themselves.
