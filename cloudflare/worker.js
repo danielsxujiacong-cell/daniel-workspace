@@ -73,19 +73,19 @@ function base64Url(bytes) {
 function base64UrlText(value) { return base64Url(encoder.encode(value)); }
 
 
-export async function authenticateWorkspace(request, env) {
+export async function authenticateWorkspace(request, env, { onFailure = () => {} } = {}) {
   const token = request.headers.get("Authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];
-  if (!token || !env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return null;
+  if (!token || !env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) { onFailure("missing_session"); return null; }
   try {
     const response = await fetch(`${env.SUPABASE_URL.replace(/\/+$/, "")}/auth/v1/user`, {
       headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` },
       signal: timeoutSignal(8_000),
     });
-    if (!response.ok) return null;
+    if (!response.ok) { onFailure(response.status === 401 || response.status === 403 ? "invalid_session" : "auth_unavailable"); return null; }
     const user = await response.json();
-    return typeof user?.id === "string" && typeof env.WORKSPACE_USER_ID === "string" && env.WORKSPACE_USER_ID.length > 0 && user.id === env.WORKSPACE_USER_ID
-      ? { id: user.id } : null;
-  } catch { return null; }
+    if (typeof user?.id === "string" && typeof env.WORKSPACE_USER_ID === "string" && env.WORKSPACE_USER_ID.length > 0 && user.id === env.WORKSPACE_USER_ID) return { id:user.id };
+    onFailure("owner_not_allowed"); return null;
+  } catch { onFailure("auth_unavailable"); return null; }
 }
 
 function githubConfigured(env) {

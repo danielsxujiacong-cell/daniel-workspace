@@ -85,7 +85,13 @@ export async function chatRoute(context, publicMode = false) {
   const config = settings(env);
   if (!config.AI_API_KEY) return failure(503,'ai_not_configured','AI 服务尚未完成服务端配置。');
   try {
-    if (!publicMode && !await authenticateWorkspace(request,config)) return failure(401,'unauthorized','请重新登录后使用私人 AI。');
+    if (!publicMode) {
+      let reason='missing_session';
+      if (!await authenticateWorkspace(request,config,{onFailure:code=>{reason=code;}})) {
+        return failure(reason==='auth_unavailable'?503:reason==='owner_not_allowed'?403:401,reason,
+          reason==='auth_unavailable'?'服务端暂时无法验证登录会话，请稍后重试。':reason==='owner_not_allowed'?'当前账号没有私人 AI 权限。':'请重新登录后使用私人 AI。');
+      }
+    }
     const body = await bodyOf(request,publicMode ? 10000 : 32000);
     if (typeof body.message !== 'string' || !body.message.trim() || body.message.length > (publicMode ? 1000 : 4000)) return failure(400,'ai_invalid_request','问题为空或过长。');
     let payload = body;

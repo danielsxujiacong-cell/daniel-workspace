@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {fetchPublishedSnapshot} from '../src/public-snapshot.js';
 import {chatRoute, snapshotRoute} from '../server/edge-workspace.js';
-import {postChat} from '../cloudflare/worker.js';
+import {postChat,authenticateWorkspace} from '../cloudflare/worker.js';
 import {parseStructuredJSON} from '../src/ai/structured-json.js';
 const snapshot=JSON.parse(await readFile(new URL('../assets/public/latest.json',import.meta.url),'utf8'));
 const origin='https://workspace.danielxu.cn';
@@ -39,4 +39,12 @@ test('provider retries truncated JSON only once and reports incomplete output',a
  globalThis.fetch=async()=>{calls++;return Response.json({choices:[{message:{content:'{"completed":[]'},finish_reason:'length'}]});};
  const response=await postChat(req('/api/chat',{message:'JSON',currentPage:'home-daily-brief',relevantContext:{}}),{AI_API_KEY:'fake',AI_MODEL:'glm-4-flash-250414',AI_BASE_URL:'https://glm.test/v4',ALLOWED_ORIGINS:origin});
  assert.equal(calls,2);assert.equal(response.status,502);assert.equal((await response.json()).error.code,'ai_incomplete_response');
+});
+test('owner validation supports Edge runtimes without AbortSignal.timeout',async t=>{
+ const old=AbortSignal.timeout,original=globalThis.fetch;
+ t.after(()=>{AbortSignal.timeout=old;globalThis.fetch=original;});
+ AbortSignal.timeout=undefined;
+ globalThis.fetch=async(url,init)=>{assert.equal(url,'https://auth.test/auth/v1/user');assert.ok(init.signal instanceof AbortSignal);return Response.json({id:'owner'});};
+ const request=req('/api/chat',{});request.headers.set('Authorization','Bearer synthetic-token');
+ assert.deepEqual(await authenticateWorkspace(request,{SUPABASE_URL:'https://auth.test',SUPABASE_ANON_KEY:'test-public-key',WORKSPACE_USER_ID:'owner'}),{id:'owner'});
 });

@@ -47,6 +47,10 @@ export function getAIErrorMessage(error) {
     ai_request_too_large: "本次发送内容较多，请缩小问题范围后重试。",
     ai_context_too_large: "Workspace 上下文较多，请缩小问题范围后重试。",
     ai_invalid_request: "AI 请求格式无效，请重新发送。",
+    auth_unavailable: "服务端暂时无法验证登录会话，请稍后重试。",
+    missing_session: "登录会话未发送，请刷新工作台后重试。",
+    invalid_session: "登录会话未通过服务端验证，请重新登录。",
+    owner_not_allowed: "当前账号没有私人 AI 权限。",
   };
   return messages[error?.code] || "AI 服务暂时不可用，请重试。";
 }
