@@ -15,6 +15,19 @@ test('visitor uses same-site latest and previous when persistent API is unavaila
  assert.equal(result.projects.length,26);assert.equal(urls.length,3);
  assert.ok(urls.every(u=>!/workers.dev|supabase|github/.test(u)));assert.ok(urls[2].endsWith('previous.json'));
 });
+test('Edge snapshot fallback needs no upstream network or KV service',async t=>{
+ const original=globalThis.fetch;t.after(()=>globalThis.fetch=original);
+ globalThis.fetch=async()=>{throw Error('all upstream networks disabled');};
+ const result=await snapshotRoute({request:new Request(origin+'/api/public/snapshot'),env:{}});
+ assert.equal(result.status,200);assert.equal((await result.json()).projects.length,26);
+});
+test('anonymous daily quota rejects before calling GLM',async t=>{
+ const original=globalThis.fetch;t.after(()=>globalThis.fetch=original);let called=false;
+ globalThis.fetch=async()=>{called=true;throw Error('must not call');};
+ const kv={get:async key=>key.endsWith(':all')?'100':null,put:async()=>{throw Error('must not write');}};
+ const response=await chatRoute({request:req('/api/public/chat',{message:'hi'}),clientIp:'192.0.2.99',env:{AI_API_KEY:'fake',WORKSPACE_PUBLIC:kv}},true);
+ assert.equal(response.status,429);assert.equal(called,false);
+});
 test('safe parser accepts complete fences and rejects truncation',()=>{
  assert.deepEqual(parseStructuredJSON('```json\n{"a":"brace } inside"}\n```'),{a:'brace } inside'});
  assert.throws(()=>parseStructuredJSON('{"completed":[{"text":"partial"}'),/不完整/);

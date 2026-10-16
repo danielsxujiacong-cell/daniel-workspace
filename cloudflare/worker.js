@@ -1140,7 +1140,7 @@ export async function postChat(request, env) {
     try {
       upstream = await fetch(endpoint, {
         method: "POST",
-        headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: "Bearer " + env.AI_API_KEY },
+        headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: "Bearer " + env.AI_API_KEY.trim() },
         body: upstreamBody,
         signal: timeoutSignal(upstreamTimeoutMs),
       });
@@ -1150,10 +1150,17 @@ export async function postChat(request, env) {
         await wait(350);
         continue;
       }
-      const message = isDailyBrief && timedOut
+      // Only return fixed diagnostic labels, never upstream exception text,
+      // URLs, headers or credentials.
+      const detail = typeof error?.message === "string" ? error.message : "";
+      const unsupported = /not defined|not a function|not implemented|unsupported/i.test(detail);
+      const headerError = /header|ByteString|character/i.test(detail);
+      const message = !timedOut && unsupported ? "当前服务端运行时不支持智谱请求所需接口，请检查运行环境。"
+        : !timedOut && headerError ? "服务端请求头格式无效，请检查服务端配置；未生成内容。"
+        : isDailyBrief && timedOut
         ? "智谱 GLM 单次简报生成超时（40 秒）；系统已安全重试一次仍未完成，请检查后重试。"
         : timedOut ? "AI 服务响应超时，请重试。" : "AI 服务暂时不可用，请重试。";
-      return errorResponse(request, env, timedOut ? 504 : 502, timedOut ? "ai_timeout" : "ai_unavailable", message);
+      return errorResponse(request, env, timedOut ? 504 : 502, timedOut ? "ai_timeout" : unsupported ? "ai_runtime_unsupported" : headerError ? "ai_headers_invalid" : "ai_upstream_network_error", message);
     }
 
     if (!upstream.ok) {
