@@ -39,3 +39,18 @@ test('frozen release deliveries ignore unreviewed private edits and contain only
 test('stored reviewed deliveries remain readable independently of the current release list',()=>{
  const s=fixture();s.deliveries=s.deliveries.slice(0,3);assert.ok(validateStaticSnapshot(s));
 });
+test('actual publisher freezes already cached counts while Home is loading without a network precheck',async()=>{
+ const {readFile}=await import('node:fs/promises'),{runInNewContext}=await import('node:vm');
+ const {buildHomeActivity}=await import('../src/home-activity.js');const {parsePublicGitHubRepository}=await import('../src/github/public-api.js');
+ const source=await readFile(new URL('../src/app.js',import.meta.url),'utf8');
+ const start=source.indexOf('async function generateAndPublishVisitorSnapshot()'),end=source.indexOf('\nfunction render() {',start);
+ let published;
+ const context={publicSnapshotMode:false,workspaceActive:true,snapshotPreviewRequestId:0,workspaceAuth:{client:{},userId:'owner'},db:{projects:[{id:'private-id',name:'Cached project',github:'https://github.com/acme/project',description:'Public purpose'}],tasks:[]},
+ ui:{publicSnapshotPreview:{status:'idle'},homeActivity:{status:'loading',model:null},universeActivities:{},dashboardWorkLogs:{status:'ready',items:[{projectId:'private-id',workDate:'2026-10-12'}]}},
+ cloudWorkspaceAvailable:()=>true,render:()=>{},toast:()=>{},Date,buildHomeActivity,createStaticSnapshot,parsePublicGitHubRepository,projectIntroduction:p=>p.description,projectShowcase:()=>({features:[],outcomes:[]}),GITHUB_ACTIVITY_CACHE_TTL_MS:900000,
+ currentHomeActivityRange:()=>({valid:true,startDate:'2026-09-17',endDate:'2026-10-16'}),
+ loadGitHubActivityCacheForRange:()=>({repositories:[{fullName:'acme/project',complete:true,truncated:false,dailyCounts:[{date:'2026-10-12',count:7}]}]}),
+ publishPublicSnapshot:async s=>{published=s;return {counts:{projects:s.projects.length},publishedAt:'2026-10-16T10:00:00.000Z'};}};
+ runInNewContext(source.slice(start,end)+';globalThis.run=generateAndPublishVisitorSnapshot;',context);
+ await context.run();assert.equal(context.ui.publicSnapshotPreview.status,'published');assert.equal(published.activity.githubDailyCounts.find(d=>d.date==='2026-10-12').count,7);assert.equal(published.workLogs.length,1);assert.equal(published.projects[0].github,'');
+});
