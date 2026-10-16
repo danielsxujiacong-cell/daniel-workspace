@@ -1908,3 +1908,25 @@ h1 { margin: 0; font: 700 26px/1.2 Manrope, 'DM Sans', sans-serif; letter-spacin
 
 .delivery-day .outcome-event { grid-template-rows:auto auto; }
 .delivery-day .outcome-event small { line-height:1.25; }
+
+/* Public Home shares the existing assistant conversation and request flow. */
+.workspace-ai { min-width: 0; overflow: hidden; background: #fff; color: #303540; }
+.workspace-ai-head { display: flex; align-items: center; gap: 12px; padding: 22px 24px 12px; }
+.workspace-ai-head h2 { margin: 0 0 5px; font-size: 19px; letter-spacing: -.4px; }
+.workspace-ai-head p { margin: 0; color: #82818d; font-size: 13px; }
+.workspace-ai .assistant-messages { height: 280px; min-height: 0; flex: none; padding: 16px 24px; overscroll-behavior: contain; }
+.workspace-ai .chat-message { flex-shrink: 0; max-width: 88%; overflow-wrap: anywhere; font-size: 13px; color: #424a56; border-color: #e8e7ee; background: #f7f7fa; }
+.workspace-ai .chat-message.user { color: #514779; border-color: #e5dff4; background: #f3effb; }
+.workspace-ai .chat-message.error { color: #8c3434; border-color: #e8bebe; background: #fff5f5; }
+.workspace-ai .assistant-suggestions { flex-wrap: wrap; padding: 8px 24px 16px; }
+.workspace-ai .suggestion-chip { white-space: normal; text-align: left; color: #65568b; border-color: #e5dff0; background: #faf8fe; font-size: 12px; }
+.workspace-ai .assistant-compose { padding: 16px 24px; border-color: #efedf4; }
+.workspace-ai .assistant-compose textarea { min-width: 0; color: #303540; border-color: #e2deec; background: #fcfbfe; font-size: 14px; }
+.workspace-ai .send-button { flex-shrink: 0; }
+@media (max-width: 600px) {
+  .workspace-ai-head { padding: 18px 16px 10px; }
+  .workspace-ai-head p { font-size: 12px; }
+  .workspace-ai .assistant-messages { height: 270px; padding: 14px 16px; }
+  .workspace-ai .assistant-suggestions { padding: 6px 16px 12px; }
+  .workspace-ai .assistant-compose { padding: 12px 16px; }
+}

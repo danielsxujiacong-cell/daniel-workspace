@@ -1,3 +1,9 @@
+## V4.6 · 2026-10-16
+
+Public Home now embeds Workspace AI in place of published AI summaries. Three prompts, input, messages and retry share the existing assistant state and sendChat/public-service path. Home hides the duplicate floating entry; other pages preserve the same conversation. Only presentation/cache versions changed; no backend, snapshot, private summaries or data changes.
+
+Verification: 29 focused tests passed (auth/guest isolation, private assistant, daily/weekly summaries and mainland endpoint/quota rules). Isolated headless Edge preview with production same-origin API: three prompt clicks returned HTTP 200, provider real, glm-4-flash-250414; history lengths 1/3/5. Desktop 1440px and mobile 390px fit without horizontal overflow; message viewport stays 280/270px and scrolls internally. Both retain 26 project nodes and 26 project links, same conversation across navigation, no browser private-service requests or JS errors. Private authenticated UI not logged into for this release. Owner confirms V4.5 mainland mobile no-VPN acceptance; V4.6 real-device retest remains external acceptance. Production deployment verification follows commit/push.
+
 # Handoff
 
 ## V4.5.3 verified delivery · 2026-10-16

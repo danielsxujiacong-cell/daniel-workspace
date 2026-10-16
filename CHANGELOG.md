@@ -1,5 +1,10 @@
 # Changelog
 
+## V4.6 — 2026-10-16
+
+- Replace public Home AI summaries with an inline Workspace AI conversation and three real-service prompts.
+- Share existing chat state and request handling with the floating assistant on other pages; preserve private AI summaries, published data, same-origin API and quota enforcement.
+
 ## V4.5.3 — 2026-10-16
 
 - Run real private/public GLM in EdgeOne Node Functions. Private daily brief and weekly summary passed signed-in UI verification with source citations.

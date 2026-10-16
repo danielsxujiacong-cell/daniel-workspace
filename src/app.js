@@ -173,7 +173,7 @@ const ui = {
     localDataUnmerged: cloudCache && !migrationState.completed ? legacyCandidateTotal : 0,
     error: "",
   },
-  chat: [{ role: "assistant", text: "你好，我是 Daniel Workspace Assistant。可以问我当前页面的数据、进展和下一步。" }],
+  chat: [{ role: "assistant", text: publicSnapshotMode ? "你好，我是 Workspace AI。想了解哪个项目？" : "你好，我是 Daniel Workspace Assistant。可以问我当前页面的数据、进展和下一步。" }],
 };
 
 const colorScheme = window.matchMedia("(prefers-color-scheme: light)");
@@ -1986,28 +1986,8 @@ function renderDashboardSuggestion(today, suggestion) {
 }
 
 function renderDashboardAISummary(today, suggestion) {
-  if (publicSnapshotMode) return renderPublishedAISummaries();
+  if (publicSnapshotMode) return renderAssistant(true);
   return `<details id="dashboard-ai-summary" class="dashboard-ai-summary grid-span-12" ${ui.aiSummaryExpanded ? "open" : ""}><summary><span>${icon("sparkle")} AI 总结</span><small>今日简报 · 每周总结 · 下一步建议</small></summary><div class="dashboard-ai-summary-content">${renderDashboardSuggestion(today, suggestion)}${renderDailyBrief()}${renderWeeklySummary()}</div></details>`;
-}
-
-function renderPublishedAISummaries() {
-  const summaries = publishedSnapshot?.summaries || {};
-  const daily = summaries.dailyBrief ? parseSnapshotSummary(summaries.dailyBrief) : null;
-  const weekly = summaries.weeklySummary ? parseSnapshotSummary(summaries.weeklySummary) : null;
-  const section = (title, value) => value ? `<section class="card card-pad public-snapshot-summary"><h3>${esc(title)}</h3>${renderSummaryValue(value)}</section>` : "";
-  if (!daily && !weekly) return `<section class="card card-pad public-ai-snapshot grid-span-12"><h2>AI 简报与周报</h2><p class="muted">访客不会触发实时 AI 请求；所有者可在发布预览中选择已生成且审核过的内容。</p></section>`;
-  return `<section class="public-ai-snapshot grid-span-12"><div class="section-title"><h2>已发布的 AI 总结</h2><span class="muted">快照内容 · 不会实时请求 AI</span></div><div class="public-ai-snapshot-grid">${section("AI 今日简报", daily)}${section("AI 每周总结", weekly)}</div></section>`;
-}
-
-function parseSnapshotSummary(value) {
-  try { return JSON.parse(value); } catch { return { text: value }; }
-}
-
-function renderSummaryValue(value) {
-  if (typeof value === "string") return `<p>${esc(value)}</p>`;
-  if (Array.isArray(value)) return `<ul>${value.map((item) => `<li>${renderSummaryValue(item)}</li>`).join("")}</ul>`;
-  if (value && typeof value === "object") return `<div class="public-summary-fields">${Object.entries(value).map(([key, item]) => `<div><strong>${esc(key)}</strong>${renderSummaryValue(item)}</div>`).join("")}</div>`;
-  return `<span>${esc(value ?? "")}</span>`;
 }
 
 function universeActivityForView(activity) {
@@ -2597,15 +2577,21 @@ function contextLabel() {
   return `当前页面：${pageTitle()}`;
 }
 
-function renderAssistant() {
+function renderAssistant(inline = false) {
+  if (publicSnapshotMode && ui.page === "home" && !inline) return "";
+  if (inline) return `<section class="card workspace-ai grid-span-12" aria-label="Workspace AI"><header class="workspace-ai-head"><span class="assistant-orb">${icon("sparkle")}</span><div><h2>Workspace AI</h2><p>了解我的项目、技术实现与自动化实践。</p></div></header>${renderAssistantConversation(["你做过哪些企业 AI 自动化项目？", "FlowOps AI 是如何工作的？", "Daniel Workspace 能解决什么问题？"])}</section>`;
   if (!ui.assistantOpen) return `<button class="assistant-launcher" data-action="open-assistant" aria-label="打开 AI 助手"><span class="assistant-orb">${icon("sparkle")}</span><span>问问 AI</span></button>`;
   const prompts = ["project", "local-project"].includes(ui.page) ? ["这个项目现在有什么问题？", "这个项目最近有什么变化？", "帮我总结下一步"] : ui.page === "decisions" ? ["帮我整理这个决定", "我最近做了什么决定？"] : ui.page === "tasks" ? ["我下一步应该做什么？", "哪个任务优先？"] : ui.page === "knowledge" ? ["最近收集了哪些资料？", "总结一下当前收件箱"] : ["我下一步应该做什么？", "最近有哪些进展？"];
   const status = getAIStatus();
   const transportNote = status.mode === "real" ? "对话由服务端处理；请勿输入私人资料。" : status.hint;
   return `<section class="assistant-panel" aria-label="AI Assistant"><header class="assistant-head"><span class="assistant-orb">${icon("sparkle")}</span><div class="assistant-head-copy"><div class="assistant-head-title">Workspace Assistant <span class="tag ai-mode ${status.mode}">${esc(status.label)}</span></div><div class="ai-mode-hint">${esc(status.hint)}</div><div class="assistant-context">${esc(contextLabel())} · 当前页面数据上下文</div></div><button class="icon-button" data-action="clear-chat" title="清空对话" aria-label="清空对话">${icon("reset")}</button><button class="icon-button" data-action="close-assistant" aria-label="关闭助手">${icon("close")}</button></header>
-    <div class="assistant-messages" id="assistant-messages" aria-live="polite">${ui.chat.map((message) => `<div class="chat-message ${message.role === "user" ? "user" : ""} ${message.pending ? "pending" : ""} ${message.isError ? "error" : ""}">${esc(message.text)}${message.isError ? `<button class="chat-retry" data-action="retry-chat" data-id="${esc(message.requestId)}">重试</button>` : ""}</div>`).join("")}</div>
+    ${renderAssistantConversation(prompts)}<div class="assistant-note">${esc(status.label)} · ${esc(transportNote)}</div></section>`;
+}
+
+function renderAssistantConversation(prompts) {
+  return `    <div class="assistant-messages" id="assistant-messages" aria-live="polite">${ui.chat.map((message) => `<div class="chat-message ${message.role === "user" ? "user" : ""} ${message.pending ? "pending" : ""} ${message.isError ? "error" : ""}">${esc(message.text)}${message.isError ? `<button class="chat-retry" data-action="retry-chat" data-id="${esc(message.requestId)}">重试</button>` : ""}</div>`).join("")}</div>
     <div class="assistant-suggestions">${prompts.map((prompt) => `<button class="suggestion-chip" data-action="send-prompt" data-prompt="${esc(prompt)}" ${ui.chatBusy ? "disabled" : ""}>${esc(prompt)}</button>`).join("")}</div>
-    <form class="assistant-compose" id="assistant-form"><label class="sr-only" for="assistant-input">给 AI 助手发消息</label><textarea id="assistant-input" name="message" rows="1" placeholder="问问当前工作区…" required ${ui.chatBusy ? "disabled" : ""}></textarea><button class="send-button" type="submit" aria-label="发送" ${ui.chatBusy ? "disabled" : ""}>${icon("send")}</button></form><div class="assistant-note">${esc(status.label)} · ${esc(transportNote)}</div></section>`;
+    <form class="assistant-compose" id="assistant-form"><label class="sr-only" for="assistant-input">给 AI 助手发消息</label><textarea id="assistant-input" name="message" rows="1" placeholder="问问当前工作区…" required ${ui.chatBusy ? "disabled" : ""}></textarea><button class="send-button" type="submit" aria-label="发送" ${ui.chatBusy ? "disabled" : ""}>${icon("send")}</button></form>`;
 }
 
 function projectOptions(selected = "") {
@@ -2875,7 +2861,7 @@ function render() {
   animateDashboardKpiNumbers();
   renderSearchResults();
   enforcePublicReadOnlyDom();
-  if (ui.assistantOpen) document.querySelector("#assistant-messages")?.scrollTo({ top: 999999, behavior: "smooth" });
+  if (ui.assistantOpen || (publicSnapshotMode && ui.page === "home")) document.querySelector("#assistant-messages")?.scrollTo({ top: 999999, behavior: "smooth" });
   if (!publicSnapshotMode && ui.page === "home" && cloudWorkspaceAvailable() && ui.projectPinningAvailable === true && !ui.githubRefreshing) {
     const stalePinnedIds = getHomePinnedProjects(db.projects)
       .filter((project) => parsePublicGitHubRepository(project.github) && !isGitHubSnapshotFresh(project.githubData)

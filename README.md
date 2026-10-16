@@ -1,5 +1,9 @@
 # Daniel Workspace
 
+## V4.6 Public AI Chat Final Polish
+
+公开首页以 Workspace AI 内嵌聊天卡片替代 AI 简报与周报，三个推荐问题直接复用真实 GLM 服务。首页与其他页面悬浮助手共享当前会话；私人日报、周报和建议保持原样。用户已确认 V4.5 大陆手机关闭 VPN 的快照与匿名聊天可用；V4.6 的手机直连复测需在真实设备完成。
+
 ## V4.5.3 中国大陆读取与 AI 修复
 
 - 公开读取走同域 `/api/public/snapshot`（函数内打包静态基线，可选 KV），失败回退 `assets/public/latest.json`、`previous.json`，访客无需连接 Workers、GitHub 或 Supabase。首次静态迁移两个槽位是同一已成功发布基线，后续导出才轮换上一版。`node scripts/export-public-snapshot.mjs` 在发布阶段导入已审核快照；失败不改现有文件，成功后正常 commit/push。
@@ -12,7 +16,7 @@ Daniel Workspace V4.5.3 保留 V4.4 Dashboard 展示。私人模式使用既有�
 
 ## Status
 
-- **Stage:** V4.5.3 same-origin snapshot delivery and real private/visitor AI verified. Mainland no-VPN mobile acceptance remains pending; see [HANDOFF](docs/HANDOFF.md).
+- **Stage:** V4.6 public Home chat polish; V4.5 mainland no-VPN access confirmed by the owner. See [HANDOFF](docs/HANDOFF.md) for V4.6 verification.
 - **Last updated:** 2026-10-16
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
