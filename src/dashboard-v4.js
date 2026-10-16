@@ -323,7 +323,7 @@ export function buildOutcomeTimeline({ workLogs = [], projects = [], now = Date.
   const startDate = shiftDateKey(endDate, 1 - Math.max(1, Math.min(30, Number(days) || 30)));
   if (!startDate || !endDate) return [];
   const projectById = new Map((Array.isArray(projects) ? projects : []).map((project) => [String(project.id), project]));
-  const releases = RELEASE_MILESTONES.filter((item) => item.date >= startDate && item.date <= endDate);
+  const releases = RELEASE_MILESTONES.filter((item) => item.date >= startDate && item.date <= endDate).map(item=>({...item,projectName:"Daniel Workspace",evidenceLinks:["https://github.com/danielsxujiacong-cell/daniel-workspace/blob/main/CHANGELOG.md"]}));
   const outcomes = (Array.isArray(workLogs) ? workLogs : []).flatMap((log, index) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(log?.workDate || "")) || log.workDate < startDate || log.workDate > endDate) return [];
     const completed = cleanText(log.completedItems);
@@ -343,6 +343,7 @@ export function buildOutcomeTimeline({ workLogs = [], projects = [], now = Date.
       projectId: project?.id ? String(project.id) : "",
       projectName: project?.name || "Workspace",
       source: "工作记录",
+      evidenceLinks: (Array.isArray(log.evidenceLinks) ? log.evidenceLinks : []).filter(link=>{try{const u=new URL(link);return ["http:","https:"].includes(u.protocol)&&!u.username&&!u.password;}catch{return false;}}).slice(0,10),
     }];
   });
   return [...releases, ...outcomes]
