@@ -61,3 +61,22 @@ test('owner validation supports Edge runtimes without AbortSignal.timeout',async
  const request=req('/api/chat',{});request.headers.set('Authorization','Bearer synthetic-token');
  assert.deepEqual(await authenticateWorkspace(request,{SUPABASE_URL:'https://auth.test',SUPABASE_ANON_KEY:'test-public-key',WORKSPACE_USER_ID:'owner'}),{id:'owner'});
 });
+test('Node public AI uses atomic quota RPC without KV or private database access',async t=>{
+ const original=globalThis.fetch;t.after(()=>globalThis.fetch=original);const urls=[];let quotaBody;
+ globalThis.fetch=async(url,init)=>{
+   urls.push(url);
+   if(url.endsWith('/rest/v1/rpc/workspace_reserve_public_ai_quota')){quotaBody=JSON.parse(init.body);return Response.json(true);}
+   assert.equal(url,'https://open.bigmodel.cn/api/paas/v4/chat/completions');
+   const sent=JSON.stringify(JSON.parse(init.body));assert.ok(!sent.includes('PRIVATE_INJECTION'));
+   return Response.json({model:'glm-4-flash-250414',choices:[{message:{content:'真实服务传输测试'},finish_reason:'stop'}]});
+ };
+ const response=await chatRoute({request:req('/api/public/chat',{message:'介绍公开项目',publishedAt:snapshot.publishedAt,relevantContext:{secret:'PRIVATE_INJECTION'}}),clientIp:'192.0.2.55',env:{AI_API_KEY:'fake-test-key'}},true,{quotaBackend:'postgres'});
+ assert.equal(response.status,200);assert.equal(urls.length,2);
+ assert.deepEqual(Object.keys(quotaBody),['client_hash']);assert.match(quotaBody.client_hash,/^[a-f0-9]{64}$/);
+});
+test('atomic quota failure prevents any GLM request',async t=>{
+ const original=globalThis.fetch;t.after(()=>globalThis.fetch=original);let calls=0;
+ globalThis.fetch=async url=>{calls++;assert.ok(url.endsWith('/rpc/workspace_reserve_public_ai_quota'));return new Response('',{status:503});};
+ const response=await chatRoute({request:req('/api/public/chat',{message:'hi'}),clientIp:'192.0.2.56',env:{AI_API_KEY:'fake'}},true,{quotaBackend:'postgres'});
+ assert.equal(response.status,503);assert.equal(calls,1);
+});

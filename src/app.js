@@ -15,7 +15,7 @@ const {
   buildSnapshotActivity,
   hydratePublicSnapshot,
   publishPublicSnapshot,
-} = await import("./public-snapshot.js?v=4.5.2");
+} = await import("./public-snapshot.js?v=4.5.3");
 let hydratedPublicData = publicSnapshotMode ? hydratePublicSnapshot(publishedSnapshot) : null;
 
 const {
@@ -34,10 +34,10 @@ const {
   saveLocalScanCache,
 } = publicSnapshotMode ? {} : await import("./store.js?v=3.8-l");
 const { buildAssistantContext } = publicSnapshotMode ? {} : await import("./ai/context.js");
-const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = publicSnapshotMode ? await import("./ai/public-service.js?v=4.5.2") : await import("./ai/service.js?v=4.5.2");
+const { chat: chatWithAI, getAIStatus, getAIErrorMessage } = publicSnapshotMode ? await import("./ai/public-service.js?v=4.5.3") : await import("./ai/service.js?v=4.5.3");
 const { buildProjectNextStepContext, buildProjectNextStepPrompt, parseProjectNextStepResponse, verifiedProjectGitHubCommit } = publicSnapshotMode ? {} : await import("./ai/project-next-step.js?v=3.3.2");
-const { buildDailyBriefContext, buildDailyBriefPrompt, getRecentWorkLogRange, parseDailyBriefResponse } = publicSnapshotMode ? {} : await import("./ai/daily-brief.js?v=4.5.2");
-const { buildWeeklySummaryContext, buildWeeklySummaryPrompt, getWeeklySummaryRange, parseWeeklySummaryResponse, shanghaiDateKey, weeklySummaryMarkdown } = publicSnapshotMode ? {} : await import("./ai/weekly-summary.js?v=4.5.2");
+const { buildDailyBriefContext, buildDailyBriefPrompt, getRecentWorkLogRange, parseDailyBriefResponse } = publicSnapshotMode ? {} : await import("./ai/daily-brief.js?v=4.5.3");
+const { buildWeeklySummaryContext, buildWeeklySummaryPrompt, getWeeklySummaryRange, parseWeeklySummaryResponse, shanghaiDateKey, weeklySummaryMarkdown } = publicSnapshotMode ? {} : await import("./ai/weekly-summary.js?v=4.5.3");
 const { fetchPrivateGitHubSnapshots, listPrivateGitHubRepositories } = publicSnapshotMode ? {} : await import("./github/private-api.js?v=3.5-b.4");
 const { localScanEndpointFor, localCodexUsageEndpointFor, shouldRenderDashboardGitHubActivity } = publicSnapshotMode ? { localScanEndpointFor: () => null, localCodexUsageEndpointFor: () => null, shouldRenderDashboardGitHubActivity: () => false } : await import("./local-companion.js?v=3.9");
 const { codexUsageForRange, fetchCodexUsage, loadCodexUsageCache, mergeCodexUsageCache, publicTokenUsage, saveCodexUsageCache, formatTokenCount } = publicSnapshotMode ? {} : await import("./codex-usage.js?v=3.9");

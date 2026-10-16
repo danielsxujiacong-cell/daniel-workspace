@@ -69,7 +69,21 @@ async function quota(env, address, now = Date.now()) {
   for (let i=0;i<keys.length;i++) await kv.put(keys[i],String(counts[i]+1),{expirationTtl:172800});
   return true;
 }
-export async function chatRoute(context, publicMode = false) {
+async function postgresQuota(address, env) {
+  const day = new Date(Date.now()+8*3600000).toISOString().slice(0,10);
+  const key = await crypto.subtle.importKey('raw',new TextEncoder().encode(env.AI_API_KEY.trim()),{name:'HMAC',hash:'SHA-256'},false,['sign']);
+  const bytes = await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(`${day}:${address}`));
+  const client_hash = Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('');
+  const response = await fetch(`${SUPABASE.SUPABASE_URL}/rest/v1/rpc/workspace_reserve_public_ai_quota`,{
+    method:'POST',headers:{apikey:SUPABASE.SUPABASE_ANON_KEY,'Content-Type':'application/json'},
+    body:JSON.stringify({client_hash}),signal:AbortSignal.timeout(8000),
+  });
+  if (!response.ok) throw Error('quota_unavailable');
+  const allowed = await response.json();
+  if (typeof allowed !== 'boolean') throw Error('quota_invalid');
+  return allowed;
+}
+export async function chatRoute(context, publicMode = false, {quotaBackend='kv'} = {}) {
   const {request,env = {}} = context;
   if (request.method !== 'POST') return failure(405,'method_not_allowed','Method not allowed');
   if (!sameOrigin(request)) return failure(403,'origin_rejected','来源无效。');
@@ -92,11 +106,21 @@ export async function chatRoute(context, publicMode = false) {
       phase='quota';
       const address = context.clientIp || request.headers.get('EO-Connecting-IP');
       if (!address) throw Error('quota_unavailable');
-      const result = quotaTail.then(()=>quota(env,address));
-      quotaTail = result.catch(()=>{});
+      const result = quotaBackend==='postgres' ? postgresQuota(address,config) : quotaTail.then(()=>quota(env,address));
+      if (quotaBackend!=='postgres') quotaTail = result.catch(()=>{});
       if (!await result) return failure(429,'ai_rate_limited','访客 AI 已达频率或今日使用上限，请稍后再试。');
       phase='snapshot';
-      const snapshot = await storedSnapshot(env);
+      let snapshot = await storedSnapshot(env);
+      if (typeof body.publishedAt === 'string' && snapshot.publishedAt !== body.publishedAt) {
+        const release = [latestRelease,previousRelease].find(s=>s.publishedAt===body.publishedAt);
+        if (release) snapshot = release;
+        else {
+          const response = await fetch(`${ORIGIN}/api/public/snapshot`,{signal:AbortSignal.timeout(8000)});
+          const next = response.ok ? await response.json() : null;
+          if (!validateStaticSnapshot(next) || next.publishedAt !== body.publishedAt) throw Error('snapshot_changed');
+          snapshot = next;
+        }
+      }
       // No client context, project IDs, tools, models or endpoint overrides.
       const publicContext = {
         publishedAt:snapshot.publishedAt,

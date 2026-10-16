@@ -1,5 +1,11 @@
 # Changelog
 
+## V4.5.3 — 2026-10-16
+
+- Run real private/public GLM in EdgeOne Node Functions. Private daily brief and weekly summary passed signed-in UI verification with source citations.
+- Remove anonymous AI's KV dependency using a user-approved isolated Postgres counter/RPC with atomic global/day/minute limits and no private business access.
+- Keep visitor AI tied to the visible published snapshot revision; preserve Dashboard presentation and static snapshot fallbacks.
+
 ## V4.5.2 — 2026-10-16
 
 - Move visitor snapshot reads to same-origin persistence with latest/previous static release fallback; preserve V4.4 Dashboard presentation and source data.
