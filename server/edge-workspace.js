@@ -14,20 +14,11 @@ function sameOrigin(request) {
 }
 async function bodyOf(request, limit) {
   if (Number(request.headers.get('Content-Length')) > limit) throw Error('too_large');
-  const reader = request.body?.getReader();
-  if (!reader) throw Error('invalid_body');
-  const chunks = []; let size = 0;
-  try {
-    for (;;) {
-      const {done,value} = await reader.read(); if (done) break;
-      size += value.byteLength;
-      if (size > limit) { await reader.cancel(); throw Error('too_large'); }
-      chunks.push(value);
-    }
-  } finally { reader.releaseLock(); }
-  const bytes = new Uint8Array(size); let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk,offset); offset += chunk.byteLength; }
-  return JSON.parse(new TextDecoder().decode(bytes));
+  // EdgeOne caps incoming requests at 1 MB. Its Request.text() is supported
+  // across runtimes, including versions without a complete stream-reader API.
+  const raw = await request.text();
+  if (new TextEncoder().encode(raw).length > limit) throw Error('too_large');
+  return JSON.parse(raw);
 }
 async function storedSnapshot(env) {
   const kv = binding(env);
@@ -84,6 +75,7 @@ export async function chatRoute(context, publicMode = false) {
   if (!sameOrigin(request)) return failure(403,'origin_rejected','来源无效。');
   const config = settings(env);
   if (!config.AI_API_KEY) return failure(503,'ai_not_configured','AI 服务尚未完成服务端配置。');
+  let phase='auth';
   try {
     if (!publicMode) {
       let reason='missing_session';
@@ -92,15 +84,18 @@ export async function chatRoute(context, publicMode = false) {
           reason==='auth_unavailable'?'服务端暂时无法验证登录会话，请稍后重试。':reason==='owner_not_allowed'?'当前账号没有私人 AI 权限。':'请重新登录后使用私人 AI。');
       }
     }
+    phase='request';
     const body = await bodyOf(request,publicMode ? 10000 : 32000);
     if (typeof body.message !== 'string' || !body.message.trim() || body.message.length > (publicMode ? 1000 : 4000)) return failure(400,'ai_invalid_request','问题为空或过长。');
     let payload = body;
     if (publicMode) {
+      phase='quota';
       const address = context.clientIp || request.headers.get('EO-Connecting-IP');
       if (!address) throw Error('quota_unavailable');
       const result = quotaTail.then(()=>quota(env,address));
       quotaTail = result.catch(()=>{});
       if (!await result) return failure(429,'ai_rate_limited','访客 AI 已达频率或今日使用上限，请稍后再试。');
+      phase='snapshot';
       const snapshot = await storedSnapshot(env);
       // No client context, project IDs, tools, models or endpoint overrides.
       const publicContext = {
@@ -111,7 +106,11 @@ export async function chatRoute(context, publicMode = false) {
       // Keep all 26 names available despite generic provider array caps.
       payload = { message:body.message,currentPage:'public-projects',relevantContext:publicContext,history:Array.isArray(body.history)?body.history.slice(-6).map(h=>({role:h.role,content:typeof h.content==='string'?h.content.slice(0,600):''})):[] };
     }
+    phase='provider';
     const headers = new Headers({'Content-Type':'application/json',Origin:ORIGIN,'CF-Connecting-IP':context.clientIp || 'edge'});
     return await postChat(new Request(`${ORIGIN}/api/chat`,{method:'POST',headers,body:JSON.stringify(payload)}),config);
-  } catch { return failure(503,'ai_unavailable','AI 或用量保护暂不可用，未生成内容，请重试。'); }
+  } catch {
+    if (phase==='request') return failure(400,'ai_invalid_request','请求过大或 JSON 格式无效。');
+    return failure(503,`ai_${phase}_unavailable`,phase==='quota'?'访客用量保护尚未就绪，暂不能调用 AI。':`AI 服务${phase==='provider'?'调用':'上下文'}暂不可用，未生成内容，请重试。`);
+  }
 }
