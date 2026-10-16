@@ -1,5 +1,9 @@
 # Project context
 
+## V4.7 private project evidence
+
+Reviewed project profiles use a versioned block appended to existing notes, preserving original notes and the current cloud serializer/RLS boundary. The detail view extracts features, progress and safe HTTP(S) document links; manual-note editing retains the profile. Historical milestones use existing workspace_work_logs with deterministic source IDs. No new table, automatic publishing or public snapshot change. Private backups, raw evidence, preview and mutation plans stay Git-ignored under data/private/. The SQL preparation tool checks binding, user/project IDs and baseline values, supports rollback rehearsal, and skips already-applied rows and duplicate sources.
+
 ## V4.5.2 deployment boundary
 
 Public delivery now uses same-origin EdgeOne KV with two checked-in static fallback slots. No live upstream dependency is necessary to browse. EdgeOne Functions call BigModel directly; private AI authenticates the existing owner via `/auth/v1/user`, public AI derives context exclusively from server-published data. No business tables or source project materials change. `WORKSPACE_PUBLIC` KV binding is mandatory for anonymous quota enforcement and publication writes; fail closed until the approved free namespace can be created after provider review. The existing EdgeOne service region excludes mainland nodes; mainland mobile testing remains external acceptance. No paid plan or alternative resources are authorized.

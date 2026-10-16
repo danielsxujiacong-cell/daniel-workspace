@@ -22,7 +22,7 @@ Daniel Workspace V4.5.3 保留 V4.4 Dashboard 展示。私人模式使用既有�
 
 ## Status
 
-- **Stage:** V4.6 public Home chat polish; V4.5 mainland no-VPN access confirmed by the owner. See [HANDOFF](docs/HANDOFF.md) for V4.6 verification.
+- **Stage:** V4.7 private project enrichment completed: 26 profiles and 28 sourced historical logs; signed-in detail checks passed. Public snapshot remains unchanged. See [HANDOFF](docs/HANDOFF.md).
 - **Last updated:** 2026-10-16
 - **Primary deliverable:** 本仓库中的本地 Web 应用
 
