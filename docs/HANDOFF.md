@@ -1,3 +1,11 @@
+## V4.8 · 2026-10-16 · implementation awaiting live publication
+
+Actual existing-session click reproduced storage_not_configured. POST was still an Edge Function checking owner before missing KV; frontend aborted after 15s and surfaced native timeout. Move /api/public/snapshot to existing Node Cloud Functions, with bounded auth/store/read timeouts and safe per-stage diagnostics. User explicitly approved isolated Supabase version/pointer storage. Immutable versions and transactional save/readback/switch use SECURITY INVOKER, owner RLS; anon can read only public-safe releases and cannot publish. No business table policy changed. Public AI reads the same current release through server code, browsers remain same-origin. Dashboard layout unchanged.
+
+Fresh ignored backup data/private/v48/before.json; all 26 original project IDs and every V4.7 post-enrichment row match. 26 profiles, 29 nonduplicate logs, 3 Knowledge. User then supplied and authorized two real Decisions: deterministic insert-only IDs, linked to existing n8n/Workspace projects. All 5 materials reviewed for publication by exact content; changed/new rows fail closed. V4.7 before.json is ignored, untracked and absent from reachable Git history. Repository is PUBLIC; no private backup is staged. New snapshot migration does not expose private tables. Existing shared-project advisor findings remain outside scope.
+
+33 focused tests pass. Live database rollback rehearsal verified identical retries produce one immutable release and pointer, and rollback leaves zero releases; anon publish/insert false. Live UI publication and deployment verification are pending this source push. Actual second device/mobile carrier acceptance remains external.
+
 ## V4.7 · 2026-10-16
 
 Owner authorized the current D: checkout because the requested G: path is absent. Cloud binding verified against source and provider metadata. All 26 project IDs map to exact repository remotes; Hub worktrees were distinguished using its existing explicit path. Reviewed local docs, remote README/default-branch histories and live product URLs.

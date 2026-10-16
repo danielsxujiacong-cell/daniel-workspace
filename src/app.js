@@ -1,5 +1,5 @@
-const { readProjectProfile, projectNotesAfterEdit } = await import("./project-profile.js?v=4.7");
-const { createStaticSnapshot } = await import("./static-snapshot.js?v=4.5");
+const { readProjectProfile, projectNotesAfterEdit } = await import("./project-profile.js?v=4.8");
+const { createStaticSnapshot } = await import("./static-snapshot.js?v=4.8");
 const { universeLabels, topActivity, syncLabel } = await import("./dashboard-final.js?v=4.4");
 const { PUBLISHED_DELIVERIES, PENDING_DELIVERIES, deliveryView, layoutDeliveryDays, readDeliveryEdits, saveDeliveryEdit } = await import("./product-deliveries.js?v=4.4.1");
 const publicSnapshotMode = globalThis.DANIEL_WORKSPACE_MODE === "public";
@@ -16,7 +16,7 @@ const {
   buildSnapshotActivity,
   hydratePublicSnapshot,
   publishPublicSnapshot,
-} = await import("./public-snapshot.js?v=4.5.3");
+} = await import("./public-snapshot.js?v=4.8");
 let hydratedPublicData = publicSnapshotMode ? hydratePublicSnapshot(publishedSnapshot) : null;
 
 const {
@@ -47,7 +47,7 @@ const { fetchPublicGitHubRepositories, fetchPublicGitHubRepository, GITHUB_CACHE
   ? await import("./github/public-api.js?v=3.8-l")
   : await import("./github/public-api.js?v=3.8-l");
 const { fetchGitHubActivity, mergeGitHubActivityRetry, rateLimitedGitHubActivityNames, GITHUB_ACTIVITY_CACHE_TTL_MS } = publicSnapshotMode ? {} : await import("./github/activity.js?v=3.8-l");
-const { deployedWebsiteUrl, humanizeProjectCommit, projectDescriptionAfterEdit, projectDescriptionForEdit, projectIntroduction, projectShowcase } = await import("./project-story.js?v=4.7");
+const { deployedWebsiteUrl, humanizeProjectCommit, projectDescriptionAfterEdit, projectDescriptionForEdit, projectIntroduction, projectShowcase } = await import("./project-story.js?v=4.8");
 const { buildCloudDashboardModel, buildLocalDashboardModel, buildRecentProjectUpdates, chooseRecentCommit, compareLocalProjects, homeProjectField, projectTaskProgress, taskPriorityLabel } = await import("./dashboard.js?v=3.8");
 const { buildHomeActivity, resolveActivityRange, shiftDateKey } = await import("./home-activity.js?v=4.0");
 const { renderDashboardLayout } = await import("./dashboard-layout.js?v=3.8-a");
@@ -2797,7 +2797,7 @@ function renderPublicSnapshotNotice() {
 
 function renderSnapshotPreview() {
   const state=ui.publicSnapshotPreview, result=state.result;
-  return `<section class="page-heading"><div><div class="eyebrow">访客快照</div><h1>${state.status==="published"?"快照已发布":state.status==="publishing"?"正在发布访客快照":"发布未完成"}</h1><p role="status" aria-live="polite">${esc(state.error || (result ? `项目 ${result.counts.projects} · 跳过项目 ${result.skippedProjects || 0} · 发布时间 ${formattedTimestamp(result.publishedAt)}` : "冻结当前已加载的安全展示数据，不等待 GitHub 或 AI。"))}</p></div></section><section class="card card-pad"><p>仅发布项目展示字段、匿名活动计数和已审核成果；仓库地址、提交原文、私人笔记、工作记录原文和认证信息不会公开。</p>${state.status==="error"?"<p>原有成功快照保持不变，可点击顶部按钮重试。</p>":""}${result?.activityPartial?"<p>部分活动数据未完整加载，访客保留未知标记；安全项目已正常发布。</p>":""}</section>`;
+  return `<section class="page-heading"><div><div class="eyebrow">访客快照</div><h1>${state.status==="published"?"快照已发布":state.status==="publishing"?"正在发布访客快照":"发布未完成"}</h1><p role="status" aria-live="polite">${esc(state.error || (result ? `版本 ${result.version} · 项目 ${result.counts.projects} · Knowledge ${result.counts.knowledge} · Decisions ${result.counts.decisions} · 发布时间 ${formattedTimestamp(result.publishedAt)}` : "冻结当前已加载的安全展示数据，不等待 GitHub 或 AI。"))}</p></div></section><section class="card card-pad"><p>仅发布项目展示字段、匿名活动计数、已审核 Knowledge、Decisions 和成果；仓库地址、提交原文、私人笔记、工作记录原文和认证信息不会公开。</p>${state.status==="error"?"<p>原有成功快照保持不变，可点击顶部按钮重试。</p>":""}${(result?.diagnostics || state.diagnostics)?.length?`<details><summary>发布诊断</summary><ul>${(result?.diagnostics || state.diagnostics).map(d=>`<li>${esc(d.stage)} · ${d.ms ?? 0}ms · HTTP ${d.httpStatus ?? "—"} · ${esc(d.outcome)}</li>`).join("")}</ul></details>`:""}${result?.activityPartial?"<p>部分活动数据未完整加载，访客保留未知标记；安全项目已正常发布。</p>":""}</section>`;
 }
 
 async function generateAndPublishVisitorSnapshot() {
@@ -2821,14 +2821,16 @@ async function generateAndPublishVisitorSnapshot() {
         workLogs:ui.dashboardWorkLogs.items || [],workLogsStatus:ui.dashboardWorkLogs.status,
         workLogsComplete:ui.dashboardWorkLogs.status==="ready" && !ui.dashboardWorkLogs.truncated});
     }
-    const snapshot=createStaticSnapshot({data:{...db,projects:db.projects.map(p=>({...p,description:projectIntroduction(p),publicDetails:projectShowcase(p)}))},activityModel});
+    const snapshot=ui.pendingPublicSnapshot || createStaticSnapshot({data:{...db,projects:db.projects.map(p=>({...p,description:projectIntroduction(p),publicDetails:projectShowcase(p)}))},activityModel});
+    ui.pendingPublicSnapshot=snapshot;
     const result=await publishPublicSnapshot(snapshot,workspaceAuth);
+    ui.pendingPublicSnapshot=null;
     if(!workspaceActive || requestId!==snapshotPreviewRequestId)return;
     ui.publicSnapshotPreview={status:"published",publishedAt:result.publishedAt,result};
     toast(`访客快照已发布：${result.counts.projects} 个项目`);
   } catch(error) {
     if(!workspaceActive || requestId!==snapshotPreviewRequestId)return;
-    ui.publicSnapshotPreview={status:"error",error:typeof error?.message==="string"?error.message:"发布失败；旧快照保持不变。"};
+    ui.publicSnapshotPreview={status:"error",diagnostics:error?.diagnostics||[],error:typeof error?.message==="string"?error.message:"发布失败；旧快照保持不变。"};
   }
   render();
 }

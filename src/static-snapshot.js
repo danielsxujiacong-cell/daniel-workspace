@@ -1,4 +1,5 @@
 import { PUBLISHED_DELIVERIES } from "./product-deliveries.js";
+import { REVIEWED_KNOWLEDGE, REVIEWED_DECISIONS } from "./reviewed-public-materials.js";
 
 const secret = /(?:Bearer\s+\S+|\b(?:gh[pousr]_|github_pat_|sk-)[\w-]{8,}|\beyJ[\w-]+\.[\w-]+\.[\w-]+|-----BEGIN[\s\S]*?PRIVATE KEY-----[\s\S]*?-----END[\s\S]*?PRIVATE KEY-----|(?:\b[A-Za-z]:[\\/]|\\\\)[^\n,;，；]*|\/(?:Users|home|private|Volumes|mnt)\/[^\n,;，；]*|\b(?:api[_-]?key|secret|password|passwd|cookie|set-cookie|access[_-]?token|refresh[_-]?token|authorization|session[_-]?id|token)\b\s*[:=]\s*[^\n,;，；]+|https?:\/\/\S+|\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b)/gi;
 const text = (v,n=2000) => typeof v === "string" ? v.replace(secret,"[已隐藏]").replace(/["']?\b(?:api[_-]?key|secret|password|passwd|cookie|set-cookie|access[_-]?token|refresh[_-]?token|authorization|session[_-]?id|token)["']?\s*[:=]\s*["']?[^\n,;，；]+/gi,"[已隐藏]").replace(/(?<!\d)(?:\+?86[-\s]?)?1[3-9]\d{9}(?!\d)|(?<!\d)(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}(?!\d)/g,"[已隐藏]").trim().slice(0,n) : "";
@@ -11,6 +12,10 @@ function website(v) {
  }catch{return "";}
 }
 const rows = (v,n) => Array.isArray(v) ? v.slice(0,n) : [];
+const reviewedKnowledge = input => rows(input,2000).flatMap(k=>{
+ const approved=REVIEWED_KNOWLEDGE.find(r=>['title','content','summary'].every(f=>k?.[f]===r[f]));
+ return approved?[{...approved,projectId:k.projectId}]:[];
+});
 
 // A pure projection shared by the browser and Worker. No external APIs or raw bodies.
 export function sanitizeStaticSnapshot(input, { reviewDeliveries=false } = {}) {
@@ -30,7 +35,11 @@ export function sanitizeStaticSnapshot(input, { reviewDeliveries=false } = {}) {
  const workLogs=rows(input.workLogs,5000).filter(d=>idMap.has(d?.projectId)&&inRange(d.workDate)).map((d,i)=>({id:`work-log-${String(i+1).padStart(4,"0")}`,projectId:idMap.get(d.projectId),workDate:d.workDate,completedItems:"",outcomes:"",nextStep:""}));
  const timestamp=v=>typeof v==="string"&&Number.isFinite(Date.parse(v))?new Date(v).toISOString():"";
  return {schemaVersion:2,generatedAt:timestamp(input.generatedAt)||new Date().toISOString(),publishedAt:timestamp(input.publishedAt),
-  projects,tasks,workLogs,knowledge:[],decisions:[],summaries:{dailyBrief:"",weeklySummary:""},
+  ...(typeof input.snapshotVersion === 'string' && /^v48-[a-f0-9]{32}$/.test(input.snapshotVersion) ? {snapshotVersion:input.snapshotVersion} : {}),
+  projects,tasks,workLogs,
+  knowledge: reviewedKnowledge(input.knowledge).map((k,i)=>({id:`knowledge-${String(i+1).padStart(4,'0')}`,type:text(k.type,100),title:text(k.title,200),content:text(k.content,8000),summary:text(k.summary),tags:rows(k.tags,20).map(v=>text(v,100)),projectId:idMap.get(k.projectId)||''})),
+  decisions: rows(input.decisions,2000).filter(k=>REVIEWED_DECISIONS.some(r=>Object.keys(r).every(f=>JSON.stringify(k?.[f])===JSON.stringify(r[f])))).map((k,i)=>({id:`decision-${String(i+1).padStart(4,'0')}`,question:text(k.question,500),options:rows(k.options,10).map(v=>text(v,500)),goal:text(k.goal),time:text(k.time),cost:text(k.cost),risk:text(k.risk),recommendation:text(k.recommendation),final:text(k.final),reason:text(k.reason),projectId:idMap.get(k.projectId)||''})),
+  summaries:{dailyBrief:"",weeklySummary:""},
   activity:{startDate:a.startDate,endDate:a.endDate,githubDailyCounts:[...daily.values()].sort((a,b)=>a.date.localeCompare(b.date)),githubProjectDailyCounts:[...perProject.values()].sort((a,b)=>a.date.localeCompare(b.date)||a.projectId.localeCompare(b.projectId)),githubRepositoryCount:count(a.githubRepositoryCount)?Math.min(200,a.githubRepositoryCount):0,githubComplete:a.githubComplete===true,workLogsComplete:a.workLogsComplete===true,githubHourlyCounts:hourly?hours:[],githubHourlyComplete:hourly,githubWeekdayHourCounts:[],githubWeekdayHourlyComplete:false},
   // Read stored releases independently of future source-code release edits.
   deliveries: rows(reviewDeliveries ? PUBLISHED_DELIVERIES.items : input.deliveries,50).filter(d=>date(d?.date)).map(d=>({
@@ -56,6 +65,6 @@ export function createStaticSnapshot({data,activityModel,now=new Date().toISOStr
  for(const day of model.days||[]){for(const entry of day.githubProjectCounts||[]){const projectId=byName.get(entry.name);if(projectId)githubProjectDailyCounts.push({projectId,date:day.date,count:entry.count});}
   for(const entry of day.workLogProjects||[]){const projectId=byName.get(entry.name);if(projectId&&count(entry.count)){const available=Math.min(entry.count,5000-workLogs.length);for(let i=0;i<available;i++)workLogs.push({projectId,workDate:day.date});}}
  }
- return sanitizeStaticSnapshot({schemaVersion:2,generatedAt:now,publishedAt:"",projects,tasks:data.tasks||[],workLogs,deliveries:PUBLISHED_DELIVERIES.items,
+ return sanitizeStaticSnapshot({schemaVersion:2,generatedAt:now,publishedAt:"",projects,tasks:data.tasks||[],workLogs,knowledge:data.knowledge||[],decisions:data.decisions||[],deliveries:PUBLISHED_DELIVERIES.items,
   activity:{startDate:model.startDate||start.toISOString().slice(0,10),endDate:model.endDate||endDate,githubDailyCounts:(model.days||[]).map(d=>({date:d.date,count:d.githubCommits})),githubProjectDailyCounts,githubRepositoryCount:model.coverage?.githubRequested||0,githubComplete:model.coverage?.githubComplete===true,workLogsComplete:model.coverage?.workLogsComplete===true,githubHourlyCounts:model.hourlyCounts||[],githubHourlyComplete:model.coverage?.hourlyComplete===true}});
 }

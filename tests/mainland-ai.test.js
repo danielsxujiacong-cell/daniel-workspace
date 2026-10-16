@@ -66,12 +66,13 @@ test('Node public AI uses atomic quota RPC without KV or private database access
  globalThis.fetch=async(url,init)=>{
    urls.push(url);
    if(url.endsWith('/rest/v1/rpc/workspace_reserve_public_ai_quota')){quotaBody=JSON.parse(init.body);return Response.json(true);}
+   if(url.includes('/rest/v1/workspace_public_snapshot_current'))return Response.json([]);
    assert.equal(url,'https://open.bigmodel.cn/api/paas/v4/chat/completions');
    const sent=JSON.stringify(JSON.parse(init.body));assert.ok(!sent.includes('PRIVATE_INJECTION'));
    return Response.json({model:'glm-4-flash-250414',choices:[{message:{content:'真实服务传输测试'},finish_reason:'stop'}]});
  };
  const response=await chatRoute({request:req('/api/public/chat',{message:'介绍公开项目',publishedAt:snapshot.publishedAt,relevantContext:{secret:'PRIVATE_INJECTION'}}),clientIp:'192.0.2.55',env:{AI_API_KEY:'fake-test-key'}},true,{quotaBackend:'postgres'});
- assert.equal(response.status,200);assert.equal(urls.length,2);
+ assert.equal(response.status,200);assert.equal(urls.length,3);
  assert.deepEqual(Object.keys(quotaBody),['client_hash']);assert.match(quotaBody.client_hash,/^[a-f0-9]{64}$/);
 });
 test('atomic quota failure prevents any GLM request',async t=>{

@@ -1,5 +1,9 @@
 # Project context
 
+## V4.8 publication persistence
+
+User approved isolated public snapshot version/pointer storage in the existing confirmed Supabase project on 2026-10-16. This supersedes older KV-only publication limits. EdgeOne Node authenticates the existing owner, validates the shared projection and calls one SECURITY INVOKER RPC. Immutable safe versions, readback verification and pointer switch commit atomically; old versions remain. Browser confirms the returned immutable version via same-origin GET before success. Public AI uses that current snapshot. No private business table is queried by public handlers, and their existing policies are unchanged. Knowledge and Decisions require exact reviewed-content matches in src/reviewed-public-materials.js. Raw private logs, notes, paths, auth, repository metadata and unreviewed materials remain excluded. Two user-authored Decisions were explicitly authorized for insert and public review in this session.
+
 ## V4.7 private project evidence
 
 Reviewed project profiles use a versioned block appended to existing notes, preserving original notes and the current cloud serializer/RLS boundary. The detail view extracts features, progress and safe HTTP(S) document links; manual-note editing retains the profile. Historical milestones use existing workspace_work_logs with deterministic source IDs. No new table, automatic publishing or public snapshot change. Private backups, raw evidence, preview and mutation plans stay Git-ignored under data/private/. The SQL preparation tool checks binding, user/project IDs and baseline values, supports rollback rehearsal, and skips already-applied rows and duplicate sources.

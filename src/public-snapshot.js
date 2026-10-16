@@ -1,4 +1,4 @@
-import { validateStaticSnapshot } from "./static-snapshot.js?v=4.5";
+import { validateStaticSnapshot } from "./static-snapshot.js?v=4.8";
 export const PUBLIC_SNAPSHOT_VERSION = 1;
 export const PUBLIC_SNAPSHOT_ACTIVITY_DAYS = 366;
 
@@ -672,18 +672,32 @@ async function withTimeout(promise, timeoutMs, message) {
 
 export async function publishPublicSnapshot(snapshot, workspaceAuth, { fetchImpl = fetch } = {}) {
   if (!validatePublicSnapshot(snapshot) || !workspaceAuth?.client?.auth) throw new Error("发布资料或已验证的登录会话无效。");
-  const sessionResult = await withTimeout(workspaceAuth.client.auth.getSession(), 8_000, "验证登录会话超时，请重试。");
+  const sessionStart=Date.now();
+  const sessionResult = await withTimeout(workspaceAuth.client.auth.getSession(), 8_000, "浏览器会话获取超过 8 秒（未发出发布请求），请重试。");
   const accessToken = sessionResult?.data?.session?.access_token;
   if (sessionResult?.error || !accessToken) throw new Error("登录会话已失效，请重新登录后再发布。");
-  const response = await fetchImpl(new URL("../api/public/snapshot", import.meta.url).href, {
+  const started=Date.now(),controller=new AbortController(),timer=setTimeout(()=>controller.abort(),25000);
+  let phase='request', response;
+  try {
+  response = await fetchImpl(new URL("../api/public/snapshot", import.meta.url).href, {
     method: "POST",
     credentials: "omit",
     referrerPolicy: "no-referrer",
-    signal: AbortSignal.timeout(15_000),
+    signal: controller.signal,
     headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify(snapshot),
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload?.error?.message || `访客快照发布失败（HTTP ${response.status}）。`);
+  if (!response.ok) throw Object.assign(new Error(`${payload?.error?.message || '访客快照发布失败'} [${payload?.error?.code || 'server_error'} · HTTP ${response.status} · ${Date.now()-started}ms]`),{diagnostics:payload.diagnostics||[]});
+  if(payload.ok!==true||!/^v48-[a-f0-9]{32}$/.test(payload.version||'')||payload.counts?.projects!==snapshot.projects.length)throw Error('服务器发布确认格式无效；请重试确认当前版本。');
+  phase='confirm';
+  const confirmation=await fetchImpl(new URL(`../api/public/snapshot?version=${payload.version}`,import.meta.url).href,{cache:'no-store',credentials:'omit',signal:controller.signal,headers:{Accept:'application/json'}});
+  const saved=await confirmation.json();
+  if(!confirmation.ok||!validatePublicSnapshot(saved)||saved.snapshotVersion!==payload.version||saved.publishedAt!==payload.publishedAt||saved.projects.length!==payload.counts.projects||saved.knowledge.length!==payload.counts.knowledge||saved.decisions.length!==payload.counts.decisions)throw Error(`公开回读确认失败（HTTP ${confirmation.status}）；服务器可能已保存，请重试确认。`);
+  payload.diagnostics=[{stage:'browser_session',httpStatus:null,ms:started-sessionStart,outcome:'ok'},...(payload.diagnostics||[]),{stage:'browser_public_confirmation',httpStatus:confirmation.status,ms:Date.now()-started,outcome:'ok'}];
   return payload;
+  }catch(error){
+   if(controller.signal.aborted)throw Error(`${phase==='confirm'?'公开版本回读确认':'EdgeOne 发布请求'}超过 25 秒（HTTP ${response?.status||'未收到'}）；发布结果待确认，请重试。`);
+   throw error;
+  }finally{clearTimeout(timer);}
 }

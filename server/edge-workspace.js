@@ -1,5 +1,6 @@
 import { postChat, authenticateWorkspace } from '../cloudflare/worker.js';
 import { sanitizeStaticSnapshot, validateStaticSnapshot } from '../src/static-snapshot.js';
+import { currentPublicSnapshot } from './publication.js';
 import latestRelease from '../assets/public/latest.json' with { type: 'json' };
 import previousRelease from '../assets/public/previous.json' with { type: 'json' };
 
@@ -110,7 +111,7 @@ export async function chatRoute(context, publicMode = false, {quotaBackend='kv'}
       if (quotaBackend!=='postgres') quotaTail = result.catch(()=>{});
       if (!await result) return failure(429,'ai_rate_limited','访客 AI 已达频率或今日使用上限，请稍后再试。');
       phase='snapshot';
-      let snapshot = await storedSnapshot(env);
+      let snapshot = quotaBackend==='postgres' ? await currentPublicSnapshot() : await storedSnapshot(env);
       if (typeof body.publishedAt === 'string' && snapshot.publishedAt !== body.publishedAt) {
         const release = [latestRelease,previousRelease].find(s=>s.publishedAt===body.publishedAt);
         if (release) snapshot = release;

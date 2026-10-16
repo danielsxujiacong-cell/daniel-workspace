@@ -447,3 +447,8 @@ pm test` 通过 11/11，`git diff --check` 通过。数据库检查、备份和�
 - Preserve v1 GET compatibility; old publishing clients must refresh.
 
 - V4.5.1: 发布时图表模型尚未就绪，则即时复用现有账号本机活动缓存与已加载工作记录计数；不添加外部读取或阻塞等待。
+# V4.8 · 2026-10-16
+
+- Replace unavailable KV publication with approved isolated immutable snapshot versions and atomic activation in existing Supabase; serve through EdgeOne same-origin Node Functions.
+- Confirm publication by public version readback; report stage, duration, HTTP status and actionable failure instead of a raw timeout.
+- Publish only exact-reviewed Knowledge and user-authored Decisions alongside the existing project details, charts, Universe, Top 5 and milestones.
