@@ -2823,7 +2823,17 @@ async function generateAndPublishVisitorSnapshot() {
   try {
     const models=[ui.homeActivity,...Object.values(ui.universeActivities)].filter(s=>s?.status==="ready"&&s.model).map(s=>s.model);
     models.sort((a,b)=>a.startDate.localeCompare(b.startDate));
-    const snapshot=createStaticSnapshot({data:{...db,projects:db.projects.map(p=>({...p,description:projectIntroduction(p),publicDetails:projectShowcase(p)}))},activityModel:ui.homeActivity.status==="ready"?ui.homeActivity.model:models[0]});
+    let activityModel=ui.homeActivity.model || models[0];
+    if(!activityModel) {
+      const range=currentHomeActivityRange();
+      const cached=loadGitHubActivityCacheForRange(workspaceAuth.userId,range.startDate,range.endDate,Date.now(),GITHUB_ACTIVITY_CACHE_TTL_MS);
+      const projectRepositories=db.projects.flatMap(p=>{const repo=parsePublicGitHubRepository(p.github);return repo?[{fullName:repo.fullName,projectId:p.id,projectName:p.name}]:[];});
+      activityModel=buildHomeActivity({startDate:range.startDate,endDate:range.endDate,projects:db.projects,projectRepositories,
+        githubResults:cached?.repositories || [],githubStatus:cached?"ready":"unavailable",
+        workLogs:ui.dashboardWorkLogs.items || [],workLogsStatus:ui.dashboardWorkLogs.status,
+        workLogsComplete:ui.dashboardWorkLogs.status==="ready" && !ui.dashboardWorkLogs.truncated});
+    }
+    const snapshot=createStaticSnapshot({data:{...db,projects:db.projects.map(p=>({...p,description:projectIntroduction(p),publicDetails:projectShowcase(p)}))},activityModel});
     const result=await publishPublicSnapshot(snapshot,workspaceAuth);
     if(!workspaceActive || requestId!==snapshotPreviewRequestId)return;
     ui.publicSnapshotPreview={status:"published",publishedAt:result.publishedAt,result};

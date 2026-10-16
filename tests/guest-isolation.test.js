@@ -19,9 +19,9 @@ test("existing sessions never auto-open from the root; only the explicit private
   assert.equal(shouldRestoreExistingSession("login", true), true);
   assert.match(gate, /if \(entryMode === "demo"\)[\s\S]*?void startGuestDemo\(\);[\s\S]*?else if \(entryMode === "login"\)[\s\S]*?startPrivateEntry\(\);[\s\S]*?else \{\s*void startPublicDashboard\(\);/);
   assert.match(gate, /function startPrivateEntry\(\)[\s\S]*?showLogin\(\)[\s\S]*?shouldRestoreExistingSession\(entryMode, hasStoredAuthSession\(\)\)[\s\S]*?restoreExistingSession\(\)/);
-  assert.match(gate, /async function startPublicDashboard\(\)[\s\S]*?await import\("\.\.\/app\.js\?v=4\.5"\)[\s\S]*?catch[\s\S]*?startup-failure/);
+  assert.match(gate, /async function startPublicDashboard\(\)[\s\S]*?await import\("\.\.\/app\.js\?v=4\.5\.1"\)[\s\S]*?catch[\s\S]*?startup-failure/);
   const publicStartup = gate.slice(gate.indexOf("async function startPublicDashboard"), gate.indexOf("function startPrivateEntry"));
-  assert.ok(publicStartup.indexOf('await import("../app.js?v=4.5")') < publicStartup.indexOf("void snapshotPromise.then"));
+  assert.ok(publicStartup.indexOf('await import("../app.js?v=4.5.1")') < publicStartup.indexOf("void snapshotPromise.then"));
   assert.doesNotMatch(publicStartup, /await\s+snapshotPromise/);
   assert.doesNotMatch(publicStartup, /hasStoredAuthSession|restoreExistingSession|initializeAuthClient|localStorage|config\.js/);
   assert.match(index, /class="startup-screen"[\s\S]*?正在打开公开项目指挥中心/);
@@ -69,7 +69,7 @@ test("visitor UI has no imports or private data and service interfaces", () => {
 
 test("public entry loads only the gate module", () => {
   const scripts = [...index.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map((match) => match[1]);
-  assert.deepEqual(scripts, ["./src/auth/gate.js?v=4.5"]);
+  assert.deepEqual(scripts, ["./src/auth/gate.js?v=4.5.1"]);
 });
 
 test("private login still signs in, verifies the user, and checks the allowlist before opening app", () => {
@@ -80,7 +80,7 @@ test("private login still signs in, verifies the user, and checks the allowlist 
   const allowlistAt = loginFlow.indexOf("isAllowedUser(user)");
   const workspaceAt = loginFlow.indexOf("enterWorkspace(user)");
   assert.ok(signInAt >= 0 && signInAt < getUserAt && getUserAt < allowlistAt && allowlistAt < workspaceAt);
-  assert.match(gate, /async function enterWorkspace\(user\)\s*\{\s*if \(workspaceVisible\) return;\s*if \(!isAllowedUser\(user\)\) throw new Error\("Unauthorized user"\);[\s\S]*?import\("\.\.\/app\.js\?v=4\.5"\)/);
+  assert.match(gate, /async function enterWorkspace\(user\)\s*\{\s*if \(workspaceVisible\) return;\s*if \(!isAllowedUser\(user\)\) throw new Error\("Unauthorized user"\);[\s\S]*?import\("\.\.\/app\.js\?v=4\.5\.1"\)/);
 
   const sessionRestore = gate.slice(gate.indexOf("async function restoreExistingSession"), gate.indexOf("async function startGuestDemo"));
   const getSessionAt = sessionRestore.indexOf("client.auth.getSession()");

@@ -422,3 +422,5 @@ pm test` 通过 11/11，`git diff --check` 通过。数据库检查、备份和�
 - Replace all-repository publication prechecks with a v2 static projection of already loaded project presentation and activity counts. Authenticate the owner server-side; strip private originals and repository fields without external verification calls.
 - Keep one complete KV snapshot for all visitor views, including reviewed deliveries and project showcase details. Partial activity no longer blocks safe projects; failed writes retain the last successful snapshot.
 - Preserve v1 GET compatibility; old publishing clients must refresh.
+
+- V4.5.1: 发布时图表模型尚未就绪，则即时复用现有账号本机活动缓存与已加载工作记录计数；不添加外部读取或阻塞等待。
