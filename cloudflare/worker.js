@@ -56,6 +56,14 @@ function errorResponse(request, env, status, code, message) {
 const githubError = (request, env, status, code, message) => jsonResponse(request, env, { error: { code, message } }, status);
 const encoder = new TextEncoder();
 
+function timeoutSignal(milliseconds) {
+  if (typeof AbortSignal?.timeout === "function") return AbortSignal.timeout(milliseconds);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), milliseconds);
+  timer?.unref?.();
+  return controller.signal;
+}
+
 function base64Url(bytes) {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -71,7 +79,7 @@ export async function authenticateWorkspace(request, env) {
   try {
     const response = await fetch(`${env.SUPABASE_URL.replace(/\/+$/, "")}/auth/v1/user`, {
       headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(8_000),
+      signal: timeoutSignal(8_000),
     });
     if (!response.ok) return null;
     const user = await response.json();
@@ -1134,7 +1142,7 @@ export async function postChat(request, env) {
         method: "POST",
         headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: "Bearer " + env.AI_API_KEY },
         body: upstreamBody,
-        signal: AbortSignal.timeout(upstreamTimeoutMs),
+        signal: timeoutSignal(upstreamTimeoutMs),
       });
     } catch (error) {
       const timedOut = error && typeof error === "object" && ["TimeoutError", "AbortError"].includes(error.name);
