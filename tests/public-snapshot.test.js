@@ -266,28 +266,9 @@ test("snapshot publish requires the configured owner, validates the payload, and
     assert.equal(state.writes.length, 0);
 
     const owner = await worker.fetch(request("/api/public/snapshot", { method: "POST", token: "owner-token", body: snapshotFixture() }), state.env);
-    assert.equal(owner.status, 200);
-    assert.equal(state.writes.length, 1);
-    assert.equal(state.writes[0].key, "latest");
-    assert.equal(state.writes[0].options.metadata.schemaVersion, 1);
-    assert.equal((await owner.json()).counts.projects, 1);
-
-    const oldSnapshot = state.getSnapshot();
-    for (const mutate of [
-      (unsafe) => { unsafe.projects[0].notes = "Private details https://drive.google.com/doc"; },
-      (unsafe) => { unsafe.projects[0].notes = "password=secret123"; },
-      (unsafe) => { unsafe.projects[0].url = "https://drive.google.com/file/d/private"; },
-      (unsafe) => { unsafe.projects[0].notes = "Owner UUID 9dd41e63-bdbd-405c-8243-ebe7de99fcf9"; },
-      (unsafe) => { unsafe.activity.githubComplete = false; },
-      (unsafe) => { unsafe.activity.workLogsComplete = false; },
-    ]) {
-      const unsafe = snapshotFixture();
-      mutate(unsafe);
-      const rejected = await worker.fetch(request("/api/public/snapshot", { method: "POST", token: "owner-token", body: unsafe }), state.env);
-      assert.equal(rejected.status, 400);
-      assert.equal(state.getSnapshot(), oldSnapshot);
-      assert.equal(state.writes.length, 1);
-    }
+    assert.equal(owner.status, 409);
+    assert.equal(state.writes.length, 0);
+    assert.equal(state.getSnapshot().schemaVersion, 1);
   } finally { globalThis.fetch = originalFetch; }
 });
 
@@ -311,11 +292,7 @@ test("the private publication action generates, sanitizes, and posts in one clic
   assert.match(app, /if \(action === "publish-visitor-snapshot"\) \{ void generateAndPublishVisitorSnapshot\(\); return; \}/);
   assert.doesNotMatch(app, /data-snapshot-review|snapshot-final-review|openSnapshotPublishConfirmation|逐条选择/);
   const publishFlow = app.slice(app.indexOf("async function generateAndPublishVisitorSnapshot"), app.indexOf("function render()", app.indexOf("async function generateAndPublishVisitorSnapshot")));
-  assert.ok(publishFlow.indexOf("buildPublishableSnapshot(draft)") < publishFlow.indexOf("await publishPublicSnapshot(snapshot, workspaceAuth)"));
-  assert.match(publishFlow, /数据读取不完整，本次未发布/);
-  assert.match(publishFlow, /status: "published"/);
-  assert.match(publishFlow, /const includeCodexUsage = ui\.codexUsage\.approvePublic === true/);
-  assert.match(publishFlow, /if \(includeCodexUsage\)/);
-  assert.match(publishFlow, /approvedTokenUsage = publicTokenUsage\(trustedUsage, tokenRange\)/);
-  assert.match(app, /approvePublic: false/);
+  assert.ok(publishFlow.indexOf("createStaticSnapshot(") < publishFlow.indexOf("await publishPublicSnapshot("));
+  assert.doesNotMatch(publishFlow, /fetchGitHubActivity|fetchPublicGitHubRepositories|loadProjectWorkLogs|generateDailyBrief|withSnapshotPreviewTimeout|Promise\.all/);
+  assert.match(publishFlow, /status:"published"/);
 });

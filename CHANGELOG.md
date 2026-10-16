@@ -416,3 +416,9 @@ pm test` 通过 11/11，`git diff --check` 通过。数据库检查、备份和�
 ## 2026-10-16 · V4.4.1
 
 - 产品交付改为等距连续横向轴，同日成果独立相邻，日期与成果内容不变；桌面约 5–6 项、手机约 1–2 项横向滚动。保留详情、链接及审核机制。
+
+## 2026-10-16 · V4.5
+
+- Replace all-repository publication prechecks with a v2 static projection of already loaded project presentation and activity counts. Authenticate the owner server-side; strip private originals and repository fields without external verification calls.
+- Keep one complete KV snapshot for all visitor views, including reviewed deliveries and project showcase details. Partial activity no longer blocks safe projects; failed writes retain the last successful snapshot.
+- Preserve v1 GET compatibility; old publishing clients must refresh.

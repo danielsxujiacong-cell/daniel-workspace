@@ -1,3 +1,4 @@
+import { validateStaticSnapshot } from "./static-snapshot.js?v=4.5";
 const WORKER_BASE = "https://daniel-workspace-api.ai-investment-dashboard.workers.dev";
 export const PUBLIC_SNAPSHOT_VERSION = 1;
 export const PUBLIC_SNAPSHOT_ACTIVITY_DAYS = 366;
@@ -428,6 +429,7 @@ function safeSnapshotUrl(value, kind) {
 }
 
 export function validatePublicSnapshot(snapshot) {
+  if (snapshot?.schemaVersion === 2) return validateStaticSnapshot(snapshot);
   const rootKeys = ["schemaVersion", "generatedAt", "activity", "projects", "tasks", "workLogs", "knowledge", "decisions", "summaries", "publishedAt"];
   if (!allowedKeys(snapshot, rootKeys, ["tokenUsage"]) || snapshot.schemaVersion !== PUBLIC_SNAPSHOT_VERSION
     || typeof snapshot.generatedAt !== "string" || !Number.isFinite(Date.parse(snapshot.generatedAt))
@@ -599,7 +601,7 @@ export function buildSnapshotActivity(snapshot, range) {
   const githubCommits = days.reduce((sum, item) => sum + item.githubCommits, 0);
   const workLogs = days.reduce((sum, item) => sum + item.workLogs, 0);
   const activeDays = days.filter((item) => item.githubCommits + item.workLogs > 0).length;
-  const githubComplete = snapshot.activity.githubRepositoryCount === 0 || snapshot.activity.githubComplete === true;
+  const githubComplete = snapshot.activity.githubComplete === true;
   return {
     startDate: range.startDate,
     endDate: range.endDate,

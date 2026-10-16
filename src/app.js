@@ -1,3 +1,4 @@
+const { createStaticSnapshot } = await import("./static-snapshot.js?v=4.5");
 const { universeLabels, topActivity, syncLabel } = await import("./dashboard-final.js?v=4.4");
 const { PUBLISHED_DELIVERIES, PENDING_DELIVERIES, deliveryView, layoutDeliveryDays, readDeliveryEdits, saveDeliveryEdit } = await import("./product-deliveries.js?v=4.4.1");
 const publicSnapshotMode = globalThis.DANIEL_WORKSPACE_MODE === "public";
@@ -11,14 +12,10 @@ let workspaceAuth = globalThis.DANIEL_WORKSPACE_AUTH;
 if (!publicSnapshotMode && (!workspaceAuth?.client || !workspaceAuth.userId)) throw new Error("Workspace cloud sync requires a validated user session.");
 
 const {
-  buildPublishableSnapshot,
   buildSnapshotActivity,
-  createPublicSnapshotDraft,
   hydratePublicSnapshot,
   publishPublicSnapshot,
-  PUBLIC_SNAPSHOT_ACTIVITY_DAYS,
-  snapshotDraftCounts,
-} = await import("./public-snapshot.js?v=4.0");
+} = await import("./public-snapshot.js?v=4.5");
 let hydratedPublicData = publicSnapshotMode ? hydratePublicSnapshot(publishedSnapshot) : null;
 
 const {
@@ -49,7 +46,6 @@ const { fetchPublicGitHubRepositories, fetchPublicGitHubRepository, GITHUB_CACHE
   ? await import("./github/public-api.js?v=3.8-l")
   : await import("./github/public-api.js?v=3.8-l");
 const { fetchGitHubActivity, mergeGitHubActivityRetry, rateLimitedGitHubActivityNames, GITHUB_ACTIVITY_CACHE_TTL_MS } = publicSnapshotMode ? {} : await import("./github/activity.js?v=3.8-l");
-const { mergePublicRepositoryVerification, missingCompleteRepositories, missingPublicRepositoryVerifications, reusablePublicRepositorySnapshot, snapshotGitHubActivityCacheKey, withSnapshotPreviewTimeout } = await import("./snapshot-preview-flow.js?v=3.8-l");
 const { deployedWebsiteUrl, humanizeProjectCommit, projectDescriptionAfterEdit, projectDescriptionForEdit, projectIntroduction, projectShowcase } = await import("./project-story.js?v=3.7-d");
 const { buildCloudDashboardModel, buildLocalDashboardModel, buildRecentProjectUpdates, chooseRecentCommit, compareLocalProjects, homeProjectField, projectTaskProgress, taskPriorityLabel } = await import("./dashboard.js?v=3.8");
 const { buildHomeActivity, resolveActivityRange, shiftDateKey } = await import("./home-activity.js?v=4.0");
@@ -100,7 +96,6 @@ let universeActivityRequestSequence = 0;
 const universeActivityRequestIds = new Map();
 let codexUsageRequestId = 0;
 let snapshotPreviewRequestId = 0;
-const publicRepositoryVerificationCache = new Map();
 let migrationState = publicSnapshotMode ? null : loadCloudMigrationState(workspaceAuth.userId);
 let scanCache = publicSnapshotMode ? { inventory: null, baseline: null } : loadLocalScanCache();
 const localScanEndpoint = publicSnapshotMode ? null : localScanEndpointFor(window.location);
@@ -1819,7 +1814,7 @@ function renderProjectRecentProgress(project, localProject = null) {
 }
 
 function renderProjectShowcase(project) {
-  const story = projectShowcase(project);
+  const story = publicSnapshotMode && project.publicDetails ? project.publicDetails : projectShowcase(project);
   if (!story.features.length && !story.outcomes.length) return "";
   const list = (items) => `<ul class="project-story-list">${items.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>`;
   return `<section class="card card-pad project-showcase"><div class="project-showcase-column"><h3>核心功能</h3>${list(story.features)}</div><div class="project-showcase-column"><h3>已验证成果</h3>${list(story.outcomes)}</div></section>`;
@@ -2081,6 +2076,7 @@ function renderProjectUniverse(projects, activity, dataAvailable) {
 }
 
 function currentDeliveries(projects = db.projects) {
+  if(publicSnapshotMode && publishedSnapshot?.schemaVersion===2) return publishedSnapshot.deliveries.map(e=>({...e,projectId:projects.find(p=>p.name===e.workspaceName)?.id||""})).sort((a,b)=>a.date.localeCompare(b.date)||a.id.localeCompare(b.id));
   if(!publicSnapshotMode && privateDeliveryEdits===null) {try{privateDeliveryEdits=readDeliveryEdits(localStorage,workspaceAuth.userId);}catch{privateDeliveryEdits=[];}}
   return deliveryView({publicMode:publicSnapshotMode,edits:publicSnapshotMode?[]:privateDeliveryEdits,projects});
 }
@@ -2095,7 +2091,7 @@ function renderOutcomeTimeline(projects) {
   const nodes=layout.groups.map(group=>`<div class="delivery-day" data-date="${group.date}"><span class="delivery-day-dot" aria-hidden="true"></span><time datetime="${group.date}">${group.date.slice(5).replace("-","/")}</time>${group.items.map(e=>`<button class="outcome-event ${e.id===selected?.id?"selected":""}" data-action="select-milestone" data-milestone-id="${esc(e.id)}" aria-expanded="${e.id===selected?.id}"><time class="sr-only">${e.date}</time><small>${esc(e.projectName)}</small><strong>${esc(e.title)}</strong></button>`).join("")}</div>`).join("");
   const candidates=publicSnapshotMode?"":`<details class="delivery-candidates"><summary>待审核候选</summary>${PENDING_DELIVERIES.filter(p=>!events.some(e=>e.id===p.id)).map(p=>`<div><span>${p.date.slice(5)} · ${esc(p.projectName)} · 待审核</span><p>${esc(p.detail)}</p><button class="button quiet small" data-action="edit-delivery" data-id="${p.id}">核对并调整</button></div>`).join("")}</details>`;
   const detail=selected?`<div class="outcome-selected"><div><h3>${esc(selected.projectName)} · ${esc(selected.title)}</h3><span class="delivery-stage">${esc(selected.status||"人工确认")}</span><p>${esc(selected.detail)}</p><div class="outcome-evidence">${selected.demo?`<a href="${esc(selected.demo)}" target="_blank" rel="noopener noreferrer">当前体验 ${icon("external")}</a>`:""}${selected.evidence?`<a href="${esc(selected.evidence)}" target="_blank" rel="noopener noreferrer">${selected.ownerConfirmed?"确认依据":"交付证据"} ${icon("external")}</a>`:""}${selected.ownerConfirmed?`<span>本机人工确认</span>`:""}</div></div><div class="delivery-detail-actions">${selected.projectId?`<button class="button quiet small" data-action="view-project" data-id="${esc(selected.projectId)}">查看项目 ${icon("arrow")}</button>`:""}${publicSnapshotMode?"":`<button class="button quiet small" data-action="edit-delivery" data-id="${esc(selected.id)}">调整成果</button>`}</div></div>`:"";
-  return `<section class="card dashboard-v4-card outcome-timeline-card grid-span-12"><header class="dashboard-chart-heading"><h2>过去 30 天 · 产品交付</h2>${publicSnapshotMode?`<time class="muted delivery-snapshot-date" datetime="${PUBLISHED_DELIVERIES.publishedAt}">成果快照 · ${PUBLISHED_DELIVERIES.publishedAt.slice(5).replace("-","/")}</time>`:`<button class="button quiet small" data-action="edit-delivery" data-id="new">补充交付</button>`}</header>${events.length?`<div class="outcome-timeline-scroll" tabindex="0" aria-label="产品交付时间轴，左右滑动浏览"><div class="outcome-timeline-track delivery-compact-track">${nodes}</div></div>`:`<p class="muted">过去 30 天暂无已确认交付</p>`}${detail}${candidates}${renderDeliveryEditor(events,projects)}</section>`;
+  return `<section class="card dashboard-v4-card outcome-timeline-card grid-span-12"><header class="dashboard-chart-heading"><h2>过去 30 天 · 产品交付</h2>${publicSnapshotMode?`<time class="muted delivery-snapshot-date" datetime="${esc(publishedSnapshot?.publishedAt || PUBLISHED_DELIVERIES.publishedAt)}">成果快照 · ${(publishedSnapshot?.publishedAt || PUBLISHED_DELIVERIES.publishedAt).slice(5,10).replace("-","/")}</time>`:`<button class="button quiet small" data-action="edit-delivery" data-id="new">补充交付</button>`}</header>${events.length?`<div class="outcome-timeline-scroll" tabindex="0" aria-label="产品交付时间轴，左右滑动浏览"><div class="outcome-timeline-track delivery-compact-track">${nodes}</div></div>`:`<p class="muted">过去 30 天暂无已确认交付</p>`}${detail}${candidates}${renderDeliveryEditor(events,projects)}</section>`;
 }
 
 function renderDashboard() {
@@ -2812,327 +2808,31 @@ function renderPublicSnapshotNotice() {
 }
 
 function renderSnapshotPreview() {
-  const state = ui.publicSnapshotPreview;
-  if (["loading", "publishing"].includes(state.status)) {
-    const progress = state.progress || {};
-    return `<section class="page-heading"><div><div class="eyebrow">访客快照</div><h1>${state.status === "publishing" ? "正在发布访客快照" : "正在准备访客快照"}</h1><p>使用已同步的工作区数据；敏感内容自动隐藏，只有这次手动操作会更新访客快照。</p></div></section><section class="card card-pad snapshot-loading" role="status" aria-live="polite"><span class="startup-spinner"></span><div class="snapshot-progress-copy"><strong>${esc(progress.message || "正在准备发布…")}</strong>${progress.detail ? `<span>${esc(progress.detail)}</span>` : ""}</div></section>`;
-  }
-  if (!state.draft && state.status === "idle") return `<section class="page-heading"><div><div class="eyebrow">访客快照</div><h1>一键发布</h1><p>私人工作台保持实时更新；访客快照只在所有者手动点击发布后更新。</p></div></section>`;
-
-  const draft = state.draft;
-  const incomplete = draft ? !snapshotDraftPublishable(draft) : false;
-  const counts = draft ? snapshotDraftCounts(draft) : null;
-  const issues = Array.isArray(draft?.completeness?.issues) ? draft.completeness.issues : [];
-  const countSummary = counts ? `项目 ${counts.projects || 0} · 任务 ${counts.tasks || 0} · 工作记录 ${counts.workLogs || 0} · 资料 ${counts.knowledge || 0} · 决策 ${counts.decisions || 0} · 公开仓库活动 ${counts.githubActivity || 0} · AI 简报 ${counts.summaries || 0}${counts.codexTokenDays ? ` · Codex 汇总 ${counts.codexTokenDays} 天` : ""}` : "";
-  return `<section class="page-heading"><div><div class="eyebrow">访客快照</div><h1>${state.status === "published" ? "快照已发布" : incomplete ? "数据未完整，快照未发布" : "发布未完成"}</h1><p>${esc(state.error || (state.status === "published" ? `访客现在可读取此快照 · ${formattedTimestamp(state.publishedAt)}` : "当前数据没有写入公开存储，可从顶部按钮安全重试。"))}</p></div></section>
-    ${incomplete ? `<section class="card card-pad snapshot-incomplete" role="alert"><strong>缺失数据仍保持缺失，没有按零发布。</strong><p>完成并核对所有必要读取之前不会更新访客快照。</p>${issues.length ? `<ul>${issues.map((issue) => `<li>${esc(issue)}</li>`).join("")}</ul>` : "<p>至少一个数据源未通过完整性核对。</p>"}</section>` : ""}
-    ${draft ? `<section class="card card-pad snapshot-publish-panel" role="status"><h2>${state.status === "published" ? "本次访客快照" : "已安全汇总的数据"}</h2><p>${esc(countSummary)}</p><p>活动范围：${esc(draft.activityRange.startDate)} 至 ${esc(draft.activityRange.endDate)}</p><p>敏感信息、认证值、邮箱、联系方式、本机路径、证据链接和未核验仓库地址由白名单过滤器自动隐藏。访客页保持只读。</p>${state.status === "published" ? `<p class="snapshot-published-status">发布成功：${esc(formattedTimestamp(state.publishedAt))}。访客请求会直接读取最新快照。</p>` : ""}</section>` : ""}
-    ${state.status === "error" && !draft ? `<section class="card card-pad snapshot-incomplete" role="alert"><strong>发布失败</strong><p>${esc(state.error)}</p><p>原有访客快照未被修改。修复数据源或网络后，点击顶部「一键发布访客快照」重试。</p></section>` : ""}`;
-}
-
-async function mapWithConcurrency(items, concurrency, callback) {
-  const results = new Array(items.length);
-  let nextIndex = 0;
-  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-    while (nextIndex < items.length) {
-      const index = nextIndex++;
-      try { results[index] = await callback(items[index], index); }
-      catch (error) { results[index] = { error }; }
-    }
-  });
-  await Promise.all(workers);
-  return results;
-}
-
-function snapshotDraftPublishable(draft) {
-  return draft?.completeness?.complete === true && draft?.completeness?.workLogs === true
-    && draft?.completeness?.github === true && draft?.completeness?.workLogsTruncated !== true;
-}
-
-function snapshotReadError(error) {
-  if (error?.code === "snapshot_stage_timeout") return error.message;
-  if (error?.code === "github_worker_timeout") return error.message;
-  if (error?.status === 429 || error?.upstreamStatus === 429 || error?.code === "github_rate_limited") return "GitHub API 限流，请稍后安全重试。";
-  const message = typeof error?.message === "string" ? error.message : "读取失败，请安全重试。";
-  return message.replace(/https?:\/\/\S+/gi, "[URL 已隐藏]")
-    .replace(/\bBearer\s+\S+/gi, "Bearer [已隐藏]")
-    .replace(/\b[A-Za-z]:\\[^\s]*/g, "[本机路径已隐藏]")
-    .slice(0, 180);
-}
-
-function snapshotRepositoryNames(repositoryProjects) {
-  return [...new Set(repositoryProjects.map(({ repository }) => repository.fullName))];
-}
-
-function snapshotActivityForNames(result, names) {
-  const wanted = new Set(names.map((name) => name.toLowerCase()));
-  return {
-    repositories: (result?.repositories || []).filter((repo) => wanted.has(String(repo?.fullName || "").toLowerCase())),
-    errors: (result?.errors || []).filter((error) => wanted.has(String(error?.fullName || "").toLowerCase())),
-  };
+  const state=ui.publicSnapshotPreview, result=state.result;
+  return `<section class="page-heading"><div><div class="eyebrow">访客快照</div><h1>${state.status==="published"?"快照已发布":state.status==="publishing"?"正在发布访客快照":"发布未完成"}</h1><p role="status" aria-live="polite">${esc(state.error || (result ? `项目 ${result.counts.projects} · 跳过项目 ${result.skippedProjects || 0} · 发布时间 ${formattedTimestamp(result.publishedAt)}` : "冻结当前已加载的安全展示数据，不等待 GitHub 或 AI。"))}</p></div></section><section class="card card-pad"><p>仅发布项目展示字段、匿名活动计数和已审核成果；仓库地址、提交原文、私人笔记、工作记录原文和认证信息不会公开。</p>${state.status==="error"?"<p>原有成功快照保持不变，可点击顶部按钮重试。</p>":""}${result?.activityPartial?"<p>部分活动数据未完整加载，访客保留未知标记；安全项目已正常发布。</p>":""}</section>`;
 }
 
 async function generateAndPublishVisitorSnapshot() {
-  if (publicSnapshotMode || !workspaceActive) return;
-  if (["loading", "publishing"].includes(ui.publicSnapshotPreview.status)) return;
-  const includeCodexUsage = ui.codexUsage.approvePublic === true;
-  ui.page = "snapshot-preview";
-  if (!workspaceAuth?.client || !workspaceAuth.userId || ui.cloud.status !== "synced" || cloudSyncRunning || cloudSyncTimer) {
-    ui.publicSnapshotPreview = { status: "error", draft: null, error: "请先等待私人工作台完成 Supabase 同步，再发布快照。", progress: null };
-    render();
-    return;
+  if(publicSnapshotMode || !workspaceActive || ui.publicSnapshotPreview.status==="publishing") return;
+  ui.page="snapshot-preview";
+  const requestId=++snapshotPreviewRequestId;
+  if(!workspaceAuth?.client || !workspaceAuth.userId || !cloudWorkspaceAvailable() || !db.projects.length) {
+    ui.publicSnapshotPreview={status:"error",error:"请先加载私人 Workspace 项目后发布。"};render();return;
   }
-  ui.codexUsage.approvePublic = false;
-  const requestId = ++snapshotPreviewRequestId;
-  const previousPublishedAt = ui.publicSnapshotPreview.publishedAt || "";
-  const setProgress = (message, detail = "") => {
-    if (requestId !== snapshotPreviewRequestId || !workspaceActive) return;
-    ui.publicSnapshotPreview = { ...ui.publicSnapshotPreview, status: "loading", progress: { message, detail } };
-    render();
-  };
-  ui.publicSnapshotPreview = { status: "loading", draft: null, error: "", publishedAt: previousPublishedAt, progress: { message: "准备读取已同步的 Workspace 数据", detail: "仅这次手动操作会更新公开快照。" } };
-  render();
-  const today = shanghaiDateKey();
-  const range = resolveActivityRange("custom", { startDate: shiftDateKey(today, 1 - PUBLIC_SNAPSHOT_ACTIVITY_DAYS), endDate: today });
+  ui.publicSnapshotPreview={status:"publishing",error:""};render();
   try {
-    setProgress("读取 Supabase 工作记录", `已同步 ${db.projects.length} 个项目；逐项读取只读工作记录。`);
-    const projectLogs = new Array(db.projects.length);
-    let workLogCompleted = 0;
-    let workLogStageError = null;
-    try {
-      await withSnapshotPreviewTimeout("Supabase 工作记录", 60_000, (signal) => mapWithConcurrency(db.projects, 4, async (project, index) => {
-        let result;
-        try {
-          if (signal.aborted) throw signal.reason || new Error("工作记录读取阶段已超时。");
-          result = { projectId: project.id, items: await loadProjectWorkLogs(workspaceAuth.client, workspaceAuth.userId, project.id, { signal }) };
-        } catch (error) {
-          result = { projectId: project.id, error };
-        }
-        projectLogs[index] = result;
-        workLogCompleted += 1;
-        if (!signal.aborted && workLogCompleted === db.projects.length) setProgress("Supabase 工作记录读取完成", `已检查 ${workLogCompleted}/${db.projects.length} 个项目。`);
-        else if (!signal.aborted && (workLogCompleted % 2 === 0 || workLogCompleted === db.projects.length)) setProgress("读取 Supabase 工作记录", `已完成 ${workLogCompleted}/${db.projects.length} 个项目。`);
-        return result;
-      }));
-    } catch (error) {
-      workLogStageError = error;
-    }
-    for (let index = 0; index < db.projects.length; index += 1) {
-      if (!projectLogs[index]) projectLogs[index] = { projectId: db.projects[index].id, error: workLogStageError || new Error("该项目的工作记录结果缺失。") };
-    }
-    const failedWorkLogs = projectLogs.filter((result) => result?.error);
-    const workLogs = projectLogs.flatMap((result) => Array.isArray(result?.items) ? result.items : []);
-    const workLogsTruncated = projectLogs.some((result) => result?.items?.length >= 200);
-    const repositoryProjects = db.projects.flatMap((project) => {
-      const repository = parsePublicGitHubRepository(project.github);
-      return repository ? [{ project, repository }] : [];
-    });
-    const repositoryNames = snapshotRepositoryNames(repositoryProjects);
-    const verificationCacheKey = repositoryNames.map((name) => name.toLowerCase()).sort().join(",");
-    const cachedVerification = publicRepositoryVerificationCache.get(verificationCacheKey);
-    const previousVerification = cachedVerification && Date.now() - cachedVerification.fetchedAt < GITHUB_ACTIVITY_CACHE_TTL_MS
-      ? cachedVerification.data
-      : { snapshots: [], errors: [] };
-    const previousVerificationNames = new Set([
-      ...(previousVerification.snapshots || []).map((snapshot) => String(snapshot?.repositoryName || "").toLowerCase()),
-      ...(previousVerification.errors || []).map((error) => String(error?.fullName || "").toLowerCase()),
-    ]);
-    const cachedPublicSnapshots = repositoryProjects.flatMap(({ project, repository }) => {
-      const snapshot = project.githubData;
-      const reusable = reusablePublicRepositorySnapshot(snapshot, repository.fullName, isGitHubSnapshotFresh(snapshot));
-      return reusable && !previousVerificationNames.has(repository.fullName.toLowerCase()) ? [reusable] : [];
-    });
-    let publicCheck = mergePublicRepositoryVerification(previousVerification, { snapshots: cachedPublicSnapshots, errors: [] });
-    let publicVerificationStageError = null;
-    if (repositoryProjects.length) {
-      const repositoriesToVerify = missingPublicRepositoryVerifications(repositoryNames, publicCheck.snapshots, publicCheck.errors);
-      if (repositoriesToVerify.length) {
-        const cachedPublicCount = repositoryNames.length - repositoriesToVerify.length;
-        const repositoryByName = new Map(repositoryProjects.map(({ repository }) => [repository.fullName.toLowerCase(), repository]));
-        setProgress("核验 GitHub 仓库公开状态", `复用 ${cachedPublicCount}/${repositoryNames.length} 个已核验结果；分批核验剩余 ${repositoriesToVerify.length} 个。`);
-        try {
-          const refreshed = await withSnapshotPreviewTimeout("GitHub 仓库公开状态核验", 60_000, (signal) =>
-            fetchPublicGitHubRepositories(repositoriesToVerify.map((name) => repositoryByName.get(name.toLowerCase())?.url).filter(Boolean), workspaceAuth, {
-              signal,
-              onProgress: ({ completed, total }) => setProgress("核验 GitHub 仓库公开状态", `已复用 ${cachedPublicCount} 个已核验结果；新核验 ${completed}/${total} 个仓库。`),
-            }));
-          publicCheck = mergePublicRepositoryVerification(publicCheck, refreshed, repositoriesToVerify);
-        } catch (error) {
-          publicVerificationStageError = error;
-          publicCheck = mergePublicRepositoryVerification(publicCheck, {
-            snapshots: [],
-            errors: repositoriesToVerify.map((fullName) => ({ fullName, code: error?.code || "github_repository_verification_failed", message: snapshotReadError(error) })),
-          }, repositoriesToVerify);
-        }
-      }
-      if (!publicVerificationStageError) {
-        const returnedNames = new Set([...(publicCheck.snapshots || []), ...(publicCheck.errors || [])]
-          .map((item) => String(item?.repositoryName || item?.fullName || "").toLowerCase()));
-        const missingNames = repositoryNames.filter((name) => !returnedNames.has(name.toLowerCase()));
-        if (missingNames.length) {
-          publicCheck.errors = [...(publicCheck.errors || []), ...missingNames.map((fullName) => ({
-            fullName,
-            code: "github_repository_verification_missing",
-            message: "Worker 未返回该仓库的公开状态。",
-          }))];
-        }
-      }
-      publicRepositoryVerificationCache.set(verificationCacheKey, { fetchedAt: Date.now(), data: publicCheck });
-    }
-    if (!publicCheck) publicCheck = { snapshots: [], errors: [] };
-    const verifiedRepos = (publicCheck.snapshots || []).filter((repo) => repo.isPublic === true);
-    const verifiedNames = [...new Set(verifiedRepos.map((repo) => repo.repositoryName).filter(Boolean))];
-    const verificationErrors = (publicCheck.errors || []).filter((error) => error.httpStatus !== 404);
-    const snapshotCacheKey = snapshotGitHubActivityCacheKey(range.startDate, range.endDate, verifiedNames);
-    const cachedActivity = verifiedNames.length
-      ? loadGitHubActivityCache(workspaceAuth.userId, snapshotCacheKey, Date.now(), GITHUB_ACTIVITY_CACHE_TTL_MS)
-      : null;
-    const cachedActivitySegmentsData = !cachedActivity && verifiedNames.length
-      ? loadGitHubActivityCacheForRange(workspaceAuth.userId, range.startDate, range.endDate, Date.now(), GITHUB_ACTIVITY_CACHE_TTL_MS)
-      : null;
-    const cachedActivitySegments = cachedActivitySegmentsData
-      ? snapshotActivityForNames(cachedActivitySegmentsData, verifiedNames)
-      : null;
-    const dashboardActivityKey = snapshotGitHubActivityCacheKey(range.startDate, range.endDate, repositoryNames);
-    const dashboardActivity = !cachedActivity && !cachedActivitySegments && ui.homeActivity.status === "ready" && ui.homeActivity.key === dashboardActivityKey
-      && Date.now() - new Date(ui.homeActivity.fetchedAt || "").getTime() < GITHUB_ACTIVITY_CACHE_TTL_MS
-      ? snapshotActivityForNames(ui.homeActivity.githubData, verifiedNames)
-      : null;
-    const reusableActivity = cachedActivity || cachedActivitySegments || dashboardActivity;
-    const missingActivityNames = reusableActivity
-      ? missingCompleteRepositories(reusableActivity.repositories, verifiedNames)
-      : verifiedNames;
-    let activityResult = reusableActivity || { repositories: [], errors: [] };
-    let activityStageError = null;
-    if (missingActivityNames.length) {
-      setProgress(cachedActivity ? "复用 GitHub 完整缓存" : dashboardActivity ? "复用活动趋势已读取结果" : "读取 GitHub 活动历史",
-        `${verifiedNames.length - missingActivityNames.length}/${verifiedNames.length} 个公开仓库已完整命中；补读 ${missingActivityNames.length} 个仓库，范围 ${range.startDate} 至 ${range.endDate}。`);
-      try {
-        const refreshed = await withSnapshotPreviewTimeout("GitHub 活动历史", 90_000, (signal) =>
-          fetchGitHubActivity(missingActivityNames, workspaceAuth, { startDate: range.startDate, endDate: range.endDate, signal }));
-        activityResult = reusableActivity
-          ? mergeGitHubActivityRetry(reusableActivity, refreshed, missingActivityNames)
-          : refreshed;
-      } catch (error) {
-        activityStageError = error;
-        const timeoutErrors = missingActivityNames.map((fullName) => ({
-          fullName,
-          code: error?.code || "github_activity_stage_failed",
-          reasonCategory: "github_worker_request_failed",
-          message: snapshotReadError(error),
-        }));
-        activityResult = reusableActivity
-          ? mergeGitHubActivityRetry(reusableActivity, { repositories: [], errors: timeoutErrors }, missingActivityNames)
-          : { repositories: [], errors: timeoutErrors };
-      }
-    }
-    activityResult = snapshotActivityForNames(activityResult, verifiedNames);
-    const remainingActivityNames = missingCompleteRepositories(activityResult.repositories, verifiedNames);
-    if (remainingActivityNames.length) {
-      const knownErrors = new Set(activityResult.errors.map((error) => String(error.fullName || "").toLowerCase()));
-      activityResult.errors.push(...remainingActivityNames.filter((name) => !knownErrors.has(name.toLowerCase())).map((fullName) => ({
-        fullName,
-        code: "github_activity_result_missing",
-        reasonCategory: "github_worker_request_failed",
-        message: "GitHub Worker 未返回该仓库的完整活动结果。",
-      })));
-    }
-    const activityComplete = !verificationErrors.length && !publicVerificationStageError && !activityStageError
-      && activityResult.errors.length === 0 && activityResult.repositories.length === verifiedNames.length
-      && activityResult.repositories.every((item) => item.complete === true && item.truncated !== true);
-    if (activityComplete && verifiedNames.length) {
-      saveGitHubActivityCache(workspaceAuth.userId, snapshotCacheKey, activityResult);
-    } else if (verifiedNames.length) {
-      for (let index = 0; index < verifiedNames.length; index += 4) {
-        const names = verifiedNames.slice(index, index + 4);
-        const nameSet = new Set(names.map((name) => name.toLowerCase()));
-        const repositories = activityResult.repositories.filter((repo) => nameSet.has(String(repo?.fullName || "").toLowerCase()));
-        if (missingCompleteRepositories(repositories, names).length === 0) {
-          saveGitHubActivityCache(workspaceAuth.userId, snapshotGitHubActivityCacheKey(range.startDate, range.endDate, names), { repositories, errors: [] });
-        }
-      }
-    }
-    const summaries = {
-      dailyBrief: { status: ui.dailyBriefStatus, value: ui.dailyBrief },
-      weeklySummary: { status: ui.weeklySummaryStatus, value: ui.weeklySummary },
-    };
-    let approvedTokenUsage = null;
-    if (includeCodexUsage) {
-      setProgress("读取已批准的 Codex 汇总", "只包含按日聚合的 Token 数值。");
-      const tokenRange = resolveActivityRange("90d", { now: new Date(`${today}T12:00:00+08:00`) });
-      const cachedUsage = loadCodexUsageCache(workspaceAuth.userId) || ui.codexUsage.payload;
-      let trustedUsage = cachedUsage;
-      try {
-        if (!localCodexUsageEndpoint) throw new Error("本机 Companion 不可用。");
-        const freshUsage = await fetchCodexUsage(localCodexUsageEndpoint, tokenRange);
-        trustedUsage = mergeCodexUsageCache(cachedUsage, freshUsage) || freshUsage;
-        saveCodexUsageCache(workspaceAuth.userId, trustedUsage);
-        ui.codexUsage = {
-          ...ui.codexUsage,
-          status: "ready",
-          payload: trustedUsage,
-          model: codexUsageForRange(trustedUsage, currentHomeActivityRange()),
-          lastFetchedAt: freshUsage.generatedAt,
-          error: "",
-        };
-      } catch (error) {
-        if (!cachedUsage?.complete) throw error;
-      }
-      approvedTokenUsage = publicTokenUsage(trustedUsage, tokenRange);
-      if (!approvedTokenUsage) throw new Error("没有可发布的可信 Codex 汇总；原有访客快照保持不变。");
-    }
-    const workLogIssues = failedWorkLogs.map((result) => {
-      const project = db.projects.find((item) => String(item.id) === String(result.projectId));
-      return `工作记录：${project?.name || "未命名项目"} 未完整读取（${snapshotReadError(result.error)}）`;
-    });
-    if (workLogStageError && !workLogIssues.length) workLogIssues.push(`工作记录：${snapshotReadError(workLogStageError)}`);
-    if (workLogsTruncated) workLogIssues.push("工作记录：至少一个项目达到 200 条读取上限，可能仍有更早记录未读取。");
-    const githubIssues = [
-      ...verificationErrors.map((error) => `仓库公开状态：${error.fullName || "未知仓库"} 未核验（${snapshotReadError(error)}）`),
-      ...activityResult.errors.map((error) => `GitHub 活动：${error.fullName || "未知仓库"} 未完整读取（${snapshotReadError(error)}）`),
-    ];
-    const draft = createPublicSnapshotDraft({
-      data: db,
-      workLogs,
-      publicRepositories: verifiedRepos,
-      githubActivity: {
-        ...activityResult,
-        complete: activityComplete,
-        errors: [...verificationErrors, ...activityResult.errors],
-        issues: githubIssues,
-        workLogsComplete: !failedWorkLogs.length && !workLogStageError,
-        workLogsTruncated,
-        workLogIssues,
-      },
-      summaries,
-      tokenUsage: approvedTokenUsage,
-      activityRange: { startDate: range.startDate, endDate: range.endDate },
-    });
-    if (!range.valid) throw new Error(range.error || "快照日期范围无效。");
-    if (requestId !== snapshotPreviewRequestId) return;
-    if (!snapshotDraftPublishable(draft)) {
-      ui.publicSnapshotPreview = { status: "error", draft, error: "数据读取不完整，本次未发布。请修复下列数据源后，从顶部按钮安全重试。", publishedAt: previousPublishedAt, progress: null };
-      render();
-      return;
-    }
-    const counts = snapshotDraftCounts(draft);
-    const snapshot = buildPublishableSnapshot(draft);
-    ui.publicSnapshotPreview = { status: "publishing", draft, error: "", publishedAt: previousPublishedAt, progress: { message: "正在写入最新访客快照", detail: `项目 ${counts.projects || 0}、任务 ${counts.tasks || 0}、工作记录 ${counts.workLogs || 0}、公开仓库活动 ${counts.githubActivity || 0}。` } };
-    render();
-    try {
-      const result = await publishPublicSnapshot(snapshot, workspaceAuth);
-      if (requestId !== snapshotPreviewRequestId) return;
-      ui.publicSnapshotPreview = { status: "published", draft, error: "", publishedAt: result.publishedAt || new Date().toISOString(), publishedCounts: result.counts || counts, progress: null };
-      toast("访客快照已发布，访客现在可以读取最新内容");
-    } catch (error) {
-      if (requestId !== snapshotPreviewRequestId) return;
-      ui.publicSnapshotPreview = { status: "error", draft, error: typeof error?.message === "string" ? error.message : "发布失败；原有访客快照保持不变。", publishedAt: previousPublishedAt, progress: null };
-    }
-  } catch (error) {
-    if (requestId !== snapshotPreviewRequestId) return;
-    ui.publicSnapshotPreview = { status: "error", draft: null, error: snapshotReadError(error), publishedAt: previousPublishedAt, progress: null };
+    const models=[ui.homeActivity,...Object.values(ui.universeActivities)].filter(s=>s?.status==="ready"&&s.model).map(s=>s.model);
+    models.sort((a,b)=>a.startDate.localeCompare(b.startDate));
+    const snapshot=createStaticSnapshot({data:{...db,projects:db.projects.map(p=>({...p,description:projectIntroduction(p),publicDetails:projectShowcase(p)}))},activityModel:ui.homeActivity.status==="ready"?ui.homeActivity.model:models[0]});
+    const result=await publishPublicSnapshot(snapshot,workspaceAuth);
+    if(!workspaceActive || requestId!==snapshotPreviewRequestId)return;
+    ui.publicSnapshotPreview={status:"published",publishedAt:result.publishedAt,result};
+    toast(`访客快照已发布：${result.counts.projects} 个项目`);
+  } catch(error) {
+    if(!workspaceActive || requestId!==snapshotPreviewRequestId)return;
+    ui.publicSnapshotPreview={status:"error",error:typeof error?.message==="string"?error.message:"发布失败；旧快照保持不变。"};
   }
-  if (workspaceActive && requestId === snapshotPreviewRequestId) render();
+  render();
 }
 
 function render() {

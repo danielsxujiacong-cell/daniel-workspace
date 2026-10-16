@@ -16,7 +16,7 @@ Daniel Workspace V3.9 使用统一的 Dashboard 2.0 和两种数据模式。私�
 python local_companion.py
 ```
 
-在浏览器打开 [http://127.0.0.1:4174](http://127.0.0.1:4174) 即可浏览公开只读工作台；根网址先显示完整界面，不因已保存的 Supabase 会话自动进入私人模式。快照未发布时页面会明确说明尚无公开项目数据，不显示 Mock 统计。登录后在私人工作台点击「一键发布访客快照」，应用自动汇总所有安全字段并直接写入独立 KV；读取不完整时会显示缺失范围并保持旧快照不变。已发布快照通过 Worker 的公开 GET 读取，访客搜索、导航、项目详情和图表筛选均为只读。`?mode=guest` 是公开模式别名，`?mode=login` 是唯一私人入口；退出后回到公开根网址。FlowOps 网站明确标为虚构业务的模拟演示；TK-1001 流程模拟仅通过显式 `?mode=demo` 打开。登录后按 `Ctrl+K` 或 `⌘K` 聚焦全局搜索；Companion 仅在私人登录模式尝试从本机 `127.0.0.1:4174` 读取扫描。
+在浏览器打开 [http://127.0.0.1:4174](http://127.0.0.1:4174) 即可浏览公开只读工作台；根网址先显示完整界面，不因已保存的 Supabase 会话自动进入私人模式。快照未发布时页面会明确说明尚无公开项目数据，不显示 Mock 统计。登录后在私人工作台点击「一键发布访客快照」，应用自动汇总所有安全字段并直接写入独立 KV；发布只冻结已加载的安全展示字段和图表计数，不再逐仓库预检查或重新生成 AI；缺失活动标记为不完整，写入失败保留旧快照。已发布快照通过 Worker 的公开 GET 读取，访客搜索、导航、项目详情和图表筛选均为只读。`?mode=guest` 是公开模式别名，`?mode=login` 是唯一私人入口；退出后回到公开根网址。FlowOps 网站明确标为虚构业务的模拟演示；TK-1001 流程模拟仅通过显式 `?mode=demo` 打开。登录后按 `Ctrl+K` 或 `⌘K` 聚焦全局搜索；Companion 仅在私人登录模式尝试从本机 `127.0.0.1:4174` 读取扫描。
 
 手动控制 Companion：前台运行 `python local_companion.py` 时按 `Ctrl+C` 停止；开机任务启动的后台实例可在 PowerShell 执行 `Stop-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion"` 停止。取消后续登录自动启动，执行 `Unregister-ScheduledTask -TaskName "DanielWorkspaceLocalCompanion" -Confirm:$false`。重新登录 Windows 会再次启动仍注册的任务。
 
@@ -248,3 +248,11 @@ Home 使用 GitHub 开发活动与 Project Universe 等宽等高双卡片，手�
 ### V4.4 · Dashboard Final Polish
 
 Home activity ranking uses compact aligned vertical rows, retaining Commit/work-log counts. Product deliveries use a compact, evenly spaced horizontal September 17–October 16 timeline with ten evidence-reviewed milestones; stages and unresolved private candidates remain explicit. See docs/DELIVERY_EVIDENCE.md. Private corrections do not publish themselves.
+
+## V4.5 · 安全静态访客快照
+
+私人页面的一次点击将已加载的项目展示资料、匿名任务/工作记录计数、活动日期汇总与已审核产品交付冻结为 schemaVersion 2 JSON。Worker 验证 Supabase 所有者身份后，使用与客户端相同的字段投影器重新过滤，再单次替换 KV 的 `latest`。发布无需 GitHub、Companion 或 AI 请求；缺失图表显示不完整，不能据此推断零活动。
+
+访客 Home、Projects、星系、详情、热力图、Top 5 和产品交付均读取同一份版本化快照。原始笔记、知识/决策正文、AI 原文、任务/工作记录原文、仓库地址及提交正文一律不发布；仅保留经过过滤的展示字段、匿名计数和已审核成果。服务器写入失败或拒绝身份时保留上次成功快照。旧版 v1 可继续公开读取，但发布者需刷新页面使用 v2。
+
+实际发布必须在私人登录态点击；代码部署、自动化夹具和无痕公开读取均不能代替所有者发布成功证据。

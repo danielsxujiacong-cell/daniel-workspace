@@ -1,3 +1,4 @@
+import { sanitizeStaticSnapshot, validateStaticSnapshot } from "../src/static-snapshot.js";
 const rateBuckets = new Map();
 const MAX_BODY_CHARS = 32_000;
 const MAX_CONTEXT_CHARS = 12_000;
@@ -765,6 +766,7 @@ function validTextList(value, maximumItems = 100, maximumLength = 2_000) {
 }
 
 function validPublicSnapshot(snapshot) {
+  if (snapshot?.schemaVersion === 2) return validateStaticSnapshot(snapshot);
   const rootKeys = ["schemaVersion", "generatedAt", "activity", "projects", "tasks", "workLogs", "knowledge", "decisions", "summaries", "publishedAt"];
   if (!hasAllowedKeys(snapshot, rootKeys, ["tokenUsage"]) || snapshot.schemaVersion !== 1 || !validSnapshotDate(String(snapshot.generatedAt || "").slice(0, 10))) return false;
   const activityKeys = ["startDate", "endDate", "githubDailyCounts", "githubRepositoryCount", "githubComplete", "workLogsComplete"];
@@ -881,25 +883,6 @@ function validPublicSnapshot(snapshot) {
   return typeof snapshot.publishedAt === "string" && snapshot.publishedAt.length <= 40;
 }
 
-async function verifySnapshotGithubLinks(snapshot, env) {
-  const projects = snapshot.projects.filter((item) => item.github);
-  if (!projects.length) return true;
-  let token = null;
-  try { token = await createPublicReadToken(env); } catch { token = null; }
-  for (const project of projects) {
-    const match = project.github.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/?$/i);
-    if (!match) return false;
-    const fullName = `${match[1]}/${match[2]}`;
-    const encoded = fullName.split("/").map(encodeURIComponent).join("/");
-    let response = await githubApi(`/repos/${encoded}`, token);
-    if (!response.ok && token) response = await githubApi(`/repos/${encoded}`);
-    if (!response.ok) return false;
-    const repo = await response.json();
-    if (repo?.private !== false || repo?.full_name?.toLowerCase() !== fullName.toLowerCase()) return false;
-  }
-  return true;
-}
-
 async function publicSnapshotRoute(request, env) {
   if (!env.PUBLIC_WORKSPACE_SNAPSHOTS) return githubError(request, env, 503, "public_snapshot_unavailable", "公开快照存储尚未配置。");
   if (request.method === "GET") {
@@ -920,13 +903,23 @@ async function publicSnapshotRoute(request, env) {
   if (bodyText.length > MAX_PUBLIC_SNAPSHOT_CHARS) return githubError(request, env, 413, "public_snapshot_too_large", "访客快照超过安全大小限制。");
   let snapshot;
   try { snapshot = JSON.parse(bodyText); } catch { return githubError(request, env, 400, "public_snapshot_invalid_json", "快照内容不是有效 JSON。"); }
+  if (snapshot?.schemaVersion === 2) {
+    try { snapshot = sanitizeStaticSnapshot(snapshot, { reviewDeliveries: true }); }
+    catch { return githubError(request, env, 400, "public_snapshot_rejected", "快照缺少安全项目或日期无效；原快照保持不变。"); }
+  }
   if (!validPublicSnapshot(snapshot)) return githubError(request, env, 400, "public_snapshot_rejected", "快照字段、记录或安全筛选未通过校验；原快照保持不变。");
-  if (!await verifySnapshotGithubLinks(snapshot, env)) return githubError(request, env, 400, "public_snapshot_private_repository", "快照包含无法确认公开的 GitHub 仓库；原快照保持不变。");
+  if (snapshot.schemaVersion !== 2) return githubError(request, env, 409, "public_snapshot_upgrade_required", "请刷新 Workspace 后发布新版静态快照；旧快照保持不变。");
   const published = { ...snapshot, publishedAt: new Date().toISOString() };
-  await env.PUBLIC_WORKSPACE_SNAPSHOTS.put(PUBLIC_SNAPSHOT_KEY, JSON.stringify(published), { metadata: { schemaVersion: 1 } });
+  try {
+    await env.PUBLIC_WORKSPACE_SNAPSHOTS.put(PUBLIC_SNAPSHOT_KEY, JSON.stringify(published), { metadata: { schemaVersion: published.schemaVersion } });
+  } catch {
+    return githubError(request, env, 503, "public_snapshot_write_failed", "公开存储写入失败；上一份成功快照保持不变，请重试。");
+  }
   return jsonResponse(request, env, {
     published: true,
     publishedAt: published.publishedAt,
+    skippedProjects: published.publication?.skippedProjectCount || 0,
+    activityPartial: published.publication?.activityPartial || false,
     counts: {
       projects: published.projects.length,
       tasks: published.tasks.length,

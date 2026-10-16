@@ -108,3 +108,9 @@ Only Home ranking and delivery presentation changed. Evidence and unresolved dat
 ## V4.4.1 · 2026-10-16
 
 Delivery presentation only: date-sorted, independent same-day nodes on one continuous uniformly spaced horizontal line. Existing data, detail/demo links, private edits and review unchanged. Headless Edge local checks at 1440/390px: 245/235px collapsed height, 5.52/1.78 visible nodes, ten detail clicks each, equal gaps/aligned dots, no text clipping or document overflow. Focused delivery tests 6/6; syntax/diff checks passed. Authenticated owner UI not logged into.
+
+## V4.5 · 2026-10-16
+
+Root cause: publication re-read every project's logs, verified all repository visibility, fetched 366-day history, required global completeness, then the Worker repeated per-repository verification. Any rate-limit blocked all projects. The new one-request publisher freezes loaded safe fields/counts through shared static-snapshot.js; the authenticated Worker reprojects and replaces one KV value. No GitHub/AI/log reread. Only reviewed release records supply delivery originals. Project showcase features/outcomes are serialized, not inferred from omitted repo URLs. Public v1 remains readable until a real owner v2 publish.
+
+Verification: 166 automated tests passed; 1440/390px headless fixture checks opened all 26 star details, 26 project cards, ten delivery details, zero private API requests or JS errors. Worker deployed. Actual owner publication remains pending because the user reported being logged out; do not claim fixture success is a real publication. After frontend deploy, ask the owner to log in and click once, then read the live public v2 timestamp/counts in a fresh headless context. No Supabase source rows/sync code or Dashboard styling changed.
