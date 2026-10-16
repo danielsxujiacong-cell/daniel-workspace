@@ -77,3 +77,7 @@
 ## Next action
 
 When an authenticated browser session is available, review the shared Project Universe renderer in the signed-in shell. No authentication or data changes are required for this release.
+
+## 2026-10-16 · Project Universe Final
+
+Only Home Project Universe changed. One category-independent gravitational layout, five named flagship nodes, blue-violet nebula/dust, subtle breathing and glass details. Real public snapshot verified in Codex isolated browser: 26 projects, 5 flagships, zero clusters; detail shows saved description/status only. Desktop and 390px checked (scrollWidth 375 <= viewport 390). npm test: 149/149. Private signed-in shell uses the same renderer but was not exercised. No data/schema/auth changes. Existing unrelated working-tree edits were preserved. Further optional tuning: nebula brightness and mobile label sizing.

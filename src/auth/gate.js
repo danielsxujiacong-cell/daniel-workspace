@@ -110,7 +110,7 @@ async function enterWorkspace(user) {
     globalThis.DANIEL_WORKSPACE_AUTHENTICATED = true;
     globalThis.DANIEL_WORKSPACE_AUTH = { client: authClient, userId: user.id };
     try {
-      workspaceModule = await import("../app.js?v=4.0.1");
+      workspaceModule = await import("../app.js?v=4.0.2");
       workspaceVisible = true;
     } catch (error) {
       workspaceVisible = false;
@@ -310,7 +310,7 @@ async function startPublicDashboard() {
     const snapshotPromise = import("../public-snapshot.js?v=4.0").then(({ fetchPublishedSnapshot }) => fetchPublishedSnapshot())
       .then((snapshot) => ({ snapshot, error: "" }))
       .catch((error) => ({ snapshot: null, error: typeof error?.message === "string" ? error.message : "公开快照暂不可用。" }));
-    await import("../app.js?v=4.0.1");
+    await import("../app.js?v=4.0.2");
     void snapshotPromise.then(({ snapshot, error }) => {
       globalThis.DANIEL_WORKSPACE_PUBLIC_SNAPSHOT = snapshot;
       globalThis.DANIEL_WORKSPACE_PUBLIC_SNAPSHOT_ERROR = error;

@@ -117,55 +117,31 @@ function stableProjectId(project) {
   return String(project.id || project.name || "");
 }
 
+function isUniverseFlagship(project) {
+  return /^(daniel[ -]workspace|ai[ -]investment[ -]dashboard|daniel[ -]project[ -]hub|daniel[ -]website|n8n[ -]ai[ -]automation[ -]lab)$/i.test(String(project.name).trim());
+}
+
 function projectUniverseCoordinates(projects, radii, width, height, selectedCategory = "all") {
-  const categories = PROJECT_TYPES.filter((type) => projects.some((project) => inferProjectType(project) === type));
+  // One gravitational field; category never influences position.
   const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-  const portrait = height > width * 1.12;
-  const wideAnchors = [[0.18, 0.32], [0.46, 0.19], [0.81, 0.34], [0.30, 0.76], [0.73, 0.74]];
-  const portraitAnchors = [[0.25, 0.18], [0.72, 0.20], [0.81, 0.49], [0.55, 0.81], [0.20, 0.70]];
-  const anchors = portrait ? portraitAnchors : wideAnchors;
   const points = new Map();
   const targets = new Map();
   const clusters = [];
-
-  categories.forEach((category, clusterIndex) => {
-    const members = projects.filter((project) => inferProjectType(project) === category)
-      .sort((left, right) => String(left.name).localeCompare(String(right.name), "zh-CN"));
-    const anchor = anchors[clusterIndex % anchors.length];
-    const hash = [...category].reduce((value, character) => (value * 31 + character.codePointAt(0)) >>> 0, 7);
-    const jitterX = (((hash % 17) / 16) - 0.5) * width * 0.025;
-    const jitterY = ((((hash >>> 5) % 17) / 16) - 0.5) * height * 0.035;
-    const isFocused = selectedCategory === category;
-    const margin = Math.max(...radii.values(), 12) + 24;
-    const center = isFocused
-      ? { x: width * 0.5, y: height * 0.52 }
-      : {
-          x: Math.max(margin, Math.min(width - margin, width * anchor[0] + jitterX)),
-          y: Math.max(margin, Math.min(height - margin, height * anchor[1] + jitterY)),
-        };
-    const targetSpread = Math.min(width, height) * (isFocused ? 0.32 : portrait ? 0.20 : 0.255);
-    const availableSpread = Math.max(24, Math.min(center.x - margin, width - center.x - margin, center.y - margin, height - center.y - margin));
-    const spread = Math.min(targetSpread, availableSpread * 0.9);
-    clusters.push({
-      category,
-      color: UNIVERSE_COLORS[category],
-      count: members.length,
-      x: center.x,
-      y: Math.max(20, center.y - spread - 18),
-      centerX: center.x,
-      centerY: center.y,
-    });
-    members.forEach((project, index) => {
-      const id = String(project.id);
-      const angle = index * goldenAngle + clusterIndex * 0.63 - Math.PI / 2;
-      const distance = members.length <= 1 ? 0 : Math.sqrt((index + 0.2) / members.length) * spread;
-      const point = { x: center.x + Math.cos(angle) * distance, y: center.y + Math.sin(angle) * distance };
-      points.set(id, point);
-      targets.set(id, { ...point });
-    });
+  const ordered = [...projects].sort((a, b) => Number(isUniverseFlagship(b)) - Number(isUniverseFlagship(a)) || stableProjectId(a).localeCompare(stableProjectId(b)));
+  ordered.forEach((project, index) => {
+    const hash = [...stableProjectId(project)].reduce((v, c) => (v * 31 + c.codePointAt(0)) >>> 0, 7);
+    const angle = index * goldenAngle + (hash % 100) / 220;
+    const distance = Math.pow((index + 0.65) / Math.max(1, ordered.length), 0.8);
+    const point = { x: width * .49 + Math.cos(angle) * distance * width * .32,
+      y: height * .52 + Math.sin(angle) * distance * height * .34 };
+    if (isUniverseFlagship(project) && index < 5) {
+      const anchors = [[-.10,-.09],[.10,-.15],[.04,.10],[-.17,.15],[.19,.20]];
+      point.x = width * (.49 + anchors[index][0]);
+      point.y = height * (.52 + anchors[index][1]);
+    }
+    points.set(String(project.id), point);
+    targets.set(String(project.id), { ...point });
   });
-
-  const ordered = projects.filter((project) => selectedCategory === "all" || inferProjectType(project) === selectedCategory);
   for (let iteration = 0; iteration < 190; iteration += 1) {
     for (let left = 0; left < ordered.length; left += 1) {
       for (let right = left + 1; right < ordered.length; right += 1) {
@@ -218,7 +194,7 @@ export function buildProjectUniverse({ projects = [], activity = null, tasks = [
   const radii = new Map(projectRows.map((project) => {
     const row = activityById.get(String(project.id)) || { githubCommits: 0, workLogs: 0 };
     const score = row.githubCommits + row.workLogs;
-    return [String(project.id), 10 + (maxActivity ? Math.sqrt(score / maxActivity) * 15 : 0) + (project.isPinned === true ? 2.5 : 0)];
+    return [String(project.id), (isUniverseFlagship(project) ? 12 : 3.5) + (maxActivity ? Math.sqrt(score / maxActivity) * (isUniverseFlagship(project) ? 5 : 4) : 0)];
   }));
   const { points, clusters } = projectUniverseCoordinates(projectRows, radii, width, height, selectedCategory);
   const nodes = projectRows.map((project) => {
@@ -235,7 +211,7 @@ export function buildProjectUniverse({ projects = [], activity = null, tasks = [
       id,
       category: inferProjectType(project),
       color: UNIVERSE_COLORS[inferProjectType(project)],
-      flagship: project.isPinned === true,
+      flagship: isUniverseFlagship(project),
       activity: row,
       score,
       coverage,

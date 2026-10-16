@@ -58,7 +58,7 @@ const {
   inferProjectType,
   PROJECT_TYPES,
   weekdayHourMatrix,
-} = await import("./dashboard-v4.js?v=4.0.1");
+} = await import("./dashboard-v4.js?v=4.0.2");
 const {
   countPinnedProjects,
   getHomePinnedProjects,
@@ -2032,7 +2032,7 @@ function renderProjectUniverse(projects, activity, dataAvailable) {
     ui.universeLayoutKey = layoutKey;
     ui.universeCamera = { x: 0, y: 0, scale: 1 };
   }
-  const selectedCategory = PROJECT_TYPES.includes(ui.universeCategory) ? ui.universeCategory : "all";
+  const selectedCategory = "all";
   const normalizedQuery = ui.universeQuery.trim().toLocaleLowerCase();
   const matchesQuery = (project) => !normalizedQuery || String(project.name).toLocaleLowerCase().includes(normalizedQuery);
   const model = buildProjectUniverse({
@@ -2046,18 +2046,9 @@ function renderProjectUniverse(projects, activity, dataAvailable) {
   });
   const activeNodes = model.nodes.filter((node) => selectedCategory === "all" || node.category === selectedCategory);
   const pinned = model.nodes.filter((node) => node.flagship).sort((left, right) => right.score - left.score);
-  const prominentIds = new Set((pinned.length ? pinned : model.nodes.filter((node) => node.score > 0).sort((left, right) => right.score - left.score)).slice(0, 3).map((node) => node.id));
+  const prominentIds = new Set(pinned.map((node) => node.id));
   const clusters = model.clusters.map((cluster) => `<g class="project-universe-cluster ${selectedCategory !== "all" && cluster.category !== selectedCategory ? "is-filtered" : ""}" data-category="${esc(cluster.category)}" style="--type-color:${cluster.color}"><text x="${cluster.x.toFixed(1)}" y="${cluster.y.toFixed(1)}" text-anchor="middle">${esc(cluster.category)}</text></g>`).join("");
   const nodes = model.nodes.map((node, index) => {
-    const githubComplete = node.coverage?.githubComplete ?? activity.model?.coverage?.githubComplete;
-    const workLogsComplete = node.coverage?.workLogsComplete ?? activity.model?.coverage?.workLogsComplete;
-    const githubActivity = githubComplete === true ? `${node.activity.githubCommits} 次` : "未知";
-    const workLogActivity = workLogsComplete === true ? `${node.activity.workLogs} 条` : "未知";
-    const activityCounts = `GitHub ${githubActivity} · 工作记录 ${workLogActivity}`;
-    const coverageNote = node.coverage ? node.coverage.complete ? "项目来源完整" : "项目来源部分缺失"
-      : !activity.model ? "活动数据不可用"
-        : activity.model.coverage?.complete ? node.score ? "活动来源完整" : "已读取范围内无提交或工作记录" : "活动历史部分缺失";
-    const label = `${node.project.name} · ${node.category} · ${activityCounts} · ${coverageNote}`;
     const summary = typeof node.project.description === "string" ? node.project.description.trim().replace(/\s+/g, " ").slice(0, 150) : "";
     const classes = [
       "project-universe-node",
@@ -2068,14 +2059,14 @@ function renderProjectUniverse(projects, activity, dataAvailable) {
       normalizedQuery && !matchesQuery(node.project) ? "is-search-dimmed" : normalizedQuery ? "is-search-match" : "",
       ui.universeSelectedProjectId === node.id ? "is-selected" : "",
     ].filter(Boolean).join(" ");
-    const preferredLabel = node.project.name.length > 22 ? `${node.project.name.slice(0, 21)}…` : node.project.name;
-    const gradientId = `universe-planet-${PROJECT_TYPES.indexOf(node.category)}`;
+    const preferredLabel = node.project.name;
+    const gradientId = "universe-light";
     const previous = ui.universeAnimateLayout ? ui.universePositionTransitionFrom?.[node.id] : null;
     const animate = previous && !window.matchMedia("(prefers-reduced-motion: reduce)").matches
       && (Math.abs(previous.x - node.x) > 0.5 || Math.abs(previous.y - node.y) > 0.5)
       ? `<animateTransform attributeName="transform" type="translate" from="${previous.x.toFixed(2)} ${previous.y.toFixed(2)}" to="${node.x.toFixed(2)} ${node.y.toFixed(2)}" dur="480ms" begin="0s" fill="freeze" calcMode="spline" keyTimes="0;1" keySplines="0.2 0.7 0.2 1"/>`
       : "";
-    return `<g class="${classes}" data-action="select-universe-project" data-id="${esc(node.id)}" data-project-id="${esc(node.id)}" data-project-name="${esc(node.project.name)}" data-category="${esc(node.category)}" data-x="${node.x.toFixed(2)}" data-y="${node.y.toFixed(2)}" data-radius="${node.radius.toFixed(1)}" data-tooltip-summary="${esc(summary)}" data-tooltip-category="${esc(node.category)}" data-tooltip-activity="${esc(activityCounts)}" data-tooltip-coverage="${esc(coverageNote)}" tabindex="0" role="button" aria-label="${esc(label)}" aria-pressed="${ui.universeSelectedProjectId === node.id ? "true" : "false"}" transform="translate(${node.x.toFixed(2)} ${node.y.toFixed(2)})" style="--node-index:${index};--node-color:${node.color}">${animate}<g class="project-universe-planet"><circle class="project-universe-hit" cx="0" cy="0" r="${Math.max(22, node.radius + 9).toFixed(1)}"/><circle class="project-universe-halo" cx="0" cy="0" r="${(node.radius + 9).toFixed(1)}"/><circle class="project-universe-orbit" cx="0" cy="0" r="${(node.radius + 5).toFixed(1)}"/><circle class="project-universe-star" cx="0" cy="0" r="${node.radius.toFixed(1)}" fill="url(#${gradientId})"/><circle class="project-universe-core" cx="0" cy="0" r="${Math.max(1.7, node.radius * 0.11).toFixed(1)}"/>${node.flagship ? `<circle class="project-universe-flagship-ring" cx="0" cy="0" r="${(node.radius + 8).toFixed(1)}"/>` : ""}<text class="project-universe-label" x="0" y="${(node.radius + 20).toFixed(1)}" text-anchor="middle">${esc(preferredLabel)}</text></g></g>`;
+    return `<g class="${classes}" data-action="select-universe-project" data-id="${esc(node.id)}" data-project-id="${esc(node.id)}" data-project-name="${esc(node.project.name)}" data-category="${esc(node.category)}" data-x="${node.x.toFixed(2)}" data-y="${node.y.toFixed(2)}" data-radius="${node.radius.toFixed(1)}" data-tooltip-summary="${esc(summary)}" data-tooltip-category="${esc([homeProjectField(node.project.stage), homeProjectField(node.project.status)].filter(Boolean).join(" · "))}" data-tooltip-activity="" data-tooltip-coverage="" tabindex="0" role="button" aria-label="${esc(node.project.name)}" aria-pressed="${ui.universeSelectedProjectId === node.id ? "true" : "false"}" transform="translate(${node.x.toFixed(2)} ${node.y.toFixed(2)})" style="--node-index:${index};--node-color:${node.flagship ? "#b6c6ff" : "#7faee6"}">${animate}<g class="project-universe-planet"><circle class="project-universe-hit" cx="0" cy="0" r="${Math.max(22, node.radius + 9).toFixed(1)}"/><circle class="project-universe-halo" cx="0" cy="0" r="${(node.radius + 9).toFixed(1)}"/><circle class="project-universe-orbit" cx="0" cy="0" r="${(node.radius + 5).toFixed(1)}"/><circle class="project-universe-star" cx="0" cy="0" r="${node.radius.toFixed(1)}" fill="url(#${gradientId})"/><circle class="project-universe-core" cx="0" cy="0" r="${Math.max(1.7, node.radius * 0.11).toFixed(1)}"/>${node.flagship ? `<circle class="project-universe-flagship-ring" cx="0" cy="0" r="${(node.radius + 8).toFixed(1)}"/>` : ""}<text class="project-universe-label" x="0" y="${(node.radius + 20).toFixed(1)}" text-anchor="middle">${esc(preferredLabel)}</text></g></g>`;
   }).join("");
   const legend = model.legend.map((item) => `<span><i style="--type-color:${item.color}"></i>${esc(item.label)}</span>`).join("");
   const current = projects.find((project) => String(project.id) === ui.universeSelectedProjectId);
@@ -2084,14 +2075,21 @@ function renderProjectUniverse(projects, activity, dataAvailable) {
   const website = current ? deployedWebsiteUrl(current) : "";
   const repository = current ? parsePublicGitHubRepository(current.github)?.url || "" : "";
   const detailDescription = typeof current?.description === "string" ? current.description.trim() : "";
-  const detail = current ? `<aside class="project-universe-detail" role="dialog" aria-label="${esc(current.name)} 项目详情"><button class="project-universe-detail-close" data-action="close-universe-project" aria-label="关闭项目详情">×</button><div class="project-universe-detail-kicker">${esc(inferProjectType(current))} · 项目详情</div><h3>${esc(current.name)}</h3>${current.status ? statusPill(current.status) : ""}${detailDescription ? `<p class="project-universe-detail-summary">${esc(detailDescription)}</p>` : ""}<div class="project-universe-detail-field"><span>当前阶段</span><strong>${esc(stage)}</strong></div><div class="project-universe-detail-field"><span>下一步</span><strong>${esc(next)}</strong></div><footer><button class="button primary small" data-action="view-project" data-id="${esc(current.id)}">打开项目详情 ${icon("arrow")}</button>${website ? `<a class="button quiet small" href="${esc(website)}" target="_blank" rel="noopener noreferrer">体验网站 ${icon("external")}</a>` : repository ? `<a class="button quiet small" href="${esc(repository)}" target="_blank" rel="noopener noreferrer">GitHub ${icon("external")}</a>` : ""}</footer></aside>` : "";
+  const detail = current ? `<aside class="project-universe-detail" role="dialog" aria-label="${esc(current.name)} 项目详情"><button class="project-universe-detail-close" data-action="close-universe-project" aria-label="关闭项目详情">×</button><h3>${esc(current.name)}</h3>${detailDescription ? `<p class="project-universe-detail-summary">${esc(detailDescription.slice(0,150))}</p>` : ""}<span>${esc([homeProjectField(current.stage), homeProjectField(current.status)].filter(Boolean).join(" · "))}</span></aside>` : "";
   const queryMatch = normalizedQuery && activeNodes.some((node) => matchesQuery(node.project));
   const filterOptions = model.legend.map((item) => `<option value="${esc(item.label)}" ${selectedCategory === item.label ? "selected" : ""}>${esc(item.label)} · ${item.count}</option>`).join("");
-  const gradients = model.legend.map((item) => `<radialGradient id="universe-planet-${PROJECT_TYPES.indexOf(item.label)}" cx="34%" cy="27%" r="78%"><stop offset="0" stop-color="#ffffff" stop-opacity=".96"/><stop offset=".25" stop-color="${item.color}" stop-opacity=".98"/><stop offset="1" stop-color="${item.color}" stop-opacity=".76"/></radialGradient>`).join("");
+  const gradients = `<radialGradient id="universe-light" cx="38%" cy="32%"><stop stop-color="#ffffff"/><stop offset=".3" stop-color="#dbe7ff"/><stop offset=".68" stop-color="#91adf6"/><stop offset="1" stop-color="#5369bd"/></radialGradient>`;
+  const dust = Array.from({length: 240}, (_, i) => {
+    const angle = i * 2.39996;
+    const r = Math.pow(((i * 73 + 19) % 241) / 241, .8);
+    const x = model.width * (.49 + Math.cos(angle) * r * .38);
+    const y = model.height * (.52 + Math.sin(angle) * r * .40);
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${i % 13 === 0 ? 1.2 : .55}" opacity="${.12 + (i % 5) * .065}"/>`;
+  }).join("");
   const countLabel = selectedCategory === "all" ? `${model.nodes.length} 项目` : `${activeNodes.length} / ${model.nodes.length} 项目`;
   const camera = `<div class="project-universe-camera" role="group" aria-label="星图视角"><button type="button" data-action="zoom-universe" data-direction="in" aria-label="放大星图">＋</button><button type="button" data-action="zoom-universe" data-direction="out" aria-label="缩小星图">−</button><button type="button" data-action="reset-universe-camera" aria-label="重置视角" title="重置视角">↺</button></div>`;
   const stageStatus = activity.error ? `<div class="project-universe-error" role="status">${esc(activity.error)}</div>` : "";
-  return `<section class="card dashboard-v4-card project-universe-card grid-span-12"><header class="dashboard-chart-heading"><div><h2>Project Universe</h2><span class="project-universe-heading-subtitle">项目星系图</span></div><div class="project-universe-meta"><span>${countLabel}</span></div></header><div class="project-universe-stage"><div class="project-universe-toolbar" role="group" aria-label="星图探索"><label class="project-universe-search"><span class="sr-only">搜索项目</span>${icon("search")}<input id="universe-search" type="search" value="${esc(ui.universeQuery)}" placeholder="搜索项目" autocomplete="off" aria-label="搜索项目名称"/><button type="button" class="project-universe-locate" data-action="locate-universe-search" aria-label="定位匹配项目" title="定位匹配项目" ${queryMatch ? "" : "disabled"}>↗</button></label><label class="project-universe-category"><span class="sr-only">项目类别筛选</span><select id="universe-category" aria-label="按类别筛选项目"><option value="all" ${selectedCategory === "all" ? "selected" : ""}>全部类别</option>${filterOptions}</select></label></div><svg class="project-universe-svg" viewBox="0 0 ${model.width} ${model.height}" role="group" aria-label="项目星图。拖动平移，双指或滚轮缩放，选择星球查看项目详情"><defs>${gradients}</defs><g class="project-universe-world" transform="translate(${ui.universeCamera.x.toFixed(1)} ${ui.universeCamera.y.toFixed(1)}) scale(${ui.universeCamera.scale.toFixed(3)})">${clusters}${nodes}</g></svg>${camera}<div class="project-universe-hover-label" aria-hidden="true" hidden><strong data-tooltip-name></strong><span data-tooltip-category></span><span data-tooltip-summary></span><span data-tooltip-activity></span><span data-tooltip-coverage></span></div>${detail}${stageStatus}</div><footer class="project-universe-footer"><div class="project-universe-legend">${legend || `<span>暂无项目分类</span>`}</div><span class="project-universe-source">星球大小映射可核实活动</span></footer></section>`;
+  return `<section class="card dashboard-v4-card project-universe-card grid-span-12"><header class="dashboard-chart-heading"><div><h2>Project Universe</h2><span class="project-universe-heading-subtitle">项目星系图</span></div><div class="project-universe-meta"><span>${countLabel}</span></div></header><div class="project-universe-stage"><div class="project-universe-toolbar" role="group" aria-label="星图探索"><label class="project-universe-search"><span class="sr-only">搜索项目</span>${icon("search")}<input id="universe-search" type="search" value="${esc(ui.universeQuery)}" placeholder="搜索项目" autocomplete="off" aria-label="搜索项目名称"/><button type="button" class="project-universe-locate" data-action="locate-universe-search" aria-label="定位匹配项目" title="定位匹配项目" ${queryMatch ? "" : "disabled"}>↗</button></label></div><svg class="project-universe-svg" viewBox="0 0 ${model.width} ${model.height}" role="group" aria-label="项目星图。拖动平移，双指或滚轮缩放，选择星球查看项目详情"><defs>${gradients}</defs><g class="project-universe-world" transform="translate(${ui.universeCamera.x.toFixed(1)} ${ui.universeCamera.y.toFixed(1)}) scale(${ui.universeCamera.scale.toFixed(3)})"><g class="universe-stardust" fill="#bfd5ff" aria-hidden="true">${dust}</g>${nodes}</g></svg>${camera}<div class="project-universe-hover-label" aria-hidden="true" hidden><strong data-tooltip-name></strong><span data-tooltip-category></span><span data-tooltip-summary></span><span data-tooltip-activity></span><span data-tooltip-coverage></span></div>${detail}</div><footer class="project-universe-footer"><span>每一个光点，都是正在生长的想法</span><span class="project-universe-source">PROJECT FIELD · ${model.nodes.length}</span></footer></section>`;
 }
 
 function renderDevelopmentFingerprint(activity) {

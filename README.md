@@ -227,3 +227,7 @@ node .\node_modules\wrangler\bin\wrangler.js secret put AI_API_KEY --config .\cl
 ## Sync workflow
 
 开始编辑前检查 Git 状态；工作区干净时安全同步远端。交接前检查 `.gitignore` 和暂存内容，更新必要文档，提交并推送到 GitHub `main`；GitHub Pages 从 `main` 根目录自动发布。
+
+## V4.0 Project Universe · 单一宇宙场
+
+Home 星系图取消分类分区，所有真实项目聚拢于蓝紫星云。五个重点项目显示名称与更亮光核，其余名称按需显示；搜索、缩放、玻璃项目浮层与减少动态效果继续可用。仅调整星系模块。
