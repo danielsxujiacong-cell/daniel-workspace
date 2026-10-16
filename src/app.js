@@ -1,5 +1,5 @@
 const { readProjectProfile, projectNotesAfterEdit } = await import("./project-profile.js?v=4.8");
-const { createStaticSnapshot } = await import("./static-snapshot.js?v=4.8");
+const { createStaticSnapshot } = await import("./static-snapshot.js?v=4.9");
 const { universeLabels, topActivity, syncLabel } = await import("./dashboard-final.js?v=4.4");
 const { PUBLISHED_DELIVERIES, PENDING_DELIVERIES, deliveryView, layoutDeliveryDays, readDeliveryEdits, saveDeliveryEdit } = await import("./product-deliveries.js?v=4.4.1");
 const publicSnapshotMode = globalThis.DANIEL_WORKSPACE_MODE === "public";
@@ -16,7 +16,7 @@ const {
   buildSnapshotActivity,
   hydratePublicSnapshot,
   publishPublicSnapshot,
-} = await import("./public-snapshot.js?v=4.8");
+} = await import("./public-snapshot.js?v=4.9");
 let hydratedPublicData = publicSnapshotMode ? hydratePublicSnapshot(publishedSnapshot) : null;
 
 const {
@@ -2057,7 +2057,7 @@ function renderProjectUniverse(projects, activity, dataAvailable) {
 }
 
 function currentDeliveries(projects = db.projects) {
-  if(publicSnapshotMode && publishedSnapshot?.schemaVersion===2) return publishedSnapshot.deliveries.map(e=>({...e,projectId:projects.find(p=>p.name===e.workspaceName)?.id||""})).sort((a,b)=>a.date.localeCompare(b.date)||a.id.localeCompare(b.id));
+  if(publicSnapshotMode) return deliveryView({publicMode:true,projects});
   if(!publicSnapshotMode && privateDeliveryEdits===null) {try{privateDeliveryEdits=readDeliveryEdits(localStorage,workspaceAuth.userId);}catch{privateDeliveryEdits=[];}}
   return deliveryView({publicMode:publicSnapshotMode,edits:publicSnapshotMode?[]:privateDeliveryEdits,projects});
 }

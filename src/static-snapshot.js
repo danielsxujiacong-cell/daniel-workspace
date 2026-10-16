@@ -12,6 +12,10 @@ function website(v) {
  }catch{return "";}
 }
 const rows = (v,n) => Array.isArray(v) ? v.slice(0,n) : [];
+const publicTaskAllowlist = Object.freeze([
+ {id:"task-project-materials-history",title:"项目资料完善与历史成果整理",description:"大量 Projects 详情页只有名称、简单介绍和扫描备注，缺乏实际成果、工作记录、下一步及相关资料",status:"todo"},
+ {id:"task-workspace-v44-layout",title:"优化 Daniel Workspace V4.4",description:"当前时间线过高、日期节点分布太散，中间存在大量留白，同一天成果上下错开，视觉不协调。",status:"done"},
+]);
 const reviewedKnowledge = input => rows(input,2000).flatMap(k=>{
  const approved=REVIEWED_KNOWLEDGE.find(r=>['title','content','summary'].every(f=>k?.[f]===r[f]));
  return approved?[{...approved,projectId:k.projectId}]:[];
@@ -31,7 +35,12 @@ export function sanitizeStaticSnapshot(input, { reviewDeliveries=false } = {}) {
  const perProject=new Map();for(const d of rows(a.githubProjectDailyCounts,100000)){const projectId=idMap.get(d?.projectId);if(projectId&&inRange(d.date)&&count(d.count))perProject.set(`${projectId}:${d.date}`,{projectId,date:d.date,count:d.count});}
  const hours=rows(a.githubHourlyCounts,24).filter(d=>Number.isInteger(d?.hour)&&d.hour>=0&&d.hour<24&&count(d.count)).map(d=>({hour:d.hour,count:d.count}));
  const hourly=a.githubHourlyComplete===true&&hours.length===24&&new Set(hours.map(d=>d.hour)).size===24;
- const tasks=rows(input.tasks,2000).filter(t=>idMap.has(t?.projectId)).map((t,i)=>({id:`task-${String(i+1).padStart(4,"0")}`,title:"工作任务",description:"",projectId:idMap.get(t.projectId),status:["todo","doing","done"].includes(t.status)?t.status:"todo",priority:"",due:""}));
+ const publicProject=projects.find(p=>p.name==="Daniel Workspace"), publicSourceProject=publicProject&&input.projects.find(p=>p.name==="Daniel Workspace");
+ const tasks=publicTaskAllowlist.flatMap((approved,i)=>{
+  const task=rows(input.tasks,2000).find(t=>t?.title===approved.title&&t?.description===approved.description&&t?.status===approved.status
+   &&(!t.projectId||t.projectId===publicSourceProject?.id));
+  return task&&publicProject?[{id:`task-${String(i+1).padStart(4,"0")}`,title:approved.title,description:approved.description,projectId:publicProject.id,status:approved.status,priority:"",due:""}]:[];
+ });
  const workLogs=rows(input.workLogs,5000).filter(d=>idMap.has(d?.projectId)&&inRange(d.workDate)).map((d,i)=>({id:`work-log-${String(i+1).padStart(4,"0")}`,projectId:idMap.get(d.projectId),workDate:d.workDate,completedItems:"",outcomes:"",nextStep:""}));
  const timestamp=v=>typeof v==="string"&&Number.isFinite(Date.parse(v))?new Date(v).toISOString():"";
  return {schemaVersion:2,generatedAt:timestamp(input.generatedAt)||new Date().toISOString(),publishedAt:timestamp(input.publishedAt),

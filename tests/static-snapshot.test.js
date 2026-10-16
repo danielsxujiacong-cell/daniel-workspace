@@ -39,6 +39,24 @@ test('frozen release deliveries ignore unreviewed private edits and contain only
 test('stored reviewed deliveries remain readable independently of the current release list',()=>{
  const s=fixture();s.deliveries=s.deliveries.slice(0,3);assert.ok(validateStaticSnapshot(s));
 });
+
+test('only the two approved Daniel Workspace tasks retain their real public fields and stable IDs',()=>{
+ const input=fixture(),projectId=input.projects[0].id;
+ input.projects[0].name='Daniel Workspace';
+ input.tasks=[
+  {id:'private-one',projectId,title:'项目资料完善与历史成果整理',description:'大量 Projects 详情页只有名称、简单介绍和扫描备注，缺乏实际成果、工作记录、下一步及相关资料',status:'todo'},
+  {id:'private-two',projectId,title:'优化 Daniel Workspace V4.4',description:'当前时间线过高、日期节点分布太散，中间存在大量留白，同一天成果上下错开，视觉不协调。',status:'done'},
+  {id:'private-three',projectId,title:'不可公开的任务',description:'private detail',status:'todo'},
+  {id:'wrong-status',projectId,title:'优化 Daniel Workspace V4.4',description:'当前时间线过高、日期节点分布太散，中间存在大量留白，同一天成果上下错开，视觉不协调。',status:'todo'},
+ ];
+ const s=createStaticSnapshot({now:'2026-10-16T10:00:00Z',data:input,activityModel:{startDate:'2026-09-17',endDate:'2026-10-16'}});
+ assert.deepEqual(s.tasks,[
+  {id:'task-0001',title:'项目资料完善与历史成果整理',description:'大量 Projects 详情页只有名称、简单介绍和扫描备注，缺乏实际成果、工作记录、下一步及相关资料',projectId:'project-001',status:'todo',priority:'',due:''},
+  {id:'task-0002',title:'优化 Daniel Workspace V4.4',description:'当前时间线过高、日期节点分布太散，中间存在大量留白，同一天成果上下错开，视觉不协调。',projectId:'project-001',status:'done',priority:'',due:''},
+ ]);
+ assert.ok(validateStaticSnapshot(s));
+});
+
 test('actual publisher freezes already cached counts while Home is loading without a network precheck',async()=>{
  const {readFile}=await import('node:fs/promises'),{runInNewContext}=await import('node:vm');
  const {buildHomeActivity}=await import('../src/home-activity.js');const {parsePublicGitHubRepository}=await import('../src/github/public-api.js');
