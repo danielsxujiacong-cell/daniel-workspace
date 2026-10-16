@@ -1,3 +1,4 @@
+import { readProjectProfile } from "./project-profile.js?v=4.7";
 import { parsePublicGitHubRepository } from "./github/public-api.js";
 
 const PROJECT_INTROS = {
@@ -96,7 +97,7 @@ export function projectIntroduction(project) {
 }
 
 export function projectShowcase(project) {
-  const details = PROJECT_SHOWCASES[repoKey(project)];
+  const details = readProjectProfile(project?.notes).profile || PROJECT_SHOWCASES[repoKey(project)];
   return {
     purpose: projectIntroduction(project),
     features: details?.features || [],

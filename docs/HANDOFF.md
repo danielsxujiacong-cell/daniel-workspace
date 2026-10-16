@@ -1,3 +1,13 @@
+## V4.7 · 2026-10-16
+
+Owner authorized the current D: checkout because the requested G: path is absent. Cloud binding verified against source and provider metadata. All 26 project IDs map to exact repository remotes; Hub worktrees were distinguished using its existing explicit path. Reviewed local docs, remote README/default-branch histories and live product URLs.
+
+Private data pass completed through the authorized Supabase connector: all 26 profiles enriched, 4 scan descriptions replaced, 19 blank stages, 25 blank next steps and 7 blank website URLs filled. Existing nonblank manual stage/next-step values were deliberately preserved. Added 28 sourced logs across 24 projects; AI content intelligence and self-media text have no reliably dated feature milestone, so no log was fabricated. Existing work log and all original business rows preserved. No deletion, schema/RLS change, or public snapshot publication.
+
+Private backup/evidence/preview/plan/before-after manifest: Git-ignored data/private/v47/. Before: projects/tasks/logs/knowledge/decisions = 26/1/1/0/0. After: 26/2/29/3/0; investigation-time external additions account for the extra task and three knowledge rows, all retained in after.json. Every project change equals the reviewed plan. Rollback rehearsal and post-write repeat rehearsal passed; logs stay at 29. Only project and work-log rows are mutation targets. No private content is committed.
+
+28 focused tests cover data preservation, guarded SQL generation, profile/manual-note round-trip, existing project details, work logs, reset guards and visitor isolation. The owner logged into a fresh isolated production tab; updated next steps and product URLs are visibly cloud-loaded. Final rendered profile and sampled detail checks follow source deployment. Actual second physical-device login is not claimed.
+
 ## V4.6 · 2026-10-16
 
 Public Home now embeds Workspace AI in place of published AI summaries. Three prompts, input, messages and retry share the existing assistant state and sendChat/public-service path. Home hides the duplicate floating entry; other pages preserve the same conversation. Only presentation/cache versions changed; no backend, snapshot, private summaries or data changes.

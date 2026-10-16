@@ -1,5 +1,11 @@
 # Changelog
 
+## V4.7 — 2026-10-16
+
+- Match all 26 existing projects to repository evidence, enrich private project details, and add 28 sourced historical work logs without replacing valuable manual fields.
+- Surface project features, progress and document links using existing components; fold technical notes and empty sections.
+- Add a reviewed, optimistic, repeatable SQL preparation tool; preserve public publication and all existing source records.
+
 ## V4.6 — 2026-10-16
 
 - Replace public Home AI summaries with an inline Workspace AI conversation and three real-service prompts.

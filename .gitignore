@@ -12,6 +12,7 @@ Thumbs.db
 .idea/
 
 # Runtime caches and logs
+data/private/
 node_modules/
 cache/
 supabase/.temp/
